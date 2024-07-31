@@ -17,6 +17,7 @@ pub ExprInner: Expression = {
     #[precedence(level="0")]
     <ds:DistributionSpec> => Expression::Distribution(ds),
     "(" <e:Expr> ")" => e.value,
+    <t:Tuple> => Expression::Tuple(t),
     #[precedence(level="1")] #[assoc(side="left")]
     <o:UnaryOp> <start: @L> <e:ExprInner> <end: @R> => Expression::UnaryOp { 
             op: o,

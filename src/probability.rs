@@ -69,6 +69,11 @@ impl Distribution {
             .retain(|_, &mut prob| prob.abs() > Self::EPSILON);
     }
 
+    pub fn clean_up(&mut self) {
+        self.normalize();
+        self.remove_zero_entries();
+    }
+
     pub fn uniform(start: i32, end: i32) -> Self {
         let mut probabilities = BTreeMap::new();
         let count = (end - start + 1) as f64;
@@ -92,9 +97,11 @@ impl Distribution {
             *new_probabilities.entry(new_outcome).or_insert(0.0) += probability;
         }
 
-        Distribution {
+        let mut ret = Distribution {
             probabilities: new_probabilities,
-        }
+        };
+        ret.clean_up();
+        ret
     }
 
     pub fn cross_product(distributions: Vec<Distribution>) -> Self {
@@ -123,6 +130,7 @@ impl Distribution {
             };
         }
 
+        result.clean_up();
         result
     }
 
@@ -130,7 +138,7 @@ impl Distribution {
     where
         F: Fn(&Outcome, &Outcome) -> Outcome,
     {
-        distributions
+        let mut ret = distributions
             .into_iter()
             .reduce(|acc, dist| {
                 let mut new_probabilities = BTreeMap::new();
@@ -147,7 +155,9 @@ impl Distribution {
                     probabilities: new_probabilities,
                 }
             })
-            .ok_or(ProbabilityError::NoDistributions)
+            .ok_or(ProbabilityError::NoDistributions)?;
+        ret.clean_up();
+        Ok(ret)
     }
 
     pub fn reduce_pairwise<F>(
@@ -214,15 +224,7 @@ impl Distribution {
     }
 
     pub fn negate(&self) -> Self {
-        let mut new_probabilities = BTreeMap::new();
-
-        for (outcome, probability) in &self.probabilities {
-            new_probabilities.insert(outcome.clone(), *probability);
-        }
-
-        Distribution {
-            probabilities: new_probabilities,
-        }
+        self.map(|outcome| Outcome(outcome.0.iter().map(|&x| -x).collect()))
     }
 }
 

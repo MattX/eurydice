@@ -148,11 +148,12 @@ impl<'source> Evaluator<'source> {
 
 impl Into<SourceSpan> for ast::Range {
     fn into(self) -> SourceSpan {
-        SourceSpan::new(self.start.into(), self.end)
+        SourceSpan::new(self.start.into(), self.end - self.start)
     }
 }
 
 #[derive(Debug, Error, Diagnostic)]
+#[error("Runtime error")]
 pub enum RuntimeError<'source> {
     #[error("Empty input")]
     EmptyInput {

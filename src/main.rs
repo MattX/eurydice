@@ -4,9 +4,10 @@ mod output;
 // mod parse;
 mod probability;
 
-use std::io::{self, BufRead as _, Read};
+use std::io::{self, BufRead as _, BufWriter, Read};
 
 use lalrpop_util::lalrpop_mod;
+use miette::{GraphicalReportHandler, IntoDiagnostic};
 use output::print_distribution;
 use probability::{Distribution, Outcome};
 
@@ -28,11 +29,14 @@ fn main() {
                 continue;
             }
         };
-        // println!("{}", parse::print_expression(&expr));
+        println!("{}", ast::print_expression(&expr));
         let result = match lang::Evaluator::new(&line).evaluate(&expr) {
             Ok(distributions) => distributions,
-            Err(err) => {
-                eprintln!("Error: {}", err);
+            Err(e) => {
+                let handler = GraphicalReportHandler::new();
+                let mut string = String::new();
+                let _ = handler.render_report(&mut string, &e);
+                eprintln!("{}", string);
                 continue;
             }
         };
