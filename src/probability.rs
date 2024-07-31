@@ -228,9 +228,6 @@ impl Distribution {
 
 #[derive(Debug, Diagnostic, Error)]
 pub enum ProbabilityError {
-    #[error("Division by zero")]
-    DivisionByZero,
-
     #[error("Empty input")]
     NoDistributions,
 
@@ -251,19 +248,19 @@ pub enum ProbabilityError {
     },
 }
 
-#[derive(Debug, Clone)]
-pub struct ConditionalDistribution {
-    conditioned_on: Vec<usize>,
-    probabilities: BTreeMap<Outcome, Distribution>,
-}
+// #[derive(Debug, Clone)]
+// pub struct ConditionalDistribution {
+//     conditioned_on: Vec<usize>,
+//     probabilities: BTreeMap<Outcome, Distribution>,
+// }
 
-impl From<Distribution> for ConditionalDistribution {
-    fn from(distribution: Distribution) -> Self {
-        ConditionalDistribution {
-            conditioned_on: Vec::new(),
-            probabilities: vec![(Outcome(Vec::new()), distribution)]
-                .into_iter()
-                .collect(),
-        }
-    }
-}
+// impl From<Distribution> for ConditionalDistribution {
+//     fn from(distribution: Distribution) -> Self {
+//         ConditionalDistribution {
+//             conditioned_on: Vec::new(),
+//             probabilities: vec![(Outcome(Vec::new()), distribution)]
+//                 .into_iter()
+//                 .collect(),
+//         }
+//     }
+// }

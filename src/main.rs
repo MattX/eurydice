@@ -1,12 +1,20 @@
-mod probability;
+mod ast;
+mod lang;
 mod output;
 mod parse;
-mod lang;
+mod probability;
 
 use std::io::{self, BufRead as _, Read};
 
+use lalrpop_util::lalrpop_mod;
 use output::print_distribution;
 use probability::{Distribution, Outcome};
+
+lalrpop_mod!(
+    #[allow(clippy::ptr_arg)]
+    #[rustfmt::skip]
+    grammar
+);
 
 fn main() {
     // println!("Hello, world!");

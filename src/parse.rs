@@ -1,62 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ast::Expression;
+
 pub fn parse(input: &str) -> Result<Expression, serde_lexpr::Error> {
     serde_lexpr::from_str(input)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Expression {
-    Distribution(DistributionSpec),
-    Tuple(Vec<Expression>),
-    UnaryOp {
-        op: UnaryOp,
-        operand: Box<Expression>,
-    },
-    BinaryOp {
-        op: BinaryOp,
-        left: Box<Expression>,
-        right: Box<Expression>,
-    },
-    IntBinaryOp {
-        op: IntBinaryOp,
-        left: Box<Expression>,
-        right: usize,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DistributionSpec {
-    Constant(i32),
-    Dice { repeat: i32, sides: i32 },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum UnaryOp {
-    Negate,
-    Sum,
-    Product,
-    Max,
-    Min,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum BinaryOp {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum IntBinaryOp {
-    Highest,
-    Lowest,
 }
 
 // Prints the code in sexpr

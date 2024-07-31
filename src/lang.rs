@@ -4,7 +4,7 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::{
-    parse::{BinaryOp, DistributionSpec, Expression, UnaryOp},
+    ast::{BinaryOp, DistributionSpec, Expression, UnaryOp},
     probability::Distribution,
 };
 
@@ -89,7 +89,8 @@ fn apply_binary_op(
         BinaryOp::Le => Distribution::reduce_pairwise(two_vec, |a, b| (a <= b) as i32),
         BinaryOp::Gt => Distribution::reduce_pairwise(two_vec, |a, b| (a > b) as i32),
         BinaryOp::Ge => Distribution::reduce_pairwise(two_vec, |a, b| (a >= b) as i32),
-    }.map_err(|e| e.into())
+    }
+    .map_err(|e| e.into())
 }
 
 #[derive(Debug, Error, Diagnostic)]
