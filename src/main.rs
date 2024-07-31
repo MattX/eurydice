@@ -1,8 +1,9 @@
 mod probability;
 mod output;
+mod parse;
 mod lang;
 
-use std::io::{self, Read};
+use std::io::{self, BufRead as _, Read};
 
 use output::print_distribution;
 use probability::{Distribution, Outcome};
@@ -26,16 +27,26 @@ fn main() {
     // println!("Two d6 sorted:");
     // print_distribution(&two_d6_sorted);
 
-
-    let mut buffer = Vec::new();
-    io::stdin().read_to_end(&mut buffer).unwrap();
-    match lang::parse(&String::from_utf8(buffer).unwrap(), 0) {
-        Ok(expressions) => {
-            println!("{:?}", expressions);
-        }
-        Err(e) => {
-            eprintln!("Error: {:?}", e);
+    let stdin = io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line.unwrap();
+        let expr = match parse::parse(&line) {
+            Ok(expr) => expr,
+            Err(err) => {
+                eprintln!("Error: {}", err);
+                continue;
+            }
+        };
+        println!("{}", parse::print_expression(&expr));
+        let result = match lang::evaluate(&expr) {
+            Ok(distributions) => distributions,
+            Err(err) => {
+                eprintln!("Error: {}", err);
+                continue;
+            }
+        };
+        for distribution in result {
+            print_distribution(&distribution);
         }
     }
-
 }
