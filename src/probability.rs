@@ -127,6 +127,30 @@ impl Distribution {
         })
     }
 
+    pub fn mean(&self) -> Option<Vec<f64>> {
+        let outcome_size = self.outcome_size()?;
+        let mut mean = vec![0.0; outcome_size];
+        for (outcome, prob) in &self.probabilities {
+            for (i, &value) in outcome.0.iter().enumerate() {
+                mean[i] += value as f64 * prob;
+            }
+        }
+        Some(mean)
+    }
+
+    pub fn stddev(&self) -> Option<Vec<f64>> {
+        let outcome_size = self.outcome_size()?;
+        let mean = self.mean()?;
+        let mut variance = vec![0.0; outcome_size];
+        for (outcome, prob) in &self.probabilities {
+            for (i, &value) in outcome.0.iter().enumerate() {
+                variance[i] += (value as f64 - mean[i]).powi(2) * prob;
+            }
+        }
+        let stddev = variance.iter().map(|&v| v.sqrt()).collect();
+        Some(stddev)
+    }
+
     pub fn sum(distributions: Vec<Distribution>) -> Option<Self> {
         Self::reduce(distributions, |a, b| {
             Outcome(a.0.iter().zip(b.0.iter()).map(|(&x, &y)| x + y).collect())
