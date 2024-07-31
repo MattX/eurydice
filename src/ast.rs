@@ -1,43 +1,51 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct Range {
-    pub start: i32,
-    pub end: i32,
+    pub start: usize,
+    pub end: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct WithRange<T> {
     pub value: T,
     pub range: Range,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl<T> WithRange<T> {
+    pub fn new(start: usize, end: usize, value: T) -> Self {
+        Self {
+            value,
+            range: Range { start, end },
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Expression {
     Distribution(DistributionSpec),
-    Tuple(Vec<Expression>),
+    Tuple(Vec<WithRange<Expression>>),
     UnaryOp {
         op: UnaryOp,
-        operand: Box<Expression>,
+        operand: Box<WithRange<Expression>>,
     },
     BinaryOp {
         op: BinaryOp,
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<WithRange<Expression>>,
+        right: Box<WithRange<Expression>>,
     },
     IntBinaryOp {
         op: IntBinaryOp,
-        left: Box<Expression>,
+        left: Box<WithRange<Expression>>,
         right: usize,
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum DistributionSpec {
     Constant(i32),
     Dice { repeat: i32, sides: i32 },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Negate,
     Sum,
@@ -46,12 +54,12 @@ pub enum UnaryOp {
     Min,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub enum BinaryOp {
     Add,
-    Subtract,
-    Multiply,
-    Divide,
+    Sub,
+    Mul,
+    Div,
     Eq,
     Ne,
     Lt,
@@ -60,7 +68,7 @@ pub enum BinaryOp {
     Ge,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub enum IntBinaryOp {
     Highest,
     Lowest,

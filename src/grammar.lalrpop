@@ -1,11 +1,74 @@
 use std::str::FromStr;
-use ast::Expression;
+use crate::ast::{WithRange, Expression, DistributionSpec, UnaryOp, BinaryOp};
 
 grammar;
 
-pub Term: i32 = {
-    <n:Num> => n,
-    "(" <t:Term> ")" => t,
+match {
+    r"\s*" => { }, // The default whitespace skipping is disabled if an `ignore pattern` is specified
+    r"#[^\n\r]*[\n\r]*" => { }, // Skip `# comments`
+    _
+}
+
+pub Expr: WithRange<Expression> = {
+    <start: @L> <e:ExprInner> <end: @R> => WithRange::new(start, end, e),
 };
 
+pub ExprInner: Expression = {
+    #[precedence(level="0")]
+    <ds:DistributionSpec> => Expression::Distribution(ds),
+    "(" <e:Expr> ")" => e.value,
+    #[precedence(level="1")] #[assoc(side="left")]
+    <o:UnaryOp> <start: @L> <e:ExprInner> <end: @R> => Expression::UnaryOp { 
+            op: o,
+            operand: Box::new(WithRange::new(start, end, e))
+        },
+    #[precedence(level="2")] #[assoc(side="right")]
+    <left_start: @L> <left:ExprInner> <left_end: @R>
+    <o:BinaryOp>
+    <right_start: @L> <right:ExprInner> <right_end: @L> => Expression::BinaryOp { 
+            op: o,
+            left: Box::new(WithRange::new(left_start, left_end, left)),
+            right: Box::new(WithRange::new(right_start, right_end, right))
+        },
+};
+
+pub DistributionSpec: DistributionSpec = {
+    <n:Num> => DistributionSpec::Constant(n),
+    "d" <sides:Num> => DistributionSpec::Dice { repeat: 1, sides },
+    <repeat:Num> "d" <sides:Num> => DistributionSpec::Dice { repeat, sides },
+};
+
+pub Tuple: Vec<WithRange<Expression>> = {
+    "[" <es:Comma<Expr>> "]" => es,
+}
+
 Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
+UnaryOp: UnaryOp = {
+    "neg" => UnaryOp::Negate,
+    "sum" => UnaryOp::Sum,
+    "product" => UnaryOp::Product,
+    "max" => UnaryOp::Max,
+    "min" => UnaryOp::Min,
+};
+BinaryOp: BinaryOp = {
+    "+" => BinaryOp::Add,
+    "-" => BinaryOp::Sub,
+    "*" => BinaryOp::Mul,
+    "/" => BinaryOp::Div,
+    "=" => BinaryOp::Eq,
+    "!=" => BinaryOp::Ne,
+    "<" => BinaryOp::Lt,
+    "<=" => BinaryOp::Le,
+    ">" => BinaryOp::Gt,
+    ">=" => BinaryOp::Ge,
+};
+
+Comma<T>: Vec<T> = { // (1)
+    <mut v:(<T> ",")*> <e:T?> => match e { // (2)
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};

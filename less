@@ -1,0 +1,677 @@
+   Compiling everydice v0.1.0 (/Users/matthieu/Code/everydice)
+error: failed to run custom build command for `everydice v0.1.0 (/Users/matthieu/Code/everydice)`
+
+Caused by:
+  process didn't exit successfully: `/Users/matthieu/Code/everydice/target/debug/build/everydice-9bf6a9b2d553c8d5/build-script-build` (exit status: 1)
+  --- stdout
+  processing file `/Users/matthieu/Code/everydice/src/grammar.lalrpop`
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"!="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"!="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "!="       ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"*"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"*"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "*"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"+"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"+"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "+"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"-"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"-"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "-"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"/"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"/"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "/"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"<"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"<"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "<"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"<="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"<="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "<="       ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `"="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `"="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "="        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `">"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `">"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr ">"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      UnaryOp Expr
+    At that point, if the next token is a `">="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63, which would consume
+    the top 2 token(s) from the stack and produce a `ExprInner1`. This might then yield a
+    parse tree like
+      UnaryOp   Expr BinaryOp Expr
+      ├─ExprInner1─┤             │
+      ├─ExprInner──┤             │
+      ├─Expr───────┘             │
+      └─ExprInner────────────────┘
+
+    Alternatively, the parser could shift the `">="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr ">="       ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"!="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"!="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "!="       ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"*"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"*"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "*"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"+"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"+"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "+"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"-"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"-"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "-"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"/"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"/"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "/"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"<"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"<"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "<"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"<="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"<="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "<="       ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `"="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `"="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr "="        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `">"`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `">"` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr ">"        ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101: Local ambiguity detected
+
+    The problem arises after having observed the following symbols in the input:
+      Expr BinaryOp Expr
+    At that point, if the next token is a `">="`, then the parser can proceed in two
+    different ways.
+
+    First, the parser could execute the production at
+    /Users/matthieu/Code/everydice/src/grammar.lalrpop:23:5: 23:101, which would consume
+    the top 3 token(s) from the stack and produce a `ExprInner`. This might then yield a
+    parse tree like
+      Expr BinaryOp Expr BinaryOp Expr
+      ├─ExprInner──────┤             │
+      ├─Expr───────────┘             │
+      └─ExprInner────────────────────┘
+
+    Alternatively, the parser could shift the `">="` token and later use it to construct a
+    `BinaryOp`. This might then yield a parse tree like
+      Expr ">="       ╷ Expr
+      │    └─BinaryOp─┘    │
+      └─ExprInner──────────┘
+
+    See the LALRPOP manual for advice on making your grammar LR(1).
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"!="` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"*"` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"+"` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"-"` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"/"` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"<"` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"<="` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `"="` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `">"` we can reduce to a `ExprInner1` but we can also shift
+
+  /Users/matthieu/Code/everydice/src/grammar.lalrpop:21:5: 21:63: Conflict detected
+
+      when in this state:
+    BinaryOp = (*) "!=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "*" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "+" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "-" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "/" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "<=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) "=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    BinaryOp = (*) ">=" ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner = Expr (*) BinaryOp Expr ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+    ExprInner1 = UnaryOp Expr (*) ["!=", "(", ")", "*", "+", ",", "-", "/", "<", "<=", "=", ">", ">=", "[", "]", "d", "max", "min", "neg", "product", "sum", r#"[0-9]+"#, Eof]
+
+    and looking at a token `">="` we can reduce to a `ExprInner1` but we can also shift
+
