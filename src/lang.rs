@@ -35,19 +35,17 @@ impl<'source> Evaluator<'source> {
                 if distributions.is_empty() {
                     return Err(self.empty_input(expression.range));
                 }
-                if op == &UnaryOp::Negate {
-                    return Ok(distributions.into_iter().map(|d| d.negate()).collect());
-                }
-                let result = match op {
-                    UnaryOp::Sum => Distribution::sum(distributions),
-                    UnaryOp::Product => Distribution::product(distributions),
-                    UnaryOp::Max => Distribution::max(distributions),
-                    UnaryOp::Min => Distribution::min(distributions),
-                    _ => unreachable!(),
-                };
-                match result {
-                    Ok(d) => Ok(vec![d]),
-                    Err(e) => Err(self.probability_error(expression.range, e)),
+                match op {
+                    UnaryOp::Negate => {
+                        let mut result = distributions[0].clone();
+                        result.negate();
+                        Ok(vec![result])
+                    }
+                    UnaryOp::Invert => {
+                        let mut result = distributions[0].clone();
+                        result.invert();
+                        Ok(vec![result])
+                    }
                 }
             }
             Expression::BinaryOp { op, left, right } => {
@@ -71,7 +69,8 @@ impl<'source> Evaluator<'source> {
                     .map(|(l, r)| self.apply_binary_op(*op, &l, &r, expression.range))
                     .collect()
             }
-            Expression::IntBinaryOp { op, left, right } => todo!(),
+            Expression::FunctionCall { name, args } => todo!(),
+            Expression::List(_) => todo!(),
         }
     }
 

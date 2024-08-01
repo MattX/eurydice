@@ -18,6 +18,8 @@ pub ExprInner: Expression = {
     <ds:DistributionSpec> => Expression::Distribution(ds),
     "(" <e:Expr> ")" => e.value,
     <t:Tuple> => Expression::Tuple(t),
+    <l:List> => Expression::List(l),
+    <id:Identifier> "(" <args:Comma<Expr>> ")" => Expression::FunctionCall { name: id, args },
     #[precedence(level="1")] #[assoc(side="left")]
     <o:UnaryOp> <start: @L> <e:ExprInner> <end: @R> => Expression::UnaryOp { 
             op: o,
@@ -40,16 +42,18 @@ pub DistributionSpec: DistributionSpec = {
 };
 
 pub Tuple: Vec<WithRange<Expression>> = {
+    "{" <es:Comma<Expr>> "}" => es,
+}
+
+pub List: Vec<WithRange<Expression>> = {
     "[" <es:Comma<Expr>> "]" => es,
 }
 
 Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
+Identifier: String = <s:r"(d[a-zA-Z_]|[a-ce-zA-Z_])[a-zA-Z0-9_]*"> => s.to_string();
 UnaryOp: UnaryOp = {
-    "neg" => UnaryOp::Negate,
-    "sum" => UnaryOp::Sum,
-    "product" => UnaryOp::Product,
-    "max" => UnaryOp::Max,
-    "min" => UnaryOp::Min,
+    "-" => UnaryOp::Negate,
+    "!" => UnaryOp::Invert,
 };
 BinaryOp: BinaryOp = {
     "+" => BinaryOp::Add,
@@ -64,8 +68,8 @@ BinaryOp: BinaryOp = {
     ">=" => BinaryOp::Ge,
 };
 
-Comma<T>: Vec<T> = { // (1)
-    <mut v:(<T> ",")*> <e:T?> => match e { // (2)
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
         None => v,
         Some(e) => {
             v.push(e);

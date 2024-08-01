@@ -70,8 +70,11 @@ impl Distribution {
     }
 
     pub fn clean_up(&mut self) {
-        self.normalize();
         self.remove_zero_entries();
+        // Avoid doing tons of divisions if we can avoid it
+        if !self.is_normalized() {
+            self.normalize();
+        }
     }
 
     pub fn uniform(start: i32, end: i32) -> Self {
@@ -225,6 +228,18 @@ impl Distribution {
 
     pub fn negate(&self) -> Self {
         self.map(|outcome| Outcome(outcome.0.iter().map(|&x| -x).collect()))
+    }
+
+    pub fn invert(&self) -> Self {
+        self.map(|outcome| {
+            Outcome(
+                outcome
+                    .0
+                    .iter()
+                    .map(|&x| if x == 1 { 0 } else { 0 })
+                    .collect(),
+            )
+        })
     }
 }
 

@@ -3,6 +3,7 @@ mod lang;
 mod output;
 // mod parse;
 mod probability;
+mod typecheck;
 
 use std::io::{self, BufRead as _, BufWriter, Read};
 

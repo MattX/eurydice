@@ -26,6 +26,7 @@ impl<T> WithRange<T> {
 pub enum Expression {
     Distribution(DistributionSpec),
     Tuple(Vec<WithRange<Expression>>),
+    List(Vec<WithRange<Expression>>),
     UnaryOp {
         op: UnaryOp,
         operand: Box<WithRange<Expression>>,
@@ -35,10 +36,9 @@ pub enum Expression {
         left: Box<WithRange<Expression>>,
         right: Box<WithRange<Expression>>,
     },
-    IntBinaryOp {
-        op: IntBinaryOp,
-        left: Box<WithRange<Expression>>,
-        right: usize,
+    FunctionCall {
+        name: String,
+        args: Vec<WithRange<Expression>>,
     },
 }
 
@@ -48,16 +48,13 @@ pub enum DistributionSpec {
     Dice { repeat: i32, sides: i32 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum UnaryOp {
     Negate,
-    Sum,
-    Product,
-    Max,
-    Min,
+    Invert,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -69,12 +66,6 @@ pub enum BinaryOp {
     Le,
     Gt,
     Ge,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-pub enum IntBinaryOp {
-    Highest,
-    Lowest,
 }
 
 // Prints the code in sexpr
