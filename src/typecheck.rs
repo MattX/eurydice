@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-use crate::ast::{self, DistributionSpec, Expression, UnaryOp, WithRange};
+use crate::ast::{self, DistributionSpec, Expression, WithRange};
 
 pub fn infer(env: &TypeEnv, expr: &WithRange<Expression>) -> Result<StaticType, TypeError> {
     match &expr.value {
@@ -16,15 +16,13 @@ pub fn infer(env: &TypeEnv, expr: &WithRange<Expression>) -> Result<StaticType, 
             Ok(StaticType::Tuple(types))
         }
         Expression::List(exprs) => infer_list(env, exprs),
-        Expression::UnaryOp { op, operand } => {
-            infer_function(env, &op.into(), &[*operand.clone()])
-        }
+        Expression::UnaryOp { op, operand } => infer_function(env, &op.into(), &[*operand.clone()]),
         Expression::BinaryOp { op, left, right } => {
             infer_function(env, &op.into(), &[*left.clone(), *right.clone()])
-        },
+        }
         Expression::FunctionCall { name, args } => {
             infer_function(env, &Identifier::Function(name.clone()), args)
-        },
+        }
     }
 }
 
@@ -85,7 +83,9 @@ fn infer_function(
         None => {
             return Err(TypeError::Undefined {
                 range: args[0].range.into(),
-                name: ident.function_name().unwrap_or_else(|| format!("missing type for operator {:?}", ident)),
+                name: ident
+                    .function_name()
+                    .unwrap_or_else(|| format!("missing type for operator {:?}", ident)),
             })
         }
     };
@@ -96,7 +96,12 @@ fn infer_function(
             found: arg_types.len(),
         });
     }
-    let non_matching = func_type.args.iter().zip(arg_types.iter()).filter(|(a, b)| a != b).next();
+    let non_matching = func_type
+        .args
+        .iter()
+        .zip(arg_types.iter())
+        .filter(|(a, b)| a != b)
+        .next();
     let (expected, found) = match non_matching {
         Some((expected, found)) => (expected, found),
         None => return Ok(*func_type.ret.clone()),
@@ -116,6 +121,7 @@ fn infer_function(
         range: args[0].range.into(),
         expected: expected.clone(),
         found: found.clone(),
+        func_type: func_type.clone(),
     })
 }
 
@@ -191,7 +197,7 @@ impl Function {
     }
 
     fn is_autovector(&self) -> bool {
-        if !matches!(&*self.ret, StaticType::Int) || !matches!(&*self.ret, StaticType::IntList) {
+        if !matches!(&*self.ret, StaticType::Int) && !matches!(&*self.ret, StaticType::IntList) {
             return false;
         }
         for arg in &self.args {
@@ -270,7 +276,7 @@ pub struct TypeEnv {
     pub vars: HashMap<Identifier, StaticType>,
 }
 
-fn global_env() -> TypeEnv {
+pub fn global_env() -> TypeEnv {
     let mut vars = HashMap::new();
 
     // Unops
@@ -307,6 +313,7 @@ fn global_env() -> TypeEnv {
 
 #[derive(Debug, Error, Diagnostic)]
 #[error("Type checking error")]
+#[diagnostic()]
 pub enum TypeError {
     #[error("Reference to undefined name: `{name}`")]
     Undefined {
@@ -323,11 +330,13 @@ pub enum TypeError {
     },
 
     #[error("Mismatched types")]
+    #[diagnostic(help("Function has type {func_type}"))]
     MismatchedTypes {
         #[label("Expected type `{expected}`, found type `{found}`")]
         range: SourceSpan,
         expected: StaticType,
         found: StaticType,
+        func_type: Function,
     },
 
     #[error("Non-homogeneous list")]
