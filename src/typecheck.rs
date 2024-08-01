@@ -110,11 +110,11 @@ fn infer_function(
     // Special rules (ugh):
     // * Functions that are IntList -> Int or IntList -> IntList can also be Dist -> Dist (autocross)
     // * Functions that are (Int, Int, ...) -> Int or (Int, Int, ...) -> IntList can also be
-    // (Dist, Dist, ...) -> Dist (autovector)
+    // ((Int | Intlist | Distlist), (Int | Intlist | Distlist) | ...) -> Dist (autobroadcast)
     if func_type.is_autocross() && matches!(arg_types[0], StaticType::Dist) {
         return Ok(StaticType::Dist);
     }
-    if func_type.is_autovector() && arg_types.iter().all(|t| matches!(t, StaticType::Dist)) {
+    if func_type.is_autobroadcast() && arg_types.iter().all(|t| matches!(t, StaticType::Dist)) {
         return Ok(StaticType::Dist);
     }
     Err(TypeError::MismatchedTypes {
@@ -196,7 +196,7 @@ impl Function {
         }
     }
 
-    fn is_autovector(&self) -> bool {
+    fn is_autobroadcast(&self) -> bool {
         if !matches!(&*self.ret, StaticType::Int) && !matches!(&*self.ret, StaticType::IntList) {
             return false;
         }
@@ -213,7 +213,7 @@ impl std::fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "function[{}][{}]",
+            "function[{} -> {}]",
             self.args
                 .iter()
                 .map(|t| t.to_string())

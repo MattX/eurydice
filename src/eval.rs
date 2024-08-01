@@ -7,21 +7,16 @@ use crate::{
     probability::{self, Distribution},
 };
 
-pub struct Evaluator<'source> {
-    source: &'source str,
+pub struct Evaluator {
 }
 
-impl<'source> Evaluator<'source> {
-    pub fn new(source: &'source str) -> Self {
-        Self { source }
-    }
-
+impl Evaluator {
     pub fn evaluate(
-        &self,
+        &mut self,
         expression: &WithRange<Expression>,
     ) -> Result<Vec<Distribution>, RuntimeError> {
         match &expression.value {
-            Expression::Distribution(d) => Ok(self.spec_to_distribution(d)),
+            Expression::Distribution(d) => Ok(spec_to_distribution(d)),
             Expression::Tuple(t) => {
                 let mut distributions = Vec::new();
                 for expr in t {
@@ -33,7 +28,7 @@ impl<'source> Evaluator<'source> {
             Expression::UnaryOp { op, operand } => {
                 let distributions = self.evaluate(operand)?;
                 if distributions.is_empty() {
-                    return Err(self.empty_input(expression.range));
+                    return Err(empty_input(expression.range));
                 }
                 match op {
                     UnaryOp::Negate => {
@@ -52,10 +47,10 @@ impl<'source> Evaluator<'source> {
                 let left_dists = self.evaluate(left)?;
                 let right_dists = self.evaluate(right)?;
                 if left_dists.is_empty() {
-                    return Err(self.empty_input(expression.range));
+                    return Err(empty_input(expression.range));
                 }
                 if left_dists.len() != right_dists.len() {
-                    return Err(self.mismatched_binary_op_args(
+                    return Err(mismatched_binary_op_args(
                         *op,
                         left_dists.len(),
                         right_dists.len(),
@@ -74,22 +69,13 @@ impl<'source> Evaluator<'source> {
         }
     }
 
-    fn spec_to_distribution(&self, spec: &DistributionSpec) -> Vec<Distribution> {
-        match spec {
-            DistributionSpec::Constant(c) => vec![Distribution::uniform(*c, *c)],
-            DistributionSpec::Dice { repeat, sides } => {
-                vec![Distribution::uniform(1, *sides); *repeat as usize]
-            }
-        }
-    }
-
     fn apply_binary_op(
         &self,
         op: BinaryOp,
         left: &Distribution,
         right: &Distribution,
         range: ast::Range,
-    ) -> Result<Distribution, RuntimeError<'source>> {
+    ) -> Result<Distribution, RuntimeError> {
         let two_vec = vec![left.clone(), right.clone()];
         match op {
             BinaryOp::Add => Distribution::sum(two_vec),
@@ -104,43 +90,15 @@ impl<'source> Evaluator<'source> {
             BinaryOp::Gt => Distribution::reduce_pairwise(two_vec, |a, b| (a > b) as i32),
             BinaryOp::Ge => Distribution::reduce_pairwise(two_vec, |a, b| (a >= b) as i32),
         }
-        .map_err(|e| self.probability_error(range, e))
+        .map_err(|e| probability_error(range, e))
     }
+}
 
-    fn empty_input(&self, range: crate::ast::Range) -> RuntimeError<'source> {
-        RuntimeError::EmptyInput {
-            source_code: &self.source,
-            range: range.into(),
-        }
-    }
-
-    fn mismatched_binary_op_args(
-        &self,
-        op: BinaryOp,
-        left_size: usize,
-        right_size: usize,
-        left_range: ast::Range,
-        right_range: ast::Range,
-    ) -> RuntimeError<'source> {
-        RuntimeError::MismatchedBinaryOpArgs {
-            op,
-            left_size,
-            right_size,
-            left_range: left_range.into(),
-            right_range: right_range.into(),
-            source_code: &self.source,
-        }
-    }
-
-    fn probability_error(
-        &self,
-        range: ast::Range,
-        underlying: probability::ProbabilityError,
-    ) -> RuntimeError<'source> {
-        RuntimeError::ProbabilityError {
-            source_code: &self.source,
-            range: range.into(),
-            underlying,
+fn spec_to_distribution(spec: &DistributionSpec) -> Vec<Distribution> {
+    match spec {
+        DistributionSpec::Constant(c) => vec![Distribution::uniform(*c, *c)],
+        DistributionSpec::Dice { repeat, sides } => {
+            vec![Distribution::uniform(1, *sides); *repeat as usize]
         }
     }
 }
@@ -153,12 +111,9 @@ impl Into<SourceSpan> for ast::Range {
 
 #[derive(Debug, Error, Diagnostic)]
 #[error("Runtime error")]
-pub enum RuntimeError<'source> {
+pub enum RuntimeError {
     #[error("Empty input")]
     EmptyInput {
-        #[source_code]
-        source_code: &'source str,
-
         #[label = "Empty input"]
         range: SourceSpan,
     },
@@ -169,9 +124,6 @@ pub enum RuntimeError<'source> {
         left_size: usize,
         right_size: usize,
 
-        #[source_code]
-        source_code: &'source str,
-
         #[label = "This argument has size {left_size}..."]
         left_range: SourceSpan,
 
@@ -181,12 +133,41 @@ pub enum RuntimeError<'source> {
 
     #[error("Probability error")]
     ProbabilityError {
-        #[source_code]
-        source_code: &'source str,
-
         #[label = "Probability error: {underlying}"]
         range: SourceSpan,
 
         underlying: probability::ProbabilityError,
     },
+}
+
+fn empty_input(range: crate::ast::Range) -> RuntimeError {
+    RuntimeError::EmptyInput {
+        range: range.into(),
+    }
+}
+
+fn mismatched_binary_op_args(
+    op: BinaryOp,
+    left_size: usize,
+    right_size: usize,
+    left_range: ast::Range,
+    right_range: ast::Range,
+) -> RuntimeError {
+    RuntimeError::MismatchedBinaryOpArgs {
+        op,
+        left_size,
+        right_size,
+        left_range: left_range.into(),
+        right_range: right_range.into(),
+    }
+}
+
+fn probability_error(
+    range: ast::Range,
+    underlying: probability::ProbabilityError,
+) -> RuntimeError {
+    RuntimeError::ProbabilityError {
+        range: range.into(),
+        underlying,
+    }
 }

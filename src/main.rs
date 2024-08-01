@@ -18,10 +18,9 @@ lalrpop_mod!(
 );
 
 fn main() {
-    let stdin = io::stdin();
     let parser = grammar::ExprParser::new();
-    for line in stdin.lock().lines() {
-        let line = line.unwrap();
+    let mut rl = rustyline::DefaultEditor::new().unwrap();
+    while let Some(line) = rl.readline("> ").ok() {
         let expr = match parser.parse(&line) {
             Ok(expr) => expr,
             Err(err) => {
@@ -37,7 +36,7 @@ fn main() {
                 continue;
             }
         }
-        let result = match eval::Evaluator::new(&line).evaluate(&expr) {
+        let result = match (eval::Evaluator{}).evaluate(&expr) {
             Ok(distributions) => distributions,
             Err(e) => {
                 print_diagnostic(e, &line);
