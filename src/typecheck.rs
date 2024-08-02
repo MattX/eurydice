@@ -10,7 +10,9 @@ pub fn infer(env: &TypeEnv, expr: &WithRange<Expression>) -> Result<StaticType, 
         Expression::Distribution(ds) => Ok(distribution_spec_type(ds)),
         Expression::Tuple(_) => todo!(),
         Expression::List(exprs) => infer_list(env, exprs),
-        Expression::UnaryOp { op, operand } => infer_application(env, &op.into(), &[*operand.clone()]),
+        Expression::UnaryOp { op, operand } => {
+            infer_application(env, &op.into(), &[*operand.clone()])
+        }
         Expression::BinaryOp { op, left, right } => {
             infer_application(env, &op.into(), &[*left.clone(), *right.clone()])
         }
@@ -41,8 +43,7 @@ fn infer_list(env: &TypeEnv, exprs: &[WithRange<Expression>]) -> Result<StaticTy
     };
     for element_type in types.iter() {
         match (&list_type, element_type) {
-            (StaticType::List, StaticType::Int) | (StaticType::List, StaticType::List) => {
-            }
+            (StaticType::List, StaticType::Int) | (StaticType::List, StaticType::List) => {}
             (StaticType::Dist, StaticType::Dist) => {}
             _ => {
                 return Err(TypeError::NonHomogeneousList {
@@ -218,7 +219,7 @@ pub enum NotSubtypeReason {
         overload_index: usize,
         #[related("Reasons:")]
         reasons: Vec<SignatureMismatchReason>,
-    }
+    },
 }
 
 impl std::fmt::Display for StaticType {
@@ -258,7 +259,9 @@ impl FunctionSignature {
         if self.args.len() != other.args.len() {
             return Some(SignatureMismatchReason::ArgumentCount);
         }
-        for (i, (self_arg_type, super_arg_type)) in self.args.iter().zip(other.args.iter()).enumerate() {
+        for (i, (self_arg_type, super_arg_type)) in
+            self.args.iter().zip(other.args.iter()).enumerate()
+        {
             if let Some(reason) = super_arg_type.is_subtype(self_arg_type) {
                 return Some(SignatureMismatchReason::ArgumentNotSupertype {
                     index: i,
@@ -268,7 +271,7 @@ impl FunctionSignature {
                 });
             }
         }
-        if let Some(reason) = self.ret.is_subtype(&*other.ret) {
+        if let Some(reason) = self.ret.is_subtype(&other.ret) {
             return Some(SignatureMismatchReason::ReturnNotSubType {
                 expected: *self.ret.clone(),
                 found: *other.ret.clone(),
@@ -293,7 +296,7 @@ pub enum SignatureMismatchReason {
         expected: StaticType,
         found: StaticType,
         reason: Box<NotSubtypeReason>,
-    }
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -320,7 +323,11 @@ impl Function {
                 reasons: mismatch_reasons,
             });
         }
-        let min_count = matching_overloads.iter().map(|(_, upcast_count)| *upcast_count).min().unwrap();
+        let min_count = matching_overloads
+            .iter()
+            .map(|(_, upcast_count)| *upcast_count)
+            .min()
+            .unwrap();
         let matching_overloads = matching_overloads
             .into_iter()
             .filter(|(_, upcast_count)| *upcast_count == min_count)
@@ -338,7 +345,10 @@ impl Function {
 
     /// Otherwise, returns the number of arguments that need to be upcasted, or an explanation if the signature
     /// does not match.
-    fn non_exact_matches(sig: &FunctionSignature, args: &[StaticType]) -> Result<usize, SignatureMismatchReason> {
+    fn non_exact_matches(
+        sig: &FunctionSignature,
+        args: &[StaticType],
+    ) -> Result<usize, SignatureMismatchReason> {
         if sig.args.len() != args.len() {
             return Err(SignatureMismatchReason::ArgumentCount);
         }
@@ -395,7 +405,7 @@ pub enum ApplicationMismatchReason {
         args: Vec<StaticType>,
         overloads: Vec<usize>,
         upcasted_args: usize,
-    }
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -456,7 +466,7 @@ pub fn global_env() -> TypeEnv {
     // Unops
     for op in &[ast::UnaryOp::Negate, ast::UnaryOp::Invert] {
         vars.insert(
-            op.clone().into(),
+            op.into(),
             function(vec![StaticType::Dist], StaticType::Dist),
         );
     }
@@ -470,11 +480,16 @@ pub fn global_env() -> TypeEnv {
         ast::BinaryOp::Lt,
         ast::BinaryOp::Ne,
     ] {
-        vars.insert(op.clone().into(), int_pair_to_int());
+        vars.insert(op.into(), int_pair_to_int());
     }
 
-    for op in &[ast::BinaryOp::Add, ast::BinaryOp::Sub, ast::BinaryOp::Mul, ast::BinaryOp::Div] {
-        vars.insert(op.clone().into(), numeric_pair());
+    for op in &[
+        ast::BinaryOp::Add,
+        ast::BinaryOp::Sub,
+        ast::BinaryOp::Mul,
+        ast::BinaryOp::Div,
+    ] {
+        vars.insert(op.into(), numeric_pair());
     }
 
     // Built-in functions

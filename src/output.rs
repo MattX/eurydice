@@ -101,7 +101,7 @@ fn columns_to_print(
         chars_taken_up += 3 + column_widths[next_column + to_print];
         to_print += 1;
     }
-    return to_print;
+    to_print
 }
 
 #[derive(Debug, Copy, Clone)]

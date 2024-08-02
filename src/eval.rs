@@ -1,4 +1,3 @@
-
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
@@ -7,8 +6,7 @@ use crate::{
     probability::{self, Distribution},
 };
 
-pub struct Evaluator {
-}
+pub struct Evaluator {}
 
 impl Evaluator {
     pub fn evaluate(
@@ -32,12 +30,12 @@ impl Evaluator {
                 }
                 match op {
                     UnaryOp::Negate => {
-                        let mut result = distributions[0].clone();
+                        let result = distributions[0].clone();
                         result.negate();
                         Ok(vec![result])
                     }
                     UnaryOp::Invert => {
-                        let mut result = distributions[0].clone();
+                        let result = distributions[0].clone();
                         result.invert();
                         Ok(vec![result])
                     }
@@ -60,7 +58,7 @@ impl Evaluator {
                 }
                 left_dists
                     .into_iter()
-                    .zip(right_dists.into_iter())
+                    .zip(right_dists)
                     .map(|(l, r)| self.apply_binary_op(*op, &l, &r, expression.range))
                     .collect()
             }
@@ -103,9 +101,9 @@ fn spec_to_distribution(spec: &DistributionSpec) -> Vec<Distribution> {
     }
 }
 
-impl Into<SourceSpan> for ast::Range {
-    fn into(self) -> SourceSpan {
-        SourceSpan::new(self.start.into(), self.end - self.start)
+impl From<ast::Range> for SourceSpan {
+    fn from(range: ast::Range) -> Self {
+        SourceSpan::new(range.start.into(), range.end - range.start)
     }
 }
 
@@ -162,10 +160,7 @@ fn mismatched_binary_op_args(
     }
 }
 
-fn probability_error(
-    range: ast::Range,
-    underlying: probability::ProbabilityError,
-) -> RuntimeError {
+fn probability_error(range: ast::Range, underlying: probability::ProbabilityError) -> RuntimeError {
     RuntimeError::ProbabilityError {
         range: range.into(),
         underlying,

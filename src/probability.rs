@@ -18,9 +18,9 @@ impl From<&[i32]> for Outcome {
     }
 }
 
-impl Into<Vec<i32>> for Outcome {
-    fn into(self) -> Vec<i32> {
-        self.0
+impl From<Outcome> for Vec<i32> {
+    fn from(outcome: Outcome) -> Self {
+        outcome.0
     }
 }
 
@@ -236,7 +236,7 @@ impl Distribution {
                 outcome
                     .0
                     .iter()
-                    .map(|&x| if x == 1 { 0 } else { 0 })
+                    .map(|&x| if x == 1 { 0 } else { 1 })
                     .collect(),
             )
         })

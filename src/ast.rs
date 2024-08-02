@@ -9,7 +9,7 @@ pub struct Range {
 #[derive(Debug, Clone, Serialize)]
 pub struct WithRange<T> {
     pub value: T,
-    #[serde(skip)] 
+    #[serde(skip)]
     pub range: Range,
 }
 
