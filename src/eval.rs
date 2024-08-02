@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
@@ -6,97 +8,106 @@ use crate::{
     probability::{self, Distribution},
 };
 
-pub struct Evaluator {}
+#[derive(Debug, Clone)]
+pub enum RuntimeValue {
+    Int(i32),
+    List(Rc<Vec<i32>>),
+    Distribution(Rc<Vec<Distribution>>),
+    Primitive(fn(&[RuntimeValue]) -> Result<RuntimeValue, PrimitiveError>),
+    // TODO ideally this would instead be a reference into the AST, but what can we do
+    Function(Rc<WithRange<Expression>>),
+}
+
+impl From<i32> for RuntimeValue {
+    fn from(value: i32) -> Self {
+        RuntimeValue::Int(value)
+    }
+}
+
+impl From<Rc<Vec<i32>>> for RuntimeValue {
+    fn from(value: Rc<Vec<i32>>) -> Self {
+        RuntimeValue::List(value)
+    }
+}
+
+impl From<Vec<i32>> for RuntimeValue {
+    fn from(value: Vec<i32>) -> Self {
+        RuntimeValue::List(Rc::new(value))
+    }
+}
+
+impl From<Rc<Vec<Distribution>>> for RuntimeValue {
+    fn from(value: Rc<Vec<Distribution>>) -> Self {
+        RuntimeValue::Distribution(value)
+    }
+}
+
+impl From<Vec<Distribution>> for RuntimeValue {
+    fn from(value: Vec<Distribution>) -> Self {
+        RuntimeValue::Distribution(Rc::new(value))
+    }
+}
+
+type ValEnv<'a> = crate::util::Environment<'a, RuntimeValue>;
+
+pub struct Evaluator {
+    global_env: ValEnv<'static>,
+}
 
 impl Evaluator {
+    pub fn new() -> Self {
+        Self {
+            global_env: ValEnv::new(),
+        }
+    }
+
     pub fn evaluate(
         &mut self,
         expression: &WithRange<Expression>,
-    ) -> Result<Vec<Distribution>, RuntimeError> {
+    ) -> Result<RuntimeValue, RuntimeError> {
         match &expression.value {
             Expression::Distribution(d) => Ok(spec_to_distribution(d)),
-            Expression::Tuple(t) => {
-                let mut distributions = Vec::new();
-                for expr in t {
-                    let dists = self.evaluate(expr)?;
-                    distributions.extend(dists);
-                }
-                Ok(distributions)
-            }
             Expression::UnaryOp { op, operand } => {
                 let distributions = self.evaluate(operand)?;
-                if distributions.is_empty() {
-                    return Err(empty_input(expression.range));
-                }
-                match op {
-                    UnaryOp::Negate => {
-                        let result = distributions[0].clone();
-                        result.negate();
-                        Ok(vec![result])
-                    }
-                    UnaryOp::Invert => {
-                        let result = distributions[0].clone();
-                        result.invert();
-                        Ok(vec![result])
-                    }
-                }
+                self.apply_unary_op(op, &distributions, expression.range)
             }
             Expression::BinaryOp { op, left, right } => {
                 let left_dists = self.evaluate(left)?;
                 let right_dists = self.evaluate(right)?;
-                if left_dists.is_empty() {
-                    return Err(empty_input(expression.range));
-                }
-                if left_dists.len() != right_dists.len() {
-                    return Err(mismatched_binary_op_args(
-                        *op,
-                        left_dists.len(),
-                        right_dists.len(),
-                        left.range,
-                        right.range,
-                    ));
-                }
-                left_dists
-                    .into_iter()
-                    .zip(right_dists)
-                    .map(|(l, r)| self.apply_binary_op(*op, &l, &r, expression.range))
-                    .collect()
+                self.apply_binary_op(op, &left_dists, &right_dists, expression.range)
             }
-            Expression::FunctionCall { name, args } => todo!(),
+            Expression::FunctionCall { .. } => todo!(),
             Expression::List(_) => todo!(),
+            Expression::Reference(_) => todo!(),
+            Expression::If { .. } => todo!(),
         }
+    }
+
+    fn apply_unary_op(
+        &self,
+        op: &WithRange<UnaryOp>,
+        operand: &RuntimeValue,
+        range: ast::Range,
+    ) -> Result<RuntimeValue, RuntimeError> {
+        todo!()
     }
 
     fn apply_binary_op(
         &self,
-        op: BinaryOp,
-        left: &Distribution,
-        right: &Distribution,
+        op: &WithRange<BinaryOp>,
+        left: &RuntimeValue,
+        right: &RuntimeValue,
         range: ast::Range,
-    ) -> Result<Distribution, RuntimeError> {
-        let two_vec = vec![left.clone(), right.clone()];
-        match op {
-            BinaryOp::Add => Distribution::sum(two_vec),
-            BinaryOp::Sub => Distribution::reduce_pairwise(two_vec, |a, b| a - b),
-            BinaryOp::Mul => Distribution::product(two_vec),
-            // TODO handle errors here gracefully
-            BinaryOp::Div => Distribution::reduce_pairwise(two_vec, |a, b| a / b),
-            BinaryOp::Eq => Distribution::reduce_pairwise(two_vec, |a, b| (a == b) as i32),
-            BinaryOp::Ne => Distribution::reduce_pairwise(two_vec, |a, b| (a != b) as i32),
-            BinaryOp::Lt => Distribution::reduce_pairwise(two_vec, |a, b| (a < b) as i32),
-            BinaryOp::Le => Distribution::reduce_pairwise(two_vec, |a, b| (a <= b) as i32),
-            BinaryOp::Gt => Distribution::reduce_pairwise(two_vec, |a, b| (a > b) as i32),
-            BinaryOp::Ge => Distribution::reduce_pairwise(two_vec, |a, b| (a >= b) as i32),
-        }
-        .map_err(|e| probability_error(range, e))
+    ) -> Result<RuntimeValue, RuntimeError> {
+        todo!()
     }
 }
 
-fn spec_to_distribution(spec: &DistributionSpec) -> Vec<Distribution> {
+fn spec_to_distribution(spec: &DistributionSpec) -> RuntimeValue {
     match spec {
-        DistributionSpec::Constant(c) => vec![Distribution::uniform(*c, *c)],
+        DistributionSpec::Constant(c) => RuntimeValue::Int(*c),
         DistributionSpec::Dice { repeat, sides } => {
-            vec![Distribution::uniform(1, *sides); *repeat as usize]
+            vec![Distribution::uniform(1, *sides); *repeat as usize].into()
         }
     }
 }
@@ -138,31 +149,6 @@ pub enum RuntimeError {
     },
 }
 
-fn empty_input(range: crate::ast::Range) -> RuntimeError {
-    RuntimeError::EmptyInput {
-        range: range.into(),
-    }
-}
-
-fn mismatched_binary_op_args(
-    op: BinaryOp,
-    left_size: usize,
-    right_size: usize,
-    left_range: ast::Range,
-    right_range: ast::Range,
-) -> RuntimeError {
-    RuntimeError::MismatchedBinaryOpArgs {
-        op,
-        left_size,
-        right_size,
-        left_range: left_range.into(),
-        right_range: right_range.into(),
-    }
-}
-
-fn probability_error(range: ast::Range, underlying: probability::ProbabilityError) -> RuntimeError {
-    RuntimeError::ProbabilityError {
-        range: range.into(),
-        underlying,
-    }
+#[derive(Debug, Error, Diagnostic)]
+pub enum PrimitiveError {
 }

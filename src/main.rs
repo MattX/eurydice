@@ -1,19 +1,15 @@
 mod ast;
 mod eval;
 mod output;
-// mod parse;
 mod probability;
 mod typecheck;
+mod util;
 
 use lalrpop_util::lalrpop_mod;
 use miette::{Diagnostic, GraphicalReportHandler};
 use output::print_distribution;
 
-lalrpop_mod!(
-    #[allow(clippy::ptr_arg)]
-    #[rustfmt::skip]
-    grammar
-);
+lalrpop_mod!(grammar);
 
 fn main() {
     let parser = grammar::ExprParser::new();
@@ -34,15 +30,29 @@ fn main() {
                 continue;
             }
         }
-        let result = match (eval::Evaluator {}).evaluate(&expr) {
+        let result = match eval::Evaluator::new().evaluate(&expr) {
             Ok(distributions) => distributions,
             Err(e) => {
                 print_diagnostic(e, &line);
                 continue;
             }
         };
-        for distribution in result {
-            print_distribution(&distribution);
+        match result {
+            eval::RuntimeValue::Int(i) => println!("{}", i),
+            eval::RuntimeValue::List(is) => println!(
+                "[{}]",
+                is.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            eval::RuntimeValue::Distribution(d) => {
+                for distribution in d.iter() {
+                    print_distribution(distribution);
+                }
+            }
+            eval::RuntimeValue::Primitive(_) => println!("#<primitive>"),
+            eval::RuntimeValue::Function(_) => println!("#<function>"),
         }
     }
 }

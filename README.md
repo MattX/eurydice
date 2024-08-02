@@ -1,78 +1,99 @@
-# Eurydice
-
-Eurydice (aka everydice) is a library and DSL to maniuplate dice rolls, or more generally probability distribution over integers and integer sequences.
+# Everydice documentation
 
 ## Examples
 
-Simple query
-
 ```
-max 3d20
+2d6 + 1
 ```
 
-Represents rolling 3 d20s and keeping the largest value.
-
-The following program computes the probability of winning a Risk attack of 6 attacking and 4 defending armies.
-
 ```
-def risk_attacker_win_chance(atk_armies: int, def_armies: int) -> dist[int]:
-    if atk_armies = 1:
-        0
-    elif def_armies = 0:
-        1
-    else:
-        attacker_die = d6 repeat min(3, attacker)
-        defender_die = d6 repeat min(2, attacker)
-        die_to_compare = min(2, 3, attacker)
-        atk_wins = (attacker_die top die_to_compare) > (defender_die top die_to_compare)
-        atk_win_count = sum atk_wins
-        def_win_count = die_to_compare - atk_win_count
-        risk_attacker_win_chance map [atk_win_count, def_win_count]
-
-risk_attacker_win_chance(6, 4)
+d{-1..1}
 ```
 
-## Manual
+```
+sum(drop_lowest(3d6, 1))
+```
 
-### Syntax
+```
+coin <- d2
+if coin == 1 { d4 } else { 21-d4 }
+```
 
-The syntax aims to be Python-like, although greatly simplified.
+```
+highest_and_sum = [0, 0]
+for i in [1..20] {
+    highest_and_sum = do {
+        roll <- d6
+        [highest, sum] <- highest_and_sum
+        [max(roll, highest), roll + sum]
+    }
+}
+highest_and_sum
+```
 
-### Types
+## Types
 
-To understand the language, it's maybe easiest to start with the types you can manipulate. There are 2 scalar types:
+There are essentially 4 types of values:
 
-* `int`: Integers (32-bit signed). Example: `42` is an `int`.
-* `dist`: Distributions, which are essentially a mapping from lists of integers to floats representing their probabilities. Distributions can be over sequences of a finite length, in which case their type is `dist[k]` for some `k`, or over arbitrary sequences, in which case they are `dist[?]`. Examples: `d6` is a `dist[1]`, `d{0, [0, 0]}` is a `dist[?]`.
+* `int` is a plain integer
+* `list` is a list of integers
+* `dist` is a probability distribution over lists of integers. The list can be one integer long. To save space, distributions are internally represented as lists of distribitions, where each component of the list is independent of the others.<br/>For instance, `2d6` has runtime type `dist[1, 1]`, indicating that it is a distribution over lists of length 2 made up of two independent components. Lists can be `dist[?]`, but these are less useful.
+* Functions are first-class values as well.
 
-There are two corresponding homogenous list types:
+### Subtyping
 
-* `list[int]` is an arbitrary-length sequence of `int`s. Example: `3 repeat 2` is a `list[int]`.
-* `list[dist[k]]` and `list[dist[?]]` are lists of distributions over sequences of size `k` and over arbitrary sequences, respectively. Examples: `2d6` is a `list[dist[6]]`, and `[d6, d20]` is a `list[dist[?]]`.
+Everydice has a notion of subtyping: `int <: list <: dist`.
 
-There are two compound types:
+Lists of lists and lists of dists do not exist. Attempting to place lists in lists will result in the lists being concatenated, for instance:
 
-* `tuple[type1, type2, ...]` is a fixed-length tuple of arbitrary types.
-* `function<k, j,...>[arg1, arg2, ..., argn return]` is a function from `args1, ..., argn` to `return`.
+`[[1, 2, 3], 4, [5, 6, 7]]`
 
-#### Type casts and least upper bounds
+evaluates to
 
-All container types are covariant, so since `int :< dist[1]`, `list[int] :< list[dist[1]]`.
+`[1, 2, 3, 4, 5, 6, 7]`.
 
-* `int` unifies with `dist[1]`, creating a constant distribution.
-* `dist[k]` for any `k` unifies with `dist[?]`
-* `tuple[t1, t2, ...]` where `t1 = t2 = ...` unifies with `list[t1]`.
-* No other types unify
+Similarly, putting a distribution in a list will result in the whole list becoming a distribution: `[1, 1d6, [4, 5, 6]]` has type `dist[1, 1, 3]`.
 
-#### Primitive types
+## Syntax
 
-`applyd: function<k, j>[dist[k], tuple[int, k] -> tuple[int, j]] -> dist[j]`
-`sum: function<k>[list[dist[k]]] -> dist[k]`
+It tries, and fails, to be close to Python.
 
-## To do list
+## Standard library
 
-(Besides immediate concerns)
+### Unary operators
 
-* **Move to log-probability**
-* `var`s as a third type?
-* generics over `k` in `dist[k]`.
+* `!: int -> int; list -> list; dist -> dist`: elementwise logical negation
+* `-: int -> int; list -> list; dist -> dist`: elementwise arithmetic negation
+
+### Binary operators
+
+* `+`, `*`:
+    * `(int, int) -> int`: arithmetic addition and multiplication
+    * `(list, list) -> list`, `(dist, dist) -> dist`: perform the total sum (for `+`) or product (for `*`) of both distributions. Broadcasts one side if necessary.
+* `-`
+    * `(int, int) -> int`: subtraction
+    * `(list, list) -> list` or `(dist, dist) -> dist`: performs `sum(left) - sum(right)`.
+* `/`: `(int, int) -> int`: integer division rounding down
+* `==`, `!=`, `<=`, `<`, `>`, `>=`:
+    * `(int, int) -> int`: logical comparisons
+    * On lists or distributions, applies elementwise. Both sides must have the same dimension.
+* `or`, `and`:
+    * `(int, int) -> int`: returns 0 if both (resp. either) sides are 1, 0 otherwise.
+    * On lists or distributions, applies elementwise. Both sides must have the same dimension.
+
+### Built-in functions
+
+On dists:
+
+* `cross(d: dist) -> dist`: performs the full product of the distributions in `d`, turning a `dist[x, y, z, ...]` into a `dist[x+y+z]`. Potentially very expensive.
+* `marginalize(d: dist) -> dist`: the opposite of `cross`. Loses all covariance information.
+* `sum(d: dist) -> dist`, `product(d: dist) -> dist`: computes the sum and product, turning the dist into a `dist[1]`.
+* `drop_low(d: dist, n: int) -> dist`, `drop_high(d: dist, n: int)`, `keep_low(d: dist, n: int) -> dist`, `keep_high(d: dist, n: int)`: drop / keep the n lowest or highest values.
+* `dim(d: dist) -> list`: returns a list containing the sizes of indepdent sub-distributions.
+* `size(d: dist) -> int`: returns the cardinality of the dist. Equivalent to `sum(dim(d))`.
+* `map(f: function[list -> dist], d: dist)`: applies function `f` to each outcome in `d`, producing a new distribution.
+
+On dists or lists:
+
+* `get(d: dist, n: int) -> dist`: get the nth element of a dist. The result has type `dist[1]`.
+* `get(d: list, n: int) -> int`: gets the nth element of a list.

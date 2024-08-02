@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::typecheck::StaticType;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Range {
     pub start: usize,
@@ -23,23 +25,59 @@ impl<T> WithRange<T> {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub enum MetaStatement {
+    Type(WithRange<Expression>),
+    Out(WithRange<Expression>),
+    Statement(WithRange<Statement>),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Block {
+    pub statements: Vec<WithRange<Statement>>,
+    pub return_value: WithRange<Expression>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum Statement {
+    SampleLet {
+        name: WithRange<String>,
+        distribution: WithRange<Expression>,
+    },
+    Let {
+        name: WithRange<String>,
+        value: WithRange<Expression>,
+    },
+    Expression(WithRange<Expression>),
+    FunctionDefinition {
+        name: WithRange<String>,
+        args: Vec<(String, StaticType)>,
+        body: Block,
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub enum Expression {
     Distribution(DistributionSpec),
-    Tuple(Vec<WithRange<Expression>>),
     List(Vec<WithRange<Expression>>),
     UnaryOp {
-        op: UnaryOp,
+        op: WithRange<UnaryOp>,
         operand: Box<WithRange<Expression>>,
     },
     BinaryOp {
-        op: BinaryOp,
+        op: WithRange<BinaryOp>,
         left: Box<WithRange<Expression>>,
         right: Box<WithRange<Expression>>,
     },
     FunctionCall {
-        name: String,
+        name: WithRange<String>,
         args: Vec<WithRange<Expression>>,
     },
+    Reference(String),
+    If {
+        condition: Box<WithRange<Expression>>,
+        then_block: Box<Block>,
+        else_block: Box<Block>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

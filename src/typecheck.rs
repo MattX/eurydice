@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use miette::{Diagnostic, SourceSpan};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::ast::{self, DistributionSpec, Expression, WithRange};
@@ -8,17 +9,18 @@ use crate::ast::{self, DistributionSpec, Expression, WithRange};
 pub fn infer(env: &TypeEnv, expr: &WithRange<Expression>) -> Result<StaticType, TypeError> {
     match &expr.value {
         Expression::Distribution(ds) => Ok(distribution_spec_type(ds)),
-        Expression::Tuple(_) => todo!(),
         Expression::List(exprs) => infer_list(env, exprs),
         Expression::UnaryOp { op, operand } => {
-            infer_application(env, &op.into(), &[*operand.clone()])
+            infer_application(env, &op.value.into(), &[*operand.clone()])
         }
         Expression::BinaryOp { op, left, right } => {
-            infer_application(env, &op.into(), &[*left.clone(), *right.clone()])
+            infer_application(env, &op.value.into(), &[*left.clone(), *right.clone()])
         }
         Expression::FunctionCall { name, args } => {
-            infer_application(env, &Identifier::Function(name.clone()), args)
+            infer_application(env, &Identifier::Function(name.value.clone()), args)
         }
+        Expression::Reference(_) => todo!(),
+        Expression::If { .. } => todo!(),
     }
 }
 
@@ -139,7 +141,7 @@ fn numeric_pair() -> StaticType {
     })
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub enum StaticType {
     // An integer
     Int,
@@ -233,7 +235,7 @@ impl std::fmt::Display for StaticType {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct FunctionSignature {
     pub args: Vec<StaticType>,
     pub ret: Box<StaticType>,
@@ -299,7 +301,7 @@ pub enum SignatureMismatchReason {
     },
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct Function {
     pub overloads: Vec<FunctionSignature>,
     pub has_reducer: bool,
