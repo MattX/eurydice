@@ -1,0 +1,23 @@
+function: number of rolls in S:s to reach L:n {
+    C: 0
+    T: 0
+    loop IDX over {1..#S} {
+        if (T + (IDX@S)) < L {
+            T: T+(IDX@S)
+            C: C+1
+        }
+    }
+    result: C
+}
+
+output [number of rolls in 4d6 to reach 10]
+
+\\\ Result \\\
+
+"output 1",2.3958333333337,0.7317414856708658,1,4
+#,%
+1,5.09259259259
+2,59.9537037037
+3,25.2314814815
+4,9.72222222222
+

@@ -4,7 +4,7 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
-    ast::{self, BinaryOp, DistributionSpec, Expression, UnaryOp, WithRange},
+    ast::{self, BinaryOp, Expression, UnaryOp, WithRange},
     probability::{self, Distribution},
 };
 

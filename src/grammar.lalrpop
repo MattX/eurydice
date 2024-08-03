@@ -1,36 +1,37 @@
 use std::str::FromStr;
-use crate::ast::{WithRange, Expression, DistributionSpec, UnaryOp, BinaryOp, Statement, Block, MetaStatement};
+use crate::ast::{WithRange, Expression, UnaryOp, BinaryOp, Statement, ListLiteralItem, ListLiteral,
+                 FunctionCallItem, FunctionDefinitionItem, apply_string_escapes,
+                 make_function_definition, make_function_call};
 use crate::typecheck::StaticType;
 
 grammar;
 
 match {
     r"\s*" => { }, // The default whitespace skipping is disabled if an `ignore pattern` is specified
-    r"#[^\n\r]*[\n\r]*" => { }, // Skip `# comments`
+    r"\\[^\\]*\\" => { }, // Skip `\ comments \`
     _
 }
 
-pub Program: Vec<MetaStatement> = {};
-
-pub MetaStatement: MetaStatement = {
-    ":type" <e:Expr> => MetaStatement::Type(e),
-    ":out" <e:Expr> => MetaStatement::Out(e),
-    <s:Statement> => MetaStatement::Statement(s),
+pub Body: Vec<WithRange<Statement>> = {
+    <ss:Statement*> => ss,
 };
 
 pub Statement: WithRange<Statement> = {
-    <s:Expr> ";" => WithRange::new(s.range.start, s.range.end, Statement::Expression(s)),
-    <start: @L> <id_start: @L> <id:Identifier> <id_end: @L> "=" <e:Expr> <end: @L> ";" => 
-        WithRange::new(start, end, Statement::Let { name: WithRange::new(id_start, id_end, id), value: e }),
-    <start: @L> <id_start: @L> <id:Identifier> <id_end: @L> "<-" <e:Expr> <end: @L> ";" => 
-        WithRange::new(start, end, Statement::SampleLet { name: WithRange::new(id_start, id_end, id), distribution: e }),
-    <start: @L> "def" <id_start: @L> <id:Identifier> <id_end: @L> "(" <args:Comma<SingleArg>> ")" "{" <b:Block> "}" <end: @L> => 
-        WithRange::new(start, end, Statement::FunctionDefinition { name: WithRange::new(id_start, id_end, id), args, body: b }),
+    <start: @L> <s:StatementInner> <end: @R> => WithRange::new(start, end, s),
 };
 
-pub Block: Block = {
-    <ss:Statement*> <expr:Expr> => Block { statements: ss, return_value: expr },
-}
+pub StatementInner: Statement = {
+    <id_start: @L> <id:VariableIdentifier> <id_end: @L> ":" <e:Expr> => 
+        Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
+    <fd:FunctionDefinition> => fd,
+    "output" <e:Expr> <n:OutputName?> => Statement::Output { value: e, named: n },
+    "result: " <e:Expr> => Statement::Return { value: e },
+    "set" => todo!(),
+};
+
+pub Block: Vec<WithRange<Statement>> = {
+    <ss:Statement*> => ss,
+};
 
 pub Expr: WithRange<Expression> = {
     <start: @L> <e:ExprInner> <end: @R> => WithRange::new(start, end, e),
@@ -38,66 +39,111 @@ pub Expr: WithRange<Expression> = {
 
 pub ExprInner: Expression = {
     #[precedence(level="0")]
-    <ds:DistributionSpec> => Expression::Distribution(ds),
     "(" <e:Expr> ")" => e.value,
     <l:List> => Expression::List(l),
-    <id_start: @L> <id:Identifier> <id_end: @R> "(" <args:Comma<Expr>> ")" =>
-        Expression::FunctionCall { name: WithRange::new(id_start, id_end, id), args },
-    <id:Identifier> => Expression::Reference(id),
+    <fc:FunctionCall> => fc,
+    <id:VariableIdentifier> => Expression::Reference(id),
     #[precedence(level="1")] #[assoc(side="left")]
     <op_start: @L> <o:UnaryOp> <op_end: @R> <start: @L> <e:ExprInner> <end: @R> =>
         Expression::UnaryOp { 
             op: WithRange::new(op_start, op_end, o),
             operand: Box::new(WithRange::new(start, end, e))
         },
-    #[precedence(level="2")] #[assoc(side="right")]
+    #[precedence(level="2")] #[assoc(side="left")]
     <left_start: @L> <left:ExprInner> <left_end: @R>
     <op_start: @L> <o:BinaryOp> <op_end: @R>
-    <right_start: @L> <right:ExprInner> <right_end: @L> => Expression::BinaryOp { 
+    <right_start: @L> <right:ExprInner> <right_end: @L> =>
+        Expression::BinaryOp { 
             op: WithRange::new(op_start, op_end, o),
             left: Box::new(WithRange::new(left_start, left_end, left)),
             right: Box::new(WithRange::new(right_start, right_end, right))
         },
 };
 
-pub DistributionSpec: DistributionSpec = {
-    <n:Num> => DistributionSpec::Constant(n),
-    "d" <sides:Num> => DistributionSpec::Dice { repeat: 1, sides },
-    <repeat:Num> "d" <sides:Num> => DistributionSpec::Dice { repeat, sides },
-};
-
-pub List: Vec<WithRange<Expression>> = {
-    "[" <es:Comma<Expr>> "]" => es,
+pub OutputName: WithRange<String> = {
+    "named" <start: @L> <l:r#""(\\\\|\\"|[^"\\])*""#> <end: @R> =>
+        WithRange::new(start, end, apply_string_escapes(&l[1..l.len()-1]).into()),
 }
 
-pub SingleArg: (String, StaticType) = {
-    <id:Identifier> ":" <t:StaticType> => (id, t),
+pub List: ListLiteral = {
+    "{" <es:Comma<ListItemWithRepeat>> "}" => ListLiteral { items: es },
+}
+
+pub ListItemWithRepeat: (ListLiteralItem, i32) = {
+    <e:ListItem> <r:Repeat?> => (e, r.unwrap_or(1)),
+};
+
+pub Repeat: i32 = {
+    ":" <n:Num> => n
+};
+
+pub ListItem: ListLiteralItem = {
+    <e:Expr> => ListLiteralItem::Expr(e),
+    <start:Num> ".." <end:Num> => ListLiteralItem::Range(start, end),
+};
+
+pub FunctionCall: Expression = {
+    // This is kind of ugly, but if you try to have FunctionCallItem = Expr | Word, the parser
+    // will choke on consecutive expressions. So we say an item is a word or an expression followed
+    // by a word, and then we allow an optional last expression.
+    "[" <items:FunctionCallItem+> <last:Expr?> "]" => {
+        let mut all_items = items.into_iter().flatten().collect::<Vec<_>>();
+        if let Some(last) = last {
+            all_items.push(WithRange::new(last.range.start, last.range.end, FunctionCallItem::Expr(last.value)));
+        }
+        make_function_call(all_items)
+    }
+};
+
+pub FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
+    <start: @L> <w:Word> <end: @R> => vec![WithRange::new(start, end, FunctionCallItem::Word(w))],
+    <e:Expr> <start_word: @L> <w:Word> <end_word: @R> =>
+        vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value)),
+             WithRange::new(start_word, end_word, FunctionCallItem::Word(w))],
+};
+
+pub FunctionDefinition: Statement = {
+    "function:" <items:FunctionDefinitionItem+> "{" <b:Block> "}" => make_function_definition(items, b),
+};
+
+pub FunctionDefinitionItem: WithRange<FunctionDefinitionItem> = {
+    <start: @L> <w:Word> <end: @R> => WithRange::new(start, end, FunctionDefinitionItem::Word(w)),
+    <start: @L> <id:SingleArg> <end: @R> => WithRange::new(start, end, id),
+};
+
+pub SingleArg: FunctionDefinitionItem = {
+    <id:VariableIdentifier> ":" <t:StaticType> => FunctionDefinitionItem::ArgWithType(id, t),
 };
 
 pub StaticType: StaticType = {
-    "int" => StaticType::Int,
-    "list" => StaticType::List,
-    "dist" => StaticType::Dist,
+    "n" => StaticType::Int,
+    "s" => StaticType::List,
+    "d" => StaticType::Dist,
 };
 
 // TOOD: avoid unwrap here
 Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
-Identifier: String = <s:r"(d[a-zA-Z_]|[a-ce-zA-Z_])[a-zA-Z0-9_]*"> => s.to_string();
+VariableIdentifier: String = <s:r"[A_Z][A-Z_]*"> => s.to_string();
+Word: String = <s:r"[a-z][a-z_]+"> => s.to_string();
 UnaryOp: UnaryOp = {
     "-" => UnaryOp::Negate,
     "!" => UnaryOp::Invert,
+    "#" => UnaryOp::Length,
+    "d" => UnaryOp::D,
 };
 BinaryOp: BinaryOp = {
     "+" => BinaryOp::Add,
     "-" => BinaryOp::Sub,
     "*" => BinaryOp::Mul,
     "/" => BinaryOp::Div,
-    "==" => BinaryOp::Eq,
+    "=" => BinaryOp::Eq,
     "!=" => BinaryOp::Ne,
     "<" => BinaryOp::Lt,
     "<=" => BinaryOp::Le,
     ">" => BinaryOp::Gt,
     ">=" => BinaryOp::Ge,
+    "d" => BinaryOp::D,
+    "@" => BinaryOp::At,
 };
 
 Comma<T>: Vec<T> = {

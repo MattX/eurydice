@@ -8,6 +8,12 @@ pub struct Range {
     pub end: usize,
 }
 
+pub fn merge_ranges(range: &[Range]) -> Range {
+    let start = range.iter().map(|r| r.start).min().unwrap();
+    let end = range.iter().map(|r| r.end).max().unwrap();
+    Range { start, end }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WithRange<T> {
     pub value: T,
@@ -25,40 +31,38 @@ impl<T> WithRange<T> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub enum MetaStatement {
-    Type(WithRange<Expression>),
-    Out(WithRange<Expression>),
-    Statement(WithRange<Statement>),
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Block {
-    pub statements: Vec<WithRange<Statement>>,
-    pub return_value: WithRange<Expression>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub enum Statement {
-    SampleLet {
-        name: WithRange<String>,
-        distribution: WithRange<Expression>,
-    },
-    Let {
+    Assignment {
         name: WithRange<String>,
         value: WithRange<Expression>,
     },
-    Expression(WithRange<Expression>),
     FunctionDefinition {
         name: WithRange<String>,
-        args: Vec<(String, StaticType)>,
-        body: Block,
+        args: Vec<WithRange<(String, StaticType)>>,
+        body: Vec<WithRange<Statement>>,
+    },
+    Output {
+        value: WithRange<Expression>,
+        named: Option<WithRange<String>>,
+    },
+    Return {
+        value: WithRange<Expression>,
+    },
+    If {
+        condition: Box<WithRange<Expression>>,
+        then_block: Vec<WithRange<Statement>>,
+        else_block: Option<Vec<WithRange<Statement>>>,
+    },
+    Loop {
+        variable: WithRange<String>,
+        range_expression: Box<WithRange<Expression>>,
+        body: Vec<WithRange<Statement>>,
     }
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub enum Expression {
-    Distribution(DistributionSpec),
-    List(Vec<WithRange<Expression>>),
+    List(ListLiteral),
     UnaryOp {
         op: WithRange<UnaryOp>,
         operand: Box<WithRange<Expression>>,
@@ -73,23 +77,26 @@ pub enum Expression {
         args: Vec<WithRange<Expression>>,
     },
     Reference(String),
-    If {
-        condition: Box<WithRange<Expression>>,
-        then_block: Box<Block>,
-        else_block: Box<Block>,
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub enum DistributionSpec {
-    Constant(i32),
-    Dice { repeat: i32, sides: i32 },
+pub struct ListLiteral {
+    /// (Item, number of repetitions)
+    pub items: Vec<(ListLiteralItem, i32)>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum ListLiteralItem {
+    Expr(WithRange<Expression>),
+    Range(i32, i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum UnaryOp {
     Negate,
     Invert,
+    Length,
+    D,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -104,9 +111,97 @@ pub enum BinaryOp {
     Le,
     Gt,
     Ge,
+    D,
+    At,
 }
 
-// Prints the code in sexpr
+pub fn apply_string_escapes(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('t') => result.push('\t'),
+                Some('r') => result.push('\r'),
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some(c) => {
+                    result.push('\\');
+                    result.push(c);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+#[derive(Debug, Clone)]
+pub enum FunctionDefinitionItem {
+    Word(String),
+    ArgWithType(String, StaticType),
+}
+
+pub fn make_function_definition(
+    items: Vec<WithRange<FunctionDefinitionItem>>,
+    body: Vec<WithRange<Statement>>,
+) -> Statement {
+    let range_start = items.first().map(|i| i.range.start).expect("empty function definition");
+    let range_end = items.last().map(|i| i.range.end).expect("empty function definition");
+    let mut name = Vec::new();
+    let mut args = Vec::new();
+    for item in items.into_iter() {
+        match item.value {
+            FunctionDefinitionItem::Word(word) => {
+                name.push(word);
+            }
+            FunctionDefinitionItem::ArgWithType(arg, ty) => {
+                name.push("{}".to_string());
+                args.push(WithRange::new(item.range.start, item.range.end, (arg, ty)));
+            }
+        }
+    }
+    Statement::FunctionDefinition {
+        name: WithRange::new(range_start, range_end, name.join(" ")),
+        args,
+        body,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum FunctionCallItem {
+    Word(String),
+    Expr(Expression),
+}
+
+pub fn make_function_call(
+    items: Vec<WithRange<FunctionCallItem>>,
+) -> Expression {
+    let range_start = items.first().map(|i| i.range.start).expect("empty function call");
+    let range_end = items.last().map(|i| i.range.end).expect("empty function call");
+    let mut name = Vec::new();
+    let mut args = Vec::new();
+    for item in items.into_iter() {
+        match item.value {
+            FunctionCallItem::Word(word) => {
+                name.push(word);
+            }
+            FunctionCallItem::Expr(expr) => {
+                name.push("{}".to_string());
+                args.push(WithRange::new(item.range.start, item.range.end, expr));
+            }
+        }
+    }
+    Expression::FunctionCall {
+        name: WithRange::new(range_start, range_end, name.join(" ")),
+        args,
+    }
+}
+
+/// Prints the code in sexpr
 pub fn print_expression<T>(expression: &T) -> String
 where
     T: serde::ser::Serialize,
