@@ -85,6 +85,7 @@ where
     f: F,
 }
 
+/// Converts a distribution represented as counts into a distribution represented as probabilities.
 pub fn counter_to_probability<S>(counter: &HashMap<S, Natural>) -> HashMap<S, f64>
 where
     S: Clone + Hash + Eq,
@@ -118,6 +119,66 @@ pub const SUM_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper 
     initial_state: 0,
     f: sum_mapper,
 };
+
+fn product_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
+    state * outcome.pow(count as u32)
+}
+
+/// Mapper that multiplies the outcomes.
+pub const PRODUCT_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper {
+    initial_state: 1,
+    f: product_mapper,
+};
+
+fn max_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
+    (*state).max(outcome)
+}
+
+/// Mapper that takes the maximum of the outcomes.
+pub const MAX_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper {
+    initial_state: i32::MIN,
+    f: max_mapper,
+};
+
+fn min_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
+    (*state).min(outcome)
+}
+
+/// Mapper that takes the minimum of the outcomes.
+pub const MIN_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper {
+    initial_state: i32::MAX,
+    f: min_mapper,
+};
+
+/// The first value represents the current sum, or None if the target is already reached.
+/// The second value represents the number of rolls made so far.
+type MaxDiceToReachState = (Option<i32>, i32);
+
+/// Returns a mapper that calculates the minimum number of dice to sum, starting from the
+/// lowest dice, to reach the target.
+pub fn make_max_dice_to_reach_mapper(
+    target: i32,
+) -> StateMapper<MaxDiceToReachState, impl Fn(&MaxDiceToReachState, i32, i32) -> MaxDiceToReachState>
+{
+    StateMapper {
+        initial_state: (Some(0), 0),
+        f: move |state, outcome, count| {
+            let (sum, rolls) = state;
+            let sum = match sum {
+                Some(sum) => sum,
+                None => {
+                    return *state;
+                }
+            };
+            let count_needed = (target - sum + outcome - 1) / outcome;
+            if count_needed <= count {
+                (None, rolls + count_needed)
+            } else {
+                (Some(sum + count * outcome), rolls + count)
+            }
+        },
+    }
+}
 
 /// Calculate binomial coefficient n choose k, with value caching.
 ///
@@ -192,15 +253,52 @@ mod tests {
     fn test_sum_1d6() {
         let pool = Pool { n: 1, sides: 6 };
         let result = pool.apply(SUM_MAPPER);
-        assert_eq!(result, to_counter(vec![(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)]));
+        assert_eq!(
+            result,
+            to_counter(vec![(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)])
+        );
     }
 
     #[test]
     fn test_sum_2d6() {
         let pool = Pool { n: 2, sides: 6 };
         let result = pool.apply(SUM_MAPPER);
-        assert_eq!(result, to_counter(vec![
-            (2, 1), (3, 2), (4, 3), (5, 4), (6, 5), (7, 6), (8, 5), (9, 4), (10, 3), (11, 2), (12, 1)
-        ]));
+        assert_eq!(
+            result,
+            to_counter(vec![
+                (2, 1),
+                (3, 2),
+                (4, 3),
+                (5, 4),
+                (6, 5),
+                (7, 6),
+                (8, 5),
+                (9, 4),
+                (10, 3),
+                (11, 2),
+                (12, 1)
+            ])
+        );
+    }
+
+    #[test]
+    fn test_make_max_dice_to_reach_mapper() {
+        let mapper = make_max_dice_to_reach_mapper(10);
+        let result = Pool { n: 3, sides: 6 }.apply(mapper);
+        let mut keep_count_only = HashMap::new();
+        for (k, v) in result {
+            // If the sum is None, we've already reached the target. Replace with a number of rolls.
+            // Otherwise, return None as we haven't reached the target.
+            let key = if k.0.is_some() { None } else { Some(k.1) };
+            *keep_count_only.entry(key).or_default() += v;
+        }
+        assert_eq!(
+            keep_count_only,
+            to_counter(vec![
+                (None, 81usize.into()),
+                (Some(2), 11usize.into()),
+                (Some(3), 124usize.into())
+            ])
+        )
     }
 }
