@@ -1,8 +1,8 @@
 use std::str::FromStr;
 use crate::ast::{WithRange, Expression, UnaryOp, BinaryOp, Statement, ListLiteralItem, ListLiteral,
-                 FunctionCallItem, FunctionDefinitionItem, apply_string_escapes,
+                 FunctionCallItem, FunctionDefinitionItem, FunctionDefinition, StaticType,
+                 apply_string_escapes,
                  make_function_definition, make_function_call};
-use crate::typecheck::StaticType;
 
 grammar;
 
@@ -23,9 +23,9 @@ pub Statement: WithRange<Statement> = {
 pub StatementInner: Statement = {
     <id_start: @L> <id:VariableIdentifier> <id_end: @L> ":" <e:Expr> => 
         Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
-    <fd:FunctionDefinition> => fd,
+    <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
     "output" <e:Expr> <n:OutputName?> => Statement::Output { value: e, named: n },
-    "result: " <e:Expr> => Statement::Return { value: e },
+    "result:" <e:Expr> => Statement::Return { value: e },
     "set" => todo!(),
 };
 
@@ -43,6 +43,7 @@ pub ExprInner: Expression = {
     <l:List> => Expression::List(l),
     <fc:FunctionCall> => fc,
     <id:VariableIdentifier> => Expression::Reference(id),
+    <n:Num> => Expression::Int(n),
     #[precedence(level="1")] #[assoc(side="left")]
     <op_start: @L> <o:UnaryOp> <op_end: @R> <start: @L> <e:ExprInner> <end: @R> =>
         Expression::UnaryOp { 
@@ -141,7 +142,7 @@ pub FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
              WithRange::new(start_word, end_word, FunctionCallItem::Word(w))],
 };
 
-pub FunctionDefinition: Statement = {
+pub FunctionDefinition: FunctionDefinition = {
     "function:" <items:FunctionDefinitionItem+> "{" <b:Block> "}" => make_function_definition(items, b),
 };
 
@@ -156,8 +157,8 @@ pub SingleArg: FunctionDefinitionItem = {
 
 pub StaticType: StaticType = {
     "n" => StaticType::Int,
-    "s" => StaticType::List,
-    "d" => StaticType::Dist,
+    "s" => StaticType::Sequence,
+    "d" => StaticType::Distribution,
 };
 
 // TOOD: avoid unwrap here

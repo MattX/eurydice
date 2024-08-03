@@ -34,11 +34,7 @@ pub enum Statement {
         name: WithRange<String>,
         value: WithRange<Expression>,
     },
-    FunctionDefinition {
-        name: WithRange<String>,
-        args: Vec<WithRange<(String, StaticType)>>,
-        body: Vec<WithRange<Statement>>,
-    },
+    FunctionDefinition(FunctionDefinition),
     Output {
         value: WithRange<Expression>,
         named: Option<WithRange<String>>,
@@ -59,7 +55,15 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct FunctionDefinition {
+    pub name: WithRange<String>,
+    pub args: Vec<WithRange<(String, StaticType)>>,
+    pub body: Vec<WithRange<Statement>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub enum Expression {
+    Int(i32),
     List(ListLiteral),
     UnaryOp {
         op: WithRange<UnaryOp>,
@@ -165,7 +169,7 @@ pub enum FunctionDefinitionItem {
 pub fn make_function_definition(
     items: Vec<WithRange<FunctionDefinitionItem>>,
     body: Vec<WithRange<Statement>>,
-) -> Statement {
+) -> FunctionDefinition {
     let range_start = items.first().map(|i| i.range.start).expect("empty function definition");
     let range_end = items.last().map(|i| i.range.end).expect("empty function definition");
     let mut name = Vec::new();
@@ -181,7 +185,7 @@ pub fn make_function_definition(
             }
         }
     }
-    Statement::FunctionDefinition {
+    FunctionDefinition {
         name: WithRange::new(range_start, range_end, name.join(" ")),
         args,
         body,

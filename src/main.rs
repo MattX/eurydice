@@ -3,7 +3,6 @@ mod dice;
 mod eval;
 mod output;
 mod probability;
-mod util;
 
 use lalrpop_util::lalrpop_mod;
 use miette::{Diagnostic, GraphicalReportHandler};
@@ -12,40 +11,45 @@ use output::print_distribution;
 lalrpop_mod!(grammar);
 
 fn main() {
-    let parser = grammar::ExprParser::new();
+    let parser = grammar::BodyParser::new();
     let mut rl = rustyline::DefaultEditor::new().unwrap();
+    let mut evaluator = eval::Evaluator::new();
     while let Ok(line) = rl.readline("> ") {
-        let expr = match parser.parse(&line) {
+        let statements = match parser.parse(&line) {
             Ok(expr) => expr,
             Err(err) => {
                 eprintln!("Error: {}", err);
                 continue;
             }
         };
-        println!("{}", ast::print_expression(&expr));
-        let result = match eval::Evaluator::new().evaluate(&expr) {
-            Ok(distributions) => distributions,
-            Err(e) => {
-                print_diagnostic(e, &line);
-                continue;
-            }
-        };
-        match result {
-            eval::RuntimeValue::Int(i) => println!("{}", i),
-            eval::RuntimeValue::List(is) => println!(
-                "[{}]",
-                is.iter()
-                    .map(|i| i.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            eval::RuntimeValue::Distribution(d) => {
-                for distribution in d.iter() {
-                    print_distribution(distribution);
+        println!("{}", ast::print_expression(&statements));
+        for statement in statements {
+            match evaluator.execute(&statement) {
+                Ok(()) => {}
+                Err(e) => {
+                    print_diagnostic(e, &line);
+                    continue;
                 }
             }
-            eval::RuntimeValue::Primitive(_) => println!("#<primitive>"),
-            eval::RuntimeValue::Function(_) => println!("#<function>"),
+        }
+        for result in evaluator.get_outputs() {
+            match result {
+                eval::RuntimeValue::Int(i) => println!("{}", i),
+                eval::RuntimeValue::List(is) => println!(
+                    "[{}]",
+                    is.iter()
+                        .map(|i| i.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                eval::RuntimeValue::Distribution(d) => {
+                    for distribution in d.iter() {
+                        print_distribution(distribution);
+                    }
+                }
+                eval::RuntimeValue::Primitive(_) => println!("#<primitive>"),
+                eval::RuntimeValue::Function { .. } => println!("#<function>"),
+            }
         }
     }
 }
