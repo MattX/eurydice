@@ -3,7 +3,6 @@ mod dice;
 mod eval;
 mod output;
 mod probability;
-mod typecheck;
 mod util;
 
 use lalrpop_util::lalrpop_mod;
@@ -24,13 +23,6 @@ fn main() {
             }
         };
         println!("{}", ast::print_expression(&expr));
-        match typecheck::infer(&typecheck::global_env(), &expr) {
-            Ok(_) => {}
-            Err(e) => {
-                print_diagnostic(e, &line);
-                continue;
-            }
-        }
         let result = match eval::Evaluator::new().evaluate(&expr) {
             Ok(distributions) => distributions,
             Err(e) => {

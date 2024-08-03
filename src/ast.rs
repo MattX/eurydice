@@ -1,7 +1,5 @@
 use serde::Serialize;
 
-use crate::typecheck::StaticType;
-
 #[derive(Debug, Clone, Copy)]
 pub struct Range {
     pub start: usize,
@@ -88,7 +86,7 @@ pub struct ListLiteral {
 #[derive(Debug, Clone, Serialize)]
 pub enum ListLiteralItem {
     Expr(WithRange<Expression>),
-    Range(i32, i32),
+    Range(WithRange<Expression>, WithRange<Expression>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -113,6 +111,8 @@ pub enum BinaryOp {
     Ge,
     D,
     At,
+    Or,
+    And,
 }
 
 pub fn apply_string_escapes(s: &str) -> String {
@@ -137,6 +137,23 @@ pub fn apply_string_escapes(s: &str) -> String {
         }
     }
     result
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum StaticType {
+    Int,
+    Sequence,
+    Distribution,
+}
+
+impl std::fmt::Display for StaticType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StaticType::Int => write!(f, "int"),
+            StaticType::Sequence => write!(f, "sequence"),
+            StaticType::Distribution => write!(f, "distribution"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -49,9 +49,48 @@ pub ExprInner: Expression = {
             op: WithRange::new(op_start, op_end, o),
             operand: Box::new(WithRange::new(start, end, e))
         },
+
+    // And now get ready for all the binary operators
+    // Yes there is probably a better way to do this. 
     #[precedence(level="2")] #[assoc(side="left")]
     <left_start: @L> <left:ExprInner> <left_end: @R>
-    <op_start: @L> <o:BinaryOp> <op_end: @R>
+    <op_start: @L> <o:BinaryOp0> <op_end: @R>
+    <right_start: @L> <right:ExprInner> <right_end: @L> =>
+        Expression::BinaryOp { 
+            op: WithRange::new(op_start, op_end, o),
+            left: Box::new(WithRange::new(left_start, left_end, left)),
+            right: Box::new(WithRange::new(right_start, right_end, right))
+        },
+    #[precedence(level="3")] #[assoc(side="left")]
+    <left_start: @L> <left:ExprInner> <left_end: @R>
+    <op_start: @L> <o:BinaryOp1> <op_end: @R>
+    <right_start: @L> <right:ExprInner> <right_end: @L> =>
+        Expression::BinaryOp { 
+            op: WithRange::new(op_start, op_end, o),
+            left: Box::new(WithRange::new(left_start, left_end, left)),
+            right: Box::new(WithRange::new(right_start, right_end, right))
+        },
+    #[precedence(level="4")] #[assoc(side="left")]
+    <left_start: @L> <left:ExprInner> <left_end: @R>
+    <op_start: @L> <o:BinaryOp2> <op_end: @R>
+    <right_start: @L> <right:ExprInner> <right_end: @L> =>
+        Expression::BinaryOp { 
+            op: WithRange::new(op_start, op_end, o),
+            left: Box::new(WithRange::new(left_start, left_end, left)),
+            right: Box::new(WithRange::new(right_start, right_end, right))
+        },
+    #[precedence(level="5")] #[assoc(side="left")]
+    <left_start: @L> <left:ExprInner> <left_end: @R>
+    <op_start: @L> <o:BinaryOp3> <op_end: @R>
+    <right_start: @L> <right:ExprInner> <right_end: @L> =>
+        Expression::BinaryOp { 
+            op: WithRange::new(op_start, op_end, o),
+            left: Box::new(WithRange::new(left_start, left_end, left)),
+            right: Box::new(WithRange::new(right_start, right_end, right))
+        },
+    #[precedence(level="6")] #[assoc(side="left")]
+    <left_start: @L> <left:ExprInner> <left_end: @R>
+    <op_start: @L> <o:BinaryOp4> <op_end: @R>
     <right_start: @L> <right:ExprInner> <right_end: @L> =>
         Expression::BinaryOp { 
             op: WithRange::new(op_start, op_end, o),
@@ -79,7 +118,7 @@ pub Repeat: i32 = {
 
 pub ListItem: ListLiteralItem = {
     <e:Expr> => ListLiteralItem::Expr(e),
-    <start:Num> ".." <end:Num> => ListLiteralItem::Range(start, end),
+    <start:Expr> ".." <end:Expr> => ListLiteralItem::Range(start, end),
 };
 
 pub FunctionCall: Expression = {
@@ -131,19 +170,29 @@ UnaryOp: UnaryOp = {
     "#" => UnaryOp::Length,
     "d" => UnaryOp::D,
 };
-BinaryOp: BinaryOp = {
-    "+" => BinaryOp::Add,
-    "-" => BinaryOp::Sub,
+BinaryOp0: BinaryOp = {
+    "d" => BinaryOp::D,
+    "@" => BinaryOp::At,
+};
+BinaryOp1: BinaryOp = {
     "*" => BinaryOp::Mul,
     "/" => BinaryOp::Div,
+};
+BinaryOp2: BinaryOp = {
+    "+" => BinaryOp::Add,
+    "-" => BinaryOp::Sub,
+};
+BinaryOp3: BinaryOp = {
+    "&" => BinaryOp::And,
+    "|" => BinaryOp::Or,
+}
+BinaryOp4: BinaryOp = {
     "=" => BinaryOp::Eq,
     "!=" => BinaryOp::Ne,
     "<" => BinaryOp::Lt,
     "<=" => BinaryOp::Le,
     ">" => BinaryOp::Gt,
     ">=" => BinaryOp::Ge,
-    "d" => BinaryOp::D,
-    "@" => BinaryOp::At,
 };
 
 Comma<T>: Vec<T> = {
