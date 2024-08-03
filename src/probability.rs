@@ -200,9 +200,9 @@ impl Distribution {
                 let dist = dist?;
                 let mut new_probabilities = BTreeMap::new();
 
-                for (outcome1, prob1) in &(*acc).probabilities {
+                for (outcome1, prob1) in &acc.probabilities {
                     for (outcome2, prob2) in &dist.probabilities {
-                        let new_outcome = f(&outcome1, outcome2)?;
+                        let new_outcome = f(outcome1, outcome2)?;
                         let new_prob = prob1 * prob2;
                         *new_probabilities.entry(new_outcome).or_insert(0.0) += new_prob;
                     }

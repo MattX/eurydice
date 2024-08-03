@@ -1,4 +1,5 @@
 mod ast;
+mod dice;
 mod eval;
 mod output;
 mod probability;
