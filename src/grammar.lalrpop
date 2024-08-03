@@ -109,12 +109,13 @@ pub List: ListLiteral = {
     "{" <es:Comma<ListItemWithRepeat>> "}" => ListLiteral { items: es },
 }
 
-pub ListItemWithRepeat: (ListLiteralItem, i32) = {
+pub ListItemWithRepeat: (ListLiteralItem, usize) = {
     <e:ListItem> <r:Repeat?> => (e, r.unwrap_or(1)),
 };
 
-pub Repeat: i32 = {
-    ":" <n:Num> => n
+pub Repeat: usize = {
+    // TODO disallow negative numbers
+    ":" <n:Num> => n as usize
 };
 
 pub ListItem: ListLiteralItem = {

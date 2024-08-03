@@ -84,7 +84,7 @@ pub enum Expression {
 #[derive(Debug, Clone, Serialize)]
 pub struct ListLiteral {
     /// (Item, number of repetitions)
-    pub items: Vec<(ListLiteralItem, i32)>,
+    pub items: Vec<(ListLiteralItem, usize)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -258,7 +258,19 @@ fn to_doc(value: &lexpr::Value) -> pretty::RcDoc {
             doc = doc.append(inner_doc).append(pretty::RcDoc::text(")"));
             doc
         }
-        lexpr::Value::Vector(_) => panic!("should not have vectors in code"),
+        lexpr::Value::Vector(elements) => {
+            let mut doc = pretty::RcDoc::text("#(");
+            let mut inner_doc = pretty::RcDoc::<()>::nil();
+            for (i, value) in elements.iter().enumerate() {
+                if i > 0 {
+                    inner_doc = inner_doc.append(pretty::RcDoc::line());
+                }
+                inner_doc = inner_doc.append(to_doc(value));
+            }
+            inner_doc = inner_doc.nest(1).group();
+            doc = doc.append(inner_doc).append(pretty::RcDoc::text(")"));
+            doc
+        }
         _ => pretty::RcDoc::text(lexpr::to_string(value).unwrap()),
     }
 }

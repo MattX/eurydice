@@ -6,20 +6,65 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
-    ast::{self, BinaryOp, Expression, FunctionDefinition, Statement, UnaryOp, WithRange},
-    probability::{self, Distribution},
+    ast::{
+        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, Statement, StaticType,
+        UnaryOp, WithRange,
+    },
+    probability::{self, Distribution, JointDistribution, Outcome},
 };
 
 #[derive(Debug, Clone)]
 pub enum RuntimeValue {
     Int(i32),
     List(Rc<Vec<i32>>),
-    Distribution(Rc<Vec<Distribution>>),
+    Distribution(Rc<JointDistribution>),
     Primitive(fn(&[RuntimeValue]) -> Result<RuntimeValue, PrimitiveError>),
     // TODO ideally this would instead be a reference into the AST, but what can we do
     Function {
         definition: Rc<FunctionDefinition>,
         env: RcValEnv,
+    },
+}
+
+impl RuntimeValue {
+    fn runtime_type(&self) -> RuntimeType {
+        match self {
+            RuntimeValue::Int(_) => RuntimeType::Int,
+            RuntimeValue::List(_) => RuntimeType::Sequence,
+            RuntimeValue::Distribution(_) => RuntimeType::Distribution,
+            RuntimeValue::Primitive(_) => RuntimeType::Function,
+            RuntimeValue::Function { .. } => RuntimeType::Function,
+        }
+    }
+
+    fn sum(&self) -> RuntimeValue {
+        match self {
+            RuntimeValue::Int(i) => RuntimeValue::Int(*i),
+            RuntimeValue::List(list) => {
+                let sum = list.iter().sum();
+                RuntimeValue::Int(sum)
+            }
+            RuntimeValue::Distribution(d) => {
+                let sum = d.sum();
+                RuntimeValue::Distribution(Rc::new(JointDistribution::from(sum)))
+            }
+            _ => panic!("sum called on {}", self.runtime_type()),
+        }
+    }
+
+    fn to_list(&self, repeat: usize) -> Vec<i32> {
+        match self {
+            RuntimeValue::Int(i) => vec![*i; repeat],
+            RuntimeValue::List(list) => Rc::clone(list).repeat(repeat),
+            RuntimeValue::Distribution(d) => d
+                .sum()
+                .probabilities
+                .keys()
+                .map(|i| i.0[0])
+                .collect::<Vec<_>>()
+                .repeat(repeat),
+            _ => panic!("to_list called on {}", self.runtime_type()),
+        }
     }
 }
 
@@ -41,15 +86,28 @@ impl From<Vec<i32>> for RuntimeValue {
     }
 }
 
-impl From<Rc<Vec<Distribution>>> for RuntimeValue {
-    fn from(value: Rc<Vec<Distribution>>) -> Self {
-        RuntimeValue::Distribution(value)
+impl From<JointDistribution> for RuntimeValue {
+    fn from(value: JointDistribution) -> Self {
+        RuntimeValue::Distribution(Rc::new(value))
     }
 }
 
-impl From<Vec<Distribution>> for RuntimeValue {
-    fn from(value: Vec<Distribution>) -> Self {
-        RuntimeValue::Distribution(Rc::new(value))
+#[derive(Debug, Clone, Copy)]
+pub enum RuntimeType {
+    Int,
+    Sequence,
+    Distribution,
+    Function,
+}
+
+impl std::fmt::Display for RuntimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeType::Int => write!(f, "int"),
+            RuntimeType::Sequence => write!(f, "sequence"),
+            RuntimeType::Distribution => write!(f, "distribution"),
+            RuntimeType::Function => write!(f, "function"),
+        }
     }
 }
 
@@ -127,7 +185,10 @@ impl Evaluator {
     pub fn execute(&mut self, statement: &WithRange<ast::Statement>) -> Result<(), RuntimeError> {
         let eval_context = EvalContext::new(Rc::clone(&self.global_env));
         let result = self.execute_statement(&eval_context, statement)?;
-        debug_assert!(result.is_none(), "value returned from a top-level statement");
+        debug_assert!(
+            result.is_none(),
+            "value returned from a top-level statement"
+        );
         Ok(())
     }
 
@@ -150,7 +211,9 @@ impl Evaluator {
                     .insert(name.value.clone(), value);
             }
             ast::Statement::FunctionDefinition(fd) => {
-                let env = Rc::new(RefCell::new(ValEnv::with_parent(Rc::clone(&eval_context.env))));
+                let env = Rc::new(RefCell::new(ValEnv::with_parent(Rc::clone(
+                    &eval_context.env,
+                ))));
                 let value = RuntimeValue::Function {
                     // TODO make the parser parse the FD directly into an Rc
                     definition: Rc::new(fd.clone()),
@@ -185,19 +248,26 @@ impl Evaluator {
                 else_block,
             } => {
                 let condition = self.evaluate(eval_context, condition)?;
-                if let RuntimeValue::Int(0) = condition {
-                    for statement in else_block.iter().flatten() {
-                        let res = self.execute_statement(eval_context, statement)?;
-                        if res.is_some() {
-                            return Ok(res);
-                        }
+                let cond_value = match condition {
+                    RuntimeValue::Int(i) => i,
+                    _ => {
+                        return Err(RuntimeError::InvalidCondition {
+                            range: statement.range.into(),
+                            found: condition.runtime_type(),
+                        })
                     }
+                };
+                let block = if cond_value != 0 {
+                    then_block
+                } else if let Some(block) = else_block {
+                    block
                 } else {
-                    for statement in then_block {
-                        let res = self.execute_statement(eval_context, statement)?;
-                        if res.is_some() {
-                            return Ok(res);
-                        }
+                    return Ok(None);
+                };
+                for statement in block {
+                    let res = self.execute_statement(eval_context, statement)?;
+                    if res.is_some() {
+                        return Ok(res);
                     }
                 }
             }
@@ -207,20 +277,26 @@ impl Evaluator {
                 body,
             } => {
                 let range = self.evaluate(eval_context, range_expression)?;
-                if let RuntimeValue::List(range) = range {
-                    for value in range.iter() {
-                        eval_context
-                            .env
-                            .borrow_mut()
-                            .insert(variable.value.clone(), RuntimeValue::Int(value.clone()));
-                        for statement in body {
-                            self.execute_statement(eval_context, statement)?;
+                let range = match range {
+                    RuntimeValue::List(range) => range,
+                    _ => {
+                        return Err(RuntimeError::LoopOverNonSequence {
+                            range: range_expression.range.into(),
+                            found: range.runtime_type(),
+                        })
+                    }
+                };
+                for value in range.iter() {
+                    eval_context
+                        .env
+                        .borrow_mut()
+                        .insert(variable.value.clone(), RuntimeValue::Int(value.clone()));
+                    for statement in body {
+                        let res = self.execute_statement(eval_context, statement)?;
+                        if res.is_some() {
+                            return Ok(res);
                         }
                     }
-                } else {
-                    return Err(RuntimeError::EmptyInput {
-                        range: range_expression.range.into(),
-                    });
                 }
             }
         }
@@ -235,50 +311,127 @@ impl Evaluator {
         match &expression.value {
             Expression::UnaryOp { op, operand } => {
                 let value = self.evaluate(eval_context, operand)?;
-                self.apply_unary_op(op, &value, expression.range)
+                apply_unary_op(op, &value, expression.range)
             }
             Expression::BinaryOp { op, left, right } => {
                 let left_value = self.evaluate(eval_context, left)?;
                 let right_value = self.evaluate(eval_context, right)?;
-                self.apply_binary_op(op, &left_value, &right_value, expression.range)
+                apply_binary_op(op, &left_value, &right_value, expression.range)
             }
             Expression::List(list) => {
-                todo!()
-            },
-            Expression::FunctionCall { name, args } => todo!(),
-            Expression::Reference(name) => {
-                eval_context.env.borrow().get(name).ok_or_else(|| {
-                    RuntimeError::UndefinedReference {
-                        range: expression.range.into(),
-                        name: name.clone(),
-                    }
-                })
+                let elems = list
+                    .items
+                    .iter()
+                    .map(|item| self.evaluate_list_literal_item(eval_context, item))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<i32>>();
+                Ok(elems.into())
             }
+            Expression::FunctionCall { name, args } => todo!(),
+            Expression::Reference(name) => eval_context.env.borrow().get(name).ok_or_else(|| {
+                RuntimeError::UndefinedReference {
+                    range: expression.range.into(),
+                    name: name.clone(),
+                }
+            }),
             Expression::Int(i) => Ok(RuntimeValue::Int(*i)),
         }
     }
 
-    fn apply_unary_op(
-        &self,
-        op: &WithRange<UnaryOp>,
-        operand: &RuntimeValue,
-        range: ast::Range,
-    ) -> Result<RuntimeValue, RuntimeError> {
-        todo!()
+    /// Evaluates a list literal item.
+    ///
+    /// This doesn't take precomputed values, because literals can contain special non-expression syntax.
+    fn evaluate_list_literal_item(
+        &mut self,
+        eval_context: &EvalContext,
+        item: &(ListLiteralItem, usize),
+    ) -> Result<Vec<i32>, RuntimeError> {
+        let (item, repeats) = item;
+        let base = match item {
+            ListLiteralItem::Expr(expression) => self.evaluate(eval_context, &expression),
+            ListLiteralItem::Range(start_expr, end_expr) => {
+                let start = self.evaluate(eval_context, start_expr)?;
+                let start = match start {
+                    RuntimeValue::Int(i) => i,
+                    _ => {
+                        return Err(RuntimeError::RangeHasNonSequenceEndpoints {
+                            range: start_expr.range.into(),
+                            found: start.runtime_type(),
+                        })
+                    }
+                };
+                let end = self.evaluate(eval_context, end_expr)?;
+                let end = match end {
+                    RuntimeValue::Int(i) => i,
+                    _ => {
+                        return Err(RuntimeError::RangeHasNonSequenceEndpoints {
+                            range: end_expr.range.into(),
+                            found: end.runtime_type(),
+                        })
+                    }
+                };
+                Ok(RuntimeValue::List(Rc::new((start..=end).collect())))
+            }
+        }?;
+        Ok(base.to_list(*repeats))
     }
+}
 
-    fn apply_binary_op(
-        &self,
-        op: &WithRange<BinaryOp>,
-        left: &RuntimeValue,
-        right: &RuntimeValue,
-        range: ast::Range,
-    ) -> Result<RuntimeValue, RuntimeError> {
-        todo!()
+fn apply_unary_op(
+    op: &WithRange<UnaryOp>,
+    operand: &RuntimeValue,
+    range: ast::Range,
+) -> Result<RuntimeValue, RuntimeError> {
+    match &op.value {
+        UnaryOp::D => make_d(None, operand),
+        _ => todo!(),
     }
+}
 
-    fn make_list(&self, values: Vec<RuntimeValue>) -> Result<RuntimeValue, RuntimeError> {
-        todo!()
+fn apply_binary_op(
+    op: &WithRange<BinaryOp>,
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+    range: ast::Range,
+) -> Result<RuntimeValue, RuntimeError> {
+    match &op.value {
+        BinaryOp::D => make_d(Some(left), right),
+        _ => todo!(),
+    }
+}
+
+/// Executes the unary or binary version of the _n_ `d` _m_ operator.
+fn make_d(
+    left: Option<&RuntimeValue>,
+    right: &RuntimeValue,
+) -> Result<RuntimeValue, RuntimeError> {
+    let single_dist = match right {
+        RuntimeValue::Int(i) => JointDistribution::from(Distribution::uniform(1, *i)),
+        RuntimeValue::List(lst) => JointDistribution::from(Distribution::uniform_items(lst)),
+        RuntimeValue::Distribution(d) => (**d).clone(),
+        _ => panic!("make_d called on {}", right.runtime_type()),
+    };
+    match left {
+        Some(RuntimeValue::Int(i)) => Ok(replicate(single_dist, *i).into()),
+        Some(RuntimeValue::List(lst)) => Ok(replicate(single_dist, lst.iter().sum()).into()),
+        Some(RuntimeValue::Distribution(left_dist)) => {
+            Ok(JointDistribution::from(left_dist.sum()).flat_map(|i| replicate(single_dist.clone(), i.0[0]).cross_product()).into())
+        }
+        Some(t) => panic!("make_d called on {}", t.runtime_type()),
+        None => Ok(single_dist.into()),
+    }
+}
+
+fn replicate(distribution: JointDistribution, count: i32) -> JointDistribution {
+    let negative = count < 0;
+    let abs_count = count.abs() as usize; 
+    let dist = distribution.replicate(abs_count);
+    if negative {
+        dist.map_each(|d| Outcome(d.0.iter().map(|i| -i).collect()))
+    } else {
+        dist
     }
 }
 
@@ -333,8 +486,9 @@ pub enum RuntimeError {
 
     #[error("Loops must iterate over sequences")]
     LoopOverNonSequence {
-        #[label = "Loops must iterate over sequences"]
+        #[label = "This is a {found}."]
         range: SourceSpan,
+        found: RuntimeType,
     },
 
     #[error("Reference to undefined to variable {name}")]
@@ -342,6 +496,20 @@ pub enum RuntimeError {
         #[label = "Variable not defined"]
         range: SourceSpan,
         name: String,
+    },
+
+    #[error("Conditions to `if` statements must be numbers.")]
+    InvalidCondition {
+        #[label = "This is a {found}."]
+        range: SourceSpan,
+        found: RuntimeType,
+    },
+
+    #[error("Both sides of a range constructor must evaluate to numbers.")]
+    RangeHasNonSequenceEndpoints {
+        #[label = "This is a {found}."]
+        range: SourceSpan,
+        found: RuntimeType,
     },
 }
 

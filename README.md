@@ -1,99 +1,32 @@
 # Everydice documentation
 
-## Examples
-
-```
-2d6 + 1
-```
-
-```
-d{-1..1}
-```
-
-```
-sum(drop_lowest(3d6, 1))
-```
-
-```
-coin <- d2
-if coin == 1 { d4 } else { 21-d4 }
-```
-
-```
-highest_and_sum = [0, 0]
-for i in [1..20] {
-    highest_and_sum = do {
-        roll <- d6
-        [highest, sum] <- highest_and_sum
-        [max(roll, highest), roll + sum]
-    }
-}
-highest_and_sum
-```
+This is an implementation of the AnyDice DSL.
 
 ## Types
 
-There are essentially 4 types of values:
+* Ints are 32-bit signed integers.
+* Sequences are ordered and can have repeated values.
+* Dice are distributions over sequences (possibly of length 1), and possibly weighted.
 
-* `int` is a plain integer
-* `list` is a list of integers
-* `dist` is a probability distribution over lists of integers. The list can be one integer long. To save space, distributions are internally represented as lists of distribitions, where each component of the list is independent of the others.<br/>For instance, `2d6` has runtime type `dist[1, 1]`, indicating that it is a distribution over lists of length 2 made up of two independent components. Lists can be `dist[?]`, but these are less useful.
-* Functions are first-class values as well.
+## Literals
 
-### Subtyping
-
-Everydice has a notion of subtyping: `int <: list <: dist`.
-
-Lists of lists and lists of dists do not exist. Attempting to place lists in lists will result in the lists being concatenated, for instance:
-
-`[[1, 2, 3], 4, [5, 6, 7]]`
-
-evaluates to
-
-`[1, 2, 3, 4, 5, 6, 7]`.
-
-Similarly, putting a distribution in a list will result in the whole list becoming a distribution: `[1, 1d6, [4, 5, 6]]` has type `dist[1, 1, 3]`.
-
-## Syntax
-
-It tries, and fails, to be close to Python.
-
-## Standard library
-
-### Unary operators
-
-* `!: int -> int; list -> list; dist -> dist`: elementwise logical negation
-* `-: int -> int; list -> list; dist -> dist`: elementwise arithmetic negation
-
-### Binary operators
-
-* `+`, `*`:
-    * `(int, int) -> int`: arithmetic addition and multiplication
-    * `(list, list) -> list`, `(dist, dist) -> dist`: perform the total sum (for `+`) or product (for `*`) of both distributions. Broadcasts one side if necessary.
-* `-`
-    * `(int, int) -> int`: subtraction
-    * `(list, list) -> list` or `(dist, dist) -> dist`: performs `sum(left) - sum(right)`.
-* `/`: `(int, int) -> int`: integer division rounding down
-* `==`, `!=`, `<=`, `<`, `>`, `>=`:
-    * `(int, int) -> int`: logical comparisons
-    * On lists or distributions, applies elementwise. Both sides must have the same dimension.
-* `or`, `and`:
-    * `(int, int) -> int`: returns 0 if both (resp. either) sides are 1, 0 otherwise.
-    * On lists or distributions, applies elementwise. Both sides must have the same dimension.
-
-### Built-in functions
-
-On dists:
-
-* `cross(d: dist) -> dist`: performs the full product of the distributions in `d`, turning a `dist[x, y, z, ...]` into a `dist[x+y+z]`. Potentially very expensive.
-* `marginalize(d: dist) -> dist`: the opposite of `cross`. Loses all covariance information.
-* `sum(d: dist) -> dist`, `product(d: dist) -> dist`: computes the sum and product, turning the dist into a `dist[1]`.
-* `drop_low(d: dist, n: int) -> dist`, `drop_high(d: dist, n: int)`, `keep_low(d: dist, n: int) -> dist`, `keep_high(d: dist, n: int)`: drop / keep the n lowest or highest values.
-* `dim(d: dist) -> list`: returns a list containing the sizes of indepdent sub-distributions.
-* `size(d: dist) -> int`: returns the cardinality of the dist. Equivalent to `sum(dim(d))`.
-* `map(f: function[list -> dist], d: dist)`: applies function `f` to each outcome in `d`, producing a new distribution.
-
-On dists or lists:
-
-* `get(d: dist, n: int) -> dist`: get the nth element of a dist. The result has type `dist[1]`.
-* `get(d: list, n: int) -> int`: gets the nth element of a list.
+* `123`: generates the number `123`
+* `{a, b..c, d:count}`: sequence literals can contain two types of subexpressions:
+  * subexpressions of type `int` are inserted into the sequence, with repetition
+  * range subexpressions must evaluate to an `int` on either side, and are equivalent to listing every number
+    in the range, both ends included.
+  * subexpressions of type `list` will be flattened into the outer list.
+  * distribution subexpressions will be summed, and a list of their possible outcomes will be flattened into the
+    outer list.
+  * the optional `:count` modifier will cause the item to be repeated `count` times before being inserted.
+* `(expr1)d(expr2)`:
+  * `d(expr2)` creates a base distribution 𝒟
+    * if `expr2` is an int, this expression creates a uniform distribution over `1..expr2`.
+    * if `expr2` is a list, it creates a uniform distribution over the list values.
+    * if `expr2` is a distribution, `d(expr2)` is equivalent to `expr2`.
+  * if `expr1` is present, 𝒟 is modified as follow:
+    * if `expr1` is a list, it is summed and treated as an int.
+    * if `expr1` is an int, a distrbution 𝒟×𝒟×...×𝒟 (`expr1` times) is created. If i is negative, the distribution is negated.
+    * if `expr1` is a distribution, it is summed to a distribution over ints,
+      then each int `i` is mapped to 𝒟×𝒟×...×𝒟 (`i` times). This will result in a distribution with uneven
+      outcome sizes.

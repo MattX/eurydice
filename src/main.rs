@@ -43,7 +43,8 @@ fn main() {
                         .join(", ")
                 ),
                 eval::RuntimeValue::Distribution(d) => {
-                    for distribution in d.iter() {
+                    for distribution in d.inner().iter() {
+                        println!("dist: {:?}", distribution);
                         print_distribution(distribution);
                     }
                 }

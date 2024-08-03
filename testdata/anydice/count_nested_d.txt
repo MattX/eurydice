@@ -1,0 +1,12 @@
+function: count fives in S:s {
+    result: (S = 5)
+}
+
+output [count fives in (2d2)d5]
+
+\\\ Result \\\
+
+"output 1",0.06559999999999999,0.24758158251372414,0,1
+#,%
+0,93.44
+1,6.56

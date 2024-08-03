@@ -96,6 +96,19 @@ impl Distribution {
         Distribution { probabilities }
     }
 
+    /// Generates a uniform integer distribution over the given items.
+    pub fn uniform_items(items: &[i32]) -> Self {
+        let mut probabilities = BTreeMap::new();
+        let count = items.len() as f64;
+        let probability = 1.0 / count;
+
+        for i in items {
+            probabilities.insert(Outcome(vec![*i]), probability);
+        }
+
+        Distribution { probabilities }
+    }
+
     /// Applies a function to each outcome in the distribution, producing a new distribution
     pub fn try_map<F, E>(&self, f: F) -> Result<Self, E>
     where
@@ -121,6 +134,27 @@ impl Distribution {
         F: Fn(&Outcome) -> Outcome,
     {
         self.try_map(|o| Ok::<Outcome, ()>(f(o))).expect("unwrapping Result<_, !>")
+    }
+
+    /// Applies a function to each outcome in the distribution, producing a new distribution.
+    pub fn flat_map<F>(&self, f: F) -> Self
+    where
+        F: Fn(&Outcome) -> Self,
+    {
+        let mut new_probabilities = BTreeMap::new();
+
+        for (outcome, probability) in &self.probabilities {
+            let new_dist = f(outcome);
+            for (new_outcome, new_prob) in new_dist.probabilities {
+                *new_probabilities.entry(new_outcome).or_insert(0.0) += probability * new_prob;
+            }
+        }
+
+        let mut ret = Distribution {
+            probabilities: new_probabilities,
+        };
+        ret.clean_up();
+        ret
     }
 
     /// Take a number of independent distributions, and return a new distribution over the cross product of the distributions.
@@ -279,6 +313,11 @@ impl Distribution {
         let stddev = variance.iter().map(|&v| v.sqrt()).collect();
         Ok(stddev)
     }
+
+    /// Computes the sum of each outcome. Outcomes do not have to have the same dimension.
+    pub fn sum(&self) -> Self {
+        self.map(|outcome| Outcome(vec![outcome.0.iter().sum()]))
+    }
 }
 
 /// A distribution over multiple variables, some of which can be independent.
@@ -315,8 +354,8 @@ impl JointDistribution {
     }
 
     /// Removes independence of underlying distributions. This can be a very expensive operation.
-    pub fn cross_product(&self) -> JointDistribution {
-        JointDistribution(vec![Distribution::cross_product(&self.0)])
+    pub fn cross_product(&self) -> Distribution {
+        Distribution::cross_product(&self.0)
     }
 
     /// Individually maps f over each distribution in the joint distribution.
@@ -334,7 +373,17 @@ impl JointDistribution {
     where
         F: Fn(&Outcome) -> Outcome,
     {
-        JointDistribution(vec![self.cross_product().0[0].map(&f)])
+        JointDistribution(vec![self.cross_product().map(&f)])
+    }
+
+    /// Flat map across the entire cross distribution.
+    /// 
+    /// This calls [`JointDistribution::cross_product`] and is potentially quite expensive.
+    pub fn flat_map<F>(&self, f: F) -> JointDistribution
+    where
+        F: Fn(&Outcome) -> Distribution,
+    {
+        JointDistribution::from(self.cross_product().flat_map(f))
     }
 
     /// Efficiently maps an outcome to a 1 dimensional outcome using an (i32, i32) -> i32 reducer.
@@ -365,6 +414,27 @@ impl JointDistribution {
             debug_assert_eq!(a.0.len(), 1);
             Outcome(vec![b.0.iter().cloned().fold(a.0[0], |acc, x| f(acc, x))])
         }))
+    }
+
+    /// Produces a distribution over the sum each compound outcome.
+    pub fn sum(&self) -> Distribution {
+        let each_dist_summed = JointDistribution(self.0.iter().map(|d| d.sum()).collect::<Vec<_>>());
+        // At this point each distribution's outcome_size is 1, so this cannot fail.
+        // TODO: this could still be empty I guess
+        each_dist_summed.reduce(|a, b| a + b).expect("distributions should be non-empty and have a consistent outcome size of 1")
+    }
+
+    /// Replicates each distribution in the joint distribution `n` times. They remain independent.
+    pub fn replicate(self, n: usize) -> JointDistribution {
+        let mut original_dists = self.into_inner();
+        let mut replicated = Vec::new();
+        for _i in 0..n-1 {
+            for dist in &original_dists {
+                replicated.push(dist.clone());
+            }
+        }
+        replicated.append(&mut original_dists);
+        JointDistribution(replicated)
     }
 }
 
@@ -680,8 +750,7 @@ mod tests {
         let dist2 = Distribution::uniform(3, 4);
         let joint = JointDistribution(vec![dist1, dist2]);
         let crossed = joint.cross_product();
-        assert_eq!(crossed.0.len(), 1);
-        assert_eq!(crossed.0[0].probabilities.len(), 4);
+        assert_eq!(crossed.probabilities.len(), 4);
     }
 
     #[test]
@@ -722,5 +791,14 @@ mod tests {
         let joint = JointDistribution(vec![]);
         let result = joint.reduce(|a, b| a + b);
         assert!(matches!(result, Err(ProbabilityError::NoDistributions)));
+    }
+
+    #[test]
+    fn test_joint_distribution_replicate() {
+        let dist1 = Distribution::uniform(1, 6);
+        let dist2 = Distribution::uniform(2, 7);
+        let joint = JointDistribution(vec![dist1, dist2]);
+        let replicated = joint.replicate(2);
+        assert_eq!(replicated.0.len(), 4);
     }
 }
