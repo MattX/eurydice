@@ -183,6 +183,7 @@ pub fn make_max_dice_to_reach_mapper(
 /// Calculate binomial coefficient n choose k, with value caching.
 ///
 /// Panics if k > n.
+// TODO - this can likely be made faster / smaller by only caching factorials.
 fn binom(n: usize, k: usize) -> Natural {
     if n == k {
         return ONE.clone();

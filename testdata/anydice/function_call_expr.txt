@@ -1,0 +1,12 @@
+function: add A:n B:n {
+   result: A + B
+}
+
+output [add 1 2]
+
+\\\ Result \\\
+
+"output 1",3,0,3,3
+#,%
+3,100
+
