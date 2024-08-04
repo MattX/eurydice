@@ -801,4 +801,11 @@ mod tests {
         let replicated = joint.replicate(2);
         assert_eq!(replicated.0.len(), 4);
     }
+
+    #[test]
+    fn test_uneven_cross_product() {
+        let left_die = Distribution::uniform(1, 2);
+        let right_die = Distribution::uniform(1, 6);
+        
+    }
 }

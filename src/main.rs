@@ -10,7 +10,6 @@ use miette::{Diagnostic, GraphicalReportHandler};
 use output::print_distribution;
 
 lalrpop_mod!(grammar);
-lalrpop_mod!(tiny_grammar);
 
 fn main() {
     let parser = grammar::BodyParser::new();

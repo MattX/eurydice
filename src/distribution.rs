@@ -75,16 +75,15 @@ impl<T: Eq + PartialEq + Ord + PartialOrd + Debug> Distribution<T> {
             f(outcome)
                 .into_inner()
                 .into_iter()
-                .map(|(mapped_outcome, mapped_prob)| (mapped_outcome, mapped_prob * prob.clone()))
-                .collect()
-        })
+                .map(move |(mapped_outcome, mapped_prob)| (mapped_outcome, mapped_prob * prob.clone()))
+        }).collect()
     }
 }
 
-impl<i32> Distribution<i32> {
+impl Distribution<i32> {
     fn at_operator(self, left: Distribution<i32>) -> Distribution<i32> {
         left.flat_map_values(|left_outcome| {
-            self.map_values(move |right_outcome| left_outcome + right_outcome)
+            self.clone().map_values(move |right_outcome| left_outcome * right_outcome)
         })
     }
 }

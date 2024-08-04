@@ -14,64 +14,116 @@
 
 use lazy_static::lazy_static;
 use malachite::{Natural, Rational};
-use std::{collections::HashMap, hash::Hash, sync::RwLock};
+use malachite::num::arithmetic::traits::Pow;
+use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Pool {
     n: i32,
-    sides: i32,
+    // Outcomes are ordered by their face value. The tuple represents (value, weight / count).
+    // Outcomes must be unique and have nonzero weight.
+    ordered_outcomes: Vec<(i32, u32)>,
 }
 
 impl std::fmt::Display for Pool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}d{}", self.n, self.sides)
+        // TODO format nicely if this is a regular dn.
+        write!(
+            f,
+            "{}d[{}]",
+            self.n,
+            self.ordered_outcomes
+                .iter()
+                .map(|(outcome, weight)| format!("{}:{}", outcome, weight))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+/// Cache key for the Icepool algorithm. `n` is the number of dice remaining, and
+/// `remaining_count` is the number of outcomes remaining.
+///
+/// The outcomes that remain in consideration are the `remaining_count` smallest outcomes.`
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Copy)]
+struct SubPool {
+    n: i32,
+    remaining_outcomes: usize,
+}
+
+impl SubPool {
+    fn initial(pool: &Pool) -> Self {
+        Self {
+            n: pool.n,
+            remaining_outcomes: pool.ordered_outcomes.len(),
+        }
     }
 }
 
 impl Pool {
+    pub fn ndn(n: i32, sides: i32) -> Self {
+        Self {
+            n,
+            ordered_outcomes: (1..=sides).map(|side| (side, 1)).collect::<Vec<_>>(),
+        }
+    }
+
+    pub fn from_list(n: i32, outcomes: Vec<i32>) -> Self {
+        let mut outcomes_map = HashMap::new();
+        for outcome in outcomes {
+            *outcomes_map.entry(outcome).or_insert(0) += 1;
+        }
+        let mut ordered_outcomes = outcomes_map.into_iter().collect::<Vec<_>>();
+        ordered_outcomes.sort();
+        Self { n, ordered_outcomes }
+    }
+
     pub fn apply<S, F>(&self, mapper: StateMapper<S, F>) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
         F: Fn(&S, i32, i32) -> S,
     {
         let mut cache = HashMap::new();
-        self.apply_inner(&mut cache, &mapper)
+        self.apply_inner(SubPool::initial(self), &mut cache, &mapper)
     }
 
-    pub fn apply_inner<S, F>(
+    fn apply_inner<S, F>(
         &self,
-        cache: &mut HashMap<Pool, HashMap<S, Natural>>,
+        sub_pool: SubPool,
+        cache: &mut HashMap<SubPool, HashMap<S, Natural>>,
         mapper: &StateMapper<S, F>,
     ) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
         F: Fn(&S, i32, i32) -> S,
     {
-        if let Some(value) = cache.get(self) {
+        if let Some(value) = cache.get(&sub_pool) {
             return value.clone();
         }
-        let (outcome, new_max_outcome) = (self.sides, self.sides - 1);
-        if new_max_outcome == 0 {
+        let new_remaining_outcomes = sub_pool.remaining_outcomes - 1;
+        let (outcome, weight) = self.ordered_outcomes[new_remaining_outcomes];
+        if new_remaining_outcomes == 0 {
             return [(
-                (mapper.f)(&mapper.initial_state, outcome, self.n),
+                (mapper.f)(&mapper.initial_state, outcome, sub_pool.n),
                 1usize.into(),
             )]
             .into();
         }
         let mut result = HashMap::new();
-        for num_with_outcome in 0..=self.n {
-            let sub_pool = Pool {
-                n: self.n - num_with_outcome,
-                sides: new_max_outcome,
+        for num_with_outcome in 0..=sub_pool.n {
+            let sub_sub_pool = SubPool {
+                n: sub_pool.n - num_with_outcome,
+                remaining_outcomes: new_remaining_outcomes,
             };
-            let inner_result = sub_pool.apply_inner(cache, mapper);
-            for (state, count) in inner_result {
+            let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper);
+            for (state, count) in sub_sub_pool_result {
                 let inner_state = (mapper.f)(&state, outcome, num_with_outcome);
+                // There were binom(self.n, num_with_outcome) ways to choose this combination.
                 *result.entry(inner_state).or_default() +=
-                    count * binom(self.n as usize, num_with_outcome as usize)
+                    count * binom(sub_pool.n as usize, num_with_outcome as usize) * Natural::from(weight).pow(num_with_outcome as u64);
             }
         }
-        cache.insert(*self, result.clone());
+        cache.insert(sub_pool, result.clone());
         result
     }
 }
@@ -102,12 +154,6 @@ where
             )
         })
         .collect()
-}
-
-lazy_static! {
-    /// Cache for binomial coefficients. Rows are either missing or fully calculated.
-    static ref BINOM_CACHE: RwLock<Vec<Vec<Natural>>> = RwLock::new(vec![vec![1usize.into()]]);
-    static ref ONE: Natural = 1usize.into();
 }
 
 fn sum_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
@@ -180,6 +226,12 @@ pub fn make_max_dice_to_reach_mapper(
     }
 }
 
+lazy_static! {
+    /// Cache for binomial coefficients. Rows are either missing or fully calculated.
+    static ref BINOM_CACHE: RwLock<Vec<Vec<Natural>>> = RwLock::new(vec![vec![1usize.into()]]);
+    static ref ONE: Natural = 1usize.into();
+}
+
 /// Calculate binomial coefficient n choose k, with value caching.
 ///
 /// Panics if k > n.
@@ -245,14 +297,15 @@ mod tests {
 
     #[test]
     fn test_sum_10d20() {
-        let pool = Pool { n: 10, sides: 20 };
+        let pool = Pool::ndn(10, 20);
         let result = pool.apply(SUM_MAPPER);
         assert_eq!(result.len(), 191);
+        assert_eq!(result[&133], Natural::from(70942066700u64));
     }
 
     #[test]
     fn test_sum_1d6() {
-        let pool = Pool { n: 1, sides: 6 };
+        let pool = Pool::ndn(1, 6);
         let result = pool.apply(SUM_MAPPER);
         assert_eq!(
             result,
@@ -262,7 +315,7 @@ mod tests {
 
     #[test]
     fn test_sum_2d6() {
-        let pool = Pool { n: 2, sides: 6 };
+        let pool = Pool::ndn(2, 6);
         let result = pool.apply(SUM_MAPPER);
         assert_eq!(
             result,
@@ -283,9 +336,19 @@ mod tests {
     }
 
     #[test]
+    fn test_sum_2d3() {
+        let pool = Pool::ndn(2, 3);
+        let result = pool.apply(SUM_MAPPER);
+        assert_eq!(
+            result,
+            to_counter(vec![(2, 1), (3, 2), (4, 3), (5, 2), (6, 1),])
+        );
+    }
+
+    #[test]
     fn test_make_max_dice_to_reach_mapper() {
         let mapper = make_max_dice_to_reach_mapper(10);
-        let result = Pool { n: 3, sides: 6 }.apply(mapper);
+        let result = Pool::ndn(3, 6).apply(mapper);
         let mut keep_count_only = HashMap::new();
         for (k, v) in result {
             // If the sum is None, we've already reached the target. Replace with a number of rolls.
@@ -301,5 +364,33 @@ mod tests {
                 (Some(3), 124usize.into())
             ])
         )
+    }
+
+    #[test]
+    fn test_sum_non_continuous() {
+        let pool = Pool::from_list(3, vec![-2, 0, 1, 5]);
+        let result = pool.apply(SUM_MAPPER);
+        assert_eq!(
+            result,
+            to_counter(vec![
+                (-6, 1),
+                (-4, 3),
+                (-3, 3),
+                (-2, 3),
+                (-1, 6),
+                (0, 4),
+                (1, 6),
+                (2, 3),
+                (3, 7),
+                (4, 6),
+                (5, 3),
+                (6, 6),
+                (7, 3),
+                (8, 3),
+                (10, 3),
+                (11, 3),
+                (15, 1)
+            ])
+        );
     }
 }
