@@ -1,0 +1,34 @@
+grammar;
+
+pub FunCall: () = {
+    "[" <id:Identifier> <e:Exprs?> "]" => (),
+}
+
+pub Exprs: () = {
+    <e:UnopExpr2> => (),
+    <e:UnopExpr2> <es:NonUnopExpr2+> => (),
+}
+
+pub Expr0: () = {
+    <n:Num> => (),
+    "(" <e:UnopExpr2> ")" => (),
+    <f:FunCall> => (),
+}
+
+pub NonUnopExpr2: () = {
+    <left:NonUnopExpr2> "-" <right:UnopExpr1> => (),
+    Expr0,
+}
+
+pub UnopExpr1: () = {
+    "-" <e:UnopExpr1> => (),
+    Expr0,
+}
+
+pub UnopExpr2: () = {
+    <left:UnopExpr2> "-" <right:UnopExpr1> => (),
+    UnopExpr1,
+}
+
+Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
+Identifier: String = <s:r"[a-z][a-z_]+"> => s.to_string();

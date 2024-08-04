@@ -27,6 +27,14 @@ pub StatementInner: Statement = {
     "output" <e:Expr> <n:OutputName?> => Statement::Output { value: e, named: n },
     "result:" <e:Expr> => Statement::Return { value: e },
     "set" => todo!(),
+    "loop" <id_start: @L> <id:VariableIdentifier> <id_end: @L> "over" <e:Expr> "{" <b:Block> "}" =>
+        Statement::Loop { variable: WithRange::new(id_start, id_end, id), range_expression: Box::new(e), body: b },
+    <i:IfStatement> => i,
+};
+
+IfStatement: Statement = {
+    "if" <e:Expr> "{" <b:Block> "}" => Statement::If { condition: Box::new(e), then_block: b, else_block: None },
+    "if" <e:Expr> "{" <thn:Block> "}" "else" "{" <els:Block> "}" => Statement::If { condition: Box::new(e), then_block: thn, else_block: Some(els) },
 };
 
 pub Block: Vec<WithRange<Statement>> = {
@@ -34,70 +42,67 @@ pub Block: Vec<WithRange<Statement>> = {
 };
 
 pub Expr: WithRange<Expression> = {
-    <start: @L> <e:ExprInner> <end: @R> => WithRange::new(start, end, e),
+    <start: @L> <e:ExprInner0> <end: @R> => WithRange::new(start, end, e),
 };
 
-pub ExprInner: Expression = {
+pub SafeExpr: WithRange<Expression> = {
+    <start: @L> <e:SafeExprInner0> <end: @R> => WithRange::new(start, end, e),
+};
+
+// ExprInner1 through ExprInner10 are reserved for future ops
+
+ExprInnerTier<OpClass, Rhs, NextTier>: Expression = {
+    <left_start: @L> <left:ExprInnerTier<OpClass, Rhs, NextTier>> <left_end: @R>
+    <op_start: @L> <o:OpClass> <op_end: @R>
+    <right_start: @L> <right:Rhs> <right_end: @R> =>
+        Expression::BinaryOp { 
+            op: WithRange::new(op_start, op_end, o),
+            left: Box::new(WithRange::new(left_start, left_end, left)),
+            right: Box::new(WithRange::new(right_start, right_end, right))
+        },
+    NextTier,
+}
+
+ExprInner0 = ExprInnerTier<BinaryOp0, ExprInner1, ExprInner1>;
+SafeExprInner0 = ExprInnerTier<BinaryOp0, ExprInner1, SafeExprInner1>;
+
+ExprInner1 = ExprInnerTier<BinaryOp1, ExprInner2, ExprInner2>;
+SafeExprInner1 = ExprInnerTier<BinaryOp1, ExprInner2, SafeExprInner2>;
+
+ExprInner2 = ExprInnerTier<BinaryOp2, ExprInner3, ExprInner3>;
+SafeExprInner2 = ExprInnerTier<BinaryOp2, ExprInner3, SafeExprInner3>;
+
+ExprInner3 = ExprInnerTier<BinaryOp3, ExprInner4, ExprInner4>;
+SafeExprInner3 = ExprInnerTier<BinaryOp3, ExprInner4, SafeExprInner4>;
+
+ExprInner4 = ExprInnerTier<BinaryOp4, ExprInner11, ExprInner11>;
+SafeExprInner4 = ExprInnerTier<BinaryOp4, ExprInner11, SafeExprInner11>;
+
+pub ExprInner11: Expression = {
+    <op_start: @L> <o:UnsafeUnaryOp> <op_end: @R> <start: @L> <e:ExprInner11> <end: @R> =>
+        Expression::UnaryOp { 
+            op: WithRange::new(op_start, op_end, o),
+            operand: Box::new(WithRange::new(start, end, e))
+        },
+    SafeExprInner11,
+}
+
+pub SafeExprInner11: Expression = {
+    <op_start: @L> <o:SafeUnaryOp> <op_end: @R> <start: @L> <e:ExprInner11> <end: @R> =>
+        Expression::UnaryOp { 
+            op: WithRange::new(op_start, op_end, o),
+            operand: Box::new(WithRange::new(start, end, e))
+        },
+    ExprInner12,
+}
+
+pub ExprInner12: Expression = {
     #[precedence(level="0")]
     "(" <e:Expr> ")" => e.value,
     <l:List> => Expression::List(l),
     <fc:FunctionCall> => fc,
     <id:VariableIdentifier> => Expression::Reference(id),
     <n:Num> => Expression::Int(n),
-    #[precedence(level="1")] #[assoc(side="left")]
-    <op_start: @L> <o:UnaryOp> <op_end: @R> <start: @L> <e:ExprInner> <end: @R> =>
-        Expression::UnaryOp { 
-            op: WithRange::new(op_start, op_end, o),
-            operand: Box::new(WithRange::new(start, end, e))
-        },
-
-    // And now get ready for all the binary operators
-    // Yes there is probably a better way to do this. 
-    #[precedence(level="2")] #[assoc(side="left")]
-    <left_start: @L> <left:ExprInner> <left_end: @R>
-    <op_start: @L> <o:BinaryOp0> <op_end: @R>
-    <right_start: @L> <right:ExprInner> <right_end: @L> =>
-        Expression::BinaryOp { 
-            op: WithRange::new(op_start, op_end, o),
-            left: Box::new(WithRange::new(left_start, left_end, left)),
-            right: Box::new(WithRange::new(right_start, right_end, right))
-        },
-    #[precedence(level="3")] #[assoc(side="left")]
-    <left_start: @L> <left:ExprInner> <left_end: @R>
-    <op_start: @L> <o:BinaryOp1> <op_end: @R>
-    <right_start: @L> <right:ExprInner> <right_end: @L> =>
-        Expression::BinaryOp { 
-            op: WithRange::new(op_start, op_end, o),
-            left: Box::new(WithRange::new(left_start, left_end, left)),
-            right: Box::new(WithRange::new(right_start, right_end, right))
-        },
-    #[precedence(level="4")] #[assoc(side="left")]
-    <left_start: @L> <left:ExprInner> <left_end: @R>
-    <op_start: @L> <o:BinaryOp2> <op_end: @R>
-    <right_start: @L> <right:ExprInner> <right_end: @L> =>
-        Expression::BinaryOp { 
-            op: WithRange::new(op_start, op_end, o),
-            left: Box::new(WithRange::new(left_start, left_end, left)),
-            right: Box::new(WithRange::new(right_start, right_end, right))
-        },
-    #[precedence(level="5")] #[assoc(side="left")]
-    <left_start: @L> <left:ExprInner> <left_end: @R>
-    <op_start: @L> <o:BinaryOp3> <op_end: @R>
-    <right_start: @L> <right:ExprInner> <right_end: @L> =>
-        Expression::BinaryOp { 
-            op: WithRange::new(op_start, op_end, o),
-            left: Box::new(WithRange::new(left_start, left_end, left)),
-            right: Box::new(WithRange::new(right_start, right_end, right))
-        },
-    #[precedence(level="6")] #[assoc(side="left")]
-    <left_start: @L> <left:ExprInner> <left_end: @R>
-    <op_start: @L> <o:BinaryOp4> <op_end: @R>
-    <right_start: @L> <right:ExprInner> <right_end: @L> =>
-        Expression::BinaryOp { 
-            op: WithRange::new(op_start, op_end, o),
-            left: Box::new(WithRange::new(left_start, left_end, left)),
-            right: Box::new(WithRange::new(right_start, right_end, right))
-        },
 };
 
 pub OutputName: WithRange<String> = {
@@ -124,13 +129,10 @@ pub ListItem: ListLiteralItem = {
 };
 
 pub FunctionCall: Expression = {
-    // This is kind of ugly, but if you try to have FunctionCallItem = Expr | Word, the parser
-    // will choke on consecutive expressions. So we say an item is a word or an expression followed
-    // by a word, and then we allow an optional last expression.
-    "[" <items:FunctionCallItem+> <last:Expr?> "]" => {
+    "[" <items:FunctionCallItem*> <last:FinalFunctionCallItem?> "]" => {
         let mut all_items = items.into_iter().flatten().collect::<Vec<_>>();
         if let Some(last) = last {
-            all_items.push(WithRange::new(last.range.start, last.range.end, FunctionCallItem::Expr(last.value)));
+            all_items.extend(last.into_iter());
         }
         make_function_call(all_items)
     }
@@ -138,10 +140,21 @@ pub FunctionCall: Expression = {
 
 pub FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
     <start: @L> <w:Word> <end: @R> => vec![WithRange::new(start, end, FunctionCallItem::Word(w))],
-    <e:Expr> <start_word: @L> <w:Word> <end_word: @R> =>
-        vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value)),
-             WithRange::new(start_word, end_word, FunctionCallItem::Word(w))],
+    <e:Expr> <es:SafeExpr*> <start: @L> <w:Word> <end: @R> => {
+        let mut items = vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))];
+        items.extend(es.into_iter().map(|e| WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))));
+        items.push(WithRange::new(start, end, FunctionCallItem::Word(w)));
+        items
+    }
 };
+
+pub FinalFunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
+    <e:Expr> <es:SafeExpr*> => {
+        let mut items = vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))];
+        items.extend(es.into_iter().map(|e| WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))));
+        items
+    }
+}
 
 pub FunctionDefinition: FunctionDefinition = {
     "function:" <items:FunctionDefinitionItem+> "{" <b:Block> "}" => make_function_definition(items, b),
@@ -166,12 +179,19 @@ pub StaticType: StaticType = {
 Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
 VariableIdentifier: String = <s:r"[A_Z][A-Z_]*"> => s.to_string();
 Word: String = <s:r"[a-z][a-z_]+"> => s.to_string();
-UnaryOp: UnaryOp = {
-    "-" => UnaryOp::Negate,
+
+SafeUnaryOp: UnaryOp = {
     "!" => UnaryOp::Invert,
     "#" => UnaryOp::Length,
-    "d" => UnaryOp::D,
 };
+
+// These are unary ops that are also binary ops, and therefore can cause ambiguity where expressions
+// can directly follow each other (which is just function calls).
+UnsafeUnaryOp: UnaryOp = {
+    "d" => UnaryOp::D,
+    "-" => UnaryOp::Negate,
+};
+
 BinaryOp0: BinaryOp = {
     "d" => BinaryOp::D,
     "@" => BinaryOp::At,

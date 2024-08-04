@@ -51,7 +51,7 @@ pub enum Statement {
         variable: WithRange<String>,
         range_expression: Box<WithRange<Expression>>,
         body: Vec<WithRange<Statement>>,
-    }
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,8 +170,14 @@ pub fn make_function_definition(
     items: Vec<WithRange<FunctionDefinitionItem>>,
     body: Vec<WithRange<Statement>>,
 ) -> FunctionDefinition {
-    let range_start = items.first().map(|i| i.range.start).expect("empty function definition");
-    let range_end = items.last().map(|i| i.range.end).expect("empty function definition");
+    let range_start = items
+        .first()
+        .map(|i| i.range.start)
+        .expect("empty function definition");
+    let range_end = items
+        .last()
+        .map(|i| i.range.end)
+        .expect("empty function definition");
     let mut name = Vec::new();
     let mut args = Vec::new();
     for item in items.into_iter() {
@@ -198,11 +204,15 @@ pub enum FunctionCallItem {
     Expr(Expression),
 }
 
-pub fn make_function_call(
-    items: Vec<WithRange<FunctionCallItem>>,
-) -> Expression {
-    let range_start = items.first().map(|i| i.range.start).expect("empty function call");
-    let range_end = items.last().map(|i| i.range.end).expect("empty function call");
+pub fn make_function_call(items: Vec<WithRange<FunctionCallItem>>) -> Expression {
+    let range_start = items
+        .first()
+        .map(|i| i.range.start)
+        .expect("empty function call");
+    let range_end = items
+        .last()
+        .map(|i| i.range.end)
+        .expect("empty function call");
     let mut name = Vec::new();
     let mut args = Vec::new();
     for item in items.into_iter() {
@@ -272,5 +282,36 @@ fn to_doc(value: &lexpr::Value) -> pretty::RcDoc {
             doc
         }
         _ => pretty::RcDoc::text(lexpr::to_string(value).unwrap()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grammar;
+
+    #[test]
+    fn test_apply_string_escapes() {
+        assert_eq!(apply_string_escapes("hello"), "hello");
+        assert_eq!(apply_string_escapes("hello\\nworld"), "hello\nworld");
+        assert_eq!(apply_string_escapes("hello\\tworld"), "hello\tworld");
+        assert_eq!(apply_string_escapes("hello\\rworld"), "hello\rworld");
+        assert_eq!(apply_string_escapes("hello\\\\world"), "hello\\world");
+        assert_eq!(apply_string_escapes("hello\\\"world"), "hello\"world");
+        assert_eq!(apply_string_escapes("hello\\xworld"), "hello\\xworld");
+    }
+
+    #[test]
+    fn test_parse_function_call() {
+        let text = "[test 1 2]";
+        let ast = grammar::ExprParser::new().parse(text).unwrap();
+        assert_eq!(print_expression(&ast), "((value\n  FunctionCall\n  (name (value . \"test {} {}\"))\n  (args ((value Int . 1)) ((value Int . 2)))))");
+    }
+
+    #[test]
+    fn test_parse_unop_function_call() {
+        let text = "[test 1 - 2]";
+        let ast = grammar::ExprParser::new().parse(text).unwrap();
+        assert_eq!(print_expression(&ast), "((value\n  FunctionCall\n  (name (value . \"test {}\"))\n  (args\n   ((value\n     BinaryOp\n     (op (value . Sub))\n     (left (value Int . 1))\n     (right (value Int . 2)))))))");
     }
 }
