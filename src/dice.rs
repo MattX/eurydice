@@ -15,6 +15,7 @@
 use lazy_static::lazy_static;
 use malachite::num::arithmetic::traits::Pow;
 use malachite::{Natural, Rational};
+use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
 /// Represents a pool of identical independent dice.
@@ -23,7 +24,7 @@ pub struct Pool {
     n: u32,
     // Outcomes are ordered by their face value. The tuple represents (value, weight / count).
     // Outcomes must be unique and have nonzero weight.
-    ordered_outcomes: Vec<(i32, u32)>,
+    ordered_outcomes: Vec<(i32, Natural)>,
     // This vector must be of size `n`. A false element at position `n` means that the n-th
     // lowest dice should be ignored.
     keep_list: Vec<bool>,
@@ -68,7 +69,9 @@ impl Pool {
     pub fn ndn(n: u32, sides: i32) -> Self {
         Self {
             n,
-            ordered_outcomes: (1..=sides).map(|side| (side, 1)).collect::<Vec<_>>(),
+            ordered_outcomes: (1..=sides)
+                .map(|side| (side, 1usize.into()))
+                .collect::<Vec<_>>(),
             keep_list: vec![true; n as usize],
         }
     }
@@ -76,7 +79,7 @@ impl Pool {
     pub fn from_list(n: u32, outcomes: Vec<i32>) -> Self {
         let mut outcomes_map = HashMap::new();
         for outcome in outcomes {
-            *outcomes_map.entry(outcome).or_insert(0) += 1;
+            *outcomes_map.entry(outcome).or_insert(Natural::from(0usize)) += Natural::from(1usize);
         }
         let mut ordered_outcomes = outcomes_map.into_iter().collect::<Vec<_>>();
         ordered_outcomes.sort();
@@ -88,7 +91,11 @@ impl Pool {
     }
 
     pub fn set_keep_list(mut self, keep_list: Vec<bool>) -> Self {
-        assert_eq!(keep_list.len(), self.n as usize, "keep list length must be the number of dice in the pool");
+        assert_eq!(
+            keep_list.len(),
+            self.n as usize,
+            "keep list length must be the number of dice in the pool"
+        );
         self.keep_list = keep_list;
         self
     }
@@ -116,12 +123,12 @@ impl Pool {
             return value.clone();
         }
         let new_remaining_outcomes = sub_pool.remaining_outcomes - 1;
-        let (outcome, weight) = self.ordered_outcomes[new_remaining_outcomes];
+        let (outcome, weight) = &self.ordered_outcomes[new_remaining_outcomes];
         let result = if new_remaining_outcomes == 0 {
             let num_kept = self.num_kept(sub_pool, sub_pool.n);
             [(
-                (mapper.f)(&mapper.initial_state, outcome, num_kept),
-                Natural::from(weight).pow(sub_pool.n as u64),
+                (mapper.f)(&mapper.initial_state, *outcome, num_kept),
+                weight.pow(sub_pool.n as u64),
             )]
             .into()
         } else {
@@ -137,12 +144,12 @@ impl Pool {
                 };
                 let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper);
                 for (state, count) in sub_sub_pool_result {
-                    let inner_state = (mapper.f)(&state, outcome, num_kept);
+                    let inner_state = (mapper.f)(&state, *outcome, num_kept);
                     // There were binom(self.n, num_with_outcome) ways to get this outcome,
                     // times weight^num_with_outcome if the weight is >1.
                     *result.entry(inner_state).or_default() += count
                         * binom(sub_pool.n as usize, num_with_outcome as usize)
-                        * Natural::from(weight).pow(num_with_outcome as u64);
+                        * weight.pow(num_with_outcome as u64);
                 }
             }
             result
@@ -157,6 +164,31 @@ impl Pool {
             .filter(|&&keep| keep)
             .count() as u32
     }
+}
+
+pub fn explode(die: Vec<(i32, Natural)>, on: &[i32], depth: usize) -> Vec<(i32, Natural)> {
+    if depth == 0 {
+        return die;
+    }
+    let total_weight: Natural = die.iter().map(|(_, weight)| weight).sum();
+    let exploder_weights = die.iter().filter(|(outcome, _)| on.contains(outcome)).cloned().collect::<HashMap<_, _>>();
+    let inner_explode = explode(die.clone(), on, depth - 1);
+    let mut die_dist = die
+        .into_iter()
+        .map(|(outcome, weight)| (outcome, weight * (&total_weight).pow(depth as u64)))
+        .collect::<BTreeMap<_, _>>();
+    for exploder in on {
+        // Remove the value from the inner die
+        die_dist.remove(exploder);
+    }
+    for (exploder, exploder_weight) in exploder_weights {
+        for (outcome, weight) in inner_explode.iter() {
+            let new_outcome = outcome + exploder;
+            let new_weight = weight * &exploder_weight;
+            *die_dist.entry(new_outcome).or_insert(Natural::from(0usize)) += new_weight;
+        }
+    }
+    die_dist.into_iter().collect()
 }
 
 pub struct StateMapper<S, F>
@@ -450,5 +482,48 @@ mod tests {
         let result = pool.apply(SUM_MAPPER);
         assert_eq!(result.len(), 28);
         assert_eq!(result[&15], Natural::from(16617u64));
+    }
+
+    #[test]
+    fn test_explode_d5_on_3() {
+        let die = vec![1, 2, 3, 4, 5]
+            .into_iter()
+            .map(|i| (i, 1usize.into()))
+            .collect();
+        let result = explode(die, &[3], 2);
+        assert_eq!(
+            result,
+            vec![
+                (1, 25),
+                (2, 25),
+                (4, 30),
+                (5, 30),
+                (7, 6),
+                (8, 6),
+                (9, 1),
+                (10, 1),
+                (11, 1)
+            ]
+            .into_iter()
+            .map(|(i, w)| (i, Natural::from(w as u32)))
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_explode_d10() {
+        let die = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            .into_iter()
+            .map(|i| (i, 1usize.into()))
+            .collect();
+        let result = explode(die, &[2, 8], 3);
+        assert_eq!(
+            result.len(), 33
+        );
+        let mapped = result.into_iter().collect::<HashMap<_, _>>();
+        assert_eq!(mapped[&1], Natural::from(1000u32));
+        assert_eq!(mapped[&8], Natural::from(111u32));
+        assert_eq!(mapped[&12], Natural::from(201u32));
+        assert_eq!(mapped[&29], Natural::from(1u32));
     }
 }
