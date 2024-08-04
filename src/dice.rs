@@ -13,8 +13,8 @@
 //! Entertainment_, 18(1), 258-265. https://doi.org/10.1609/aiide.v18i1.21971
 
 use lazy_static::lazy_static;
-use malachite::{Natural, Rational};
 use malachite::num::arithmetic::traits::Pow;
+use malachite::{Natural, Rational};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
 #[derive(Debug, Clone)]
@@ -75,7 +75,10 @@ impl Pool {
         }
         let mut ordered_outcomes = outcomes_map.into_iter().collect::<Vec<_>>();
         ordered_outcomes.sort();
-        Self { n, ordered_outcomes }
+        Self {
+            n,
+            ordered_outcomes,
+        }
     }
 
     pub fn apply<S, F>(&self, mapper: StateMapper<S, F>) -> HashMap<S, Natural>
@@ -102,27 +105,30 @@ impl Pool {
         }
         let new_remaining_outcomes = sub_pool.remaining_outcomes - 1;
         let (outcome, weight) = self.ordered_outcomes[new_remaining_outcomes];
-        if new_remaining_outcomes == 0 {
-            return [(
+        let result = if new_remaining_outcomes == 0 {
+            [(
                 (mapper.f)(&mapper.initial_state, outcome, sub_pool.n),
-                1usize.into(),
+                Natural::from(weight).pow(sub_pool.n as u64),
             )]
-            .into();
-        }
-        let mut result = HashMap::new();
-        for num_with_outcome in 0..=sub_pool.n {
-            let sub_sub_pool = SubPool {
-                n: sub_pool.n - num_with_outcome,
-                remaining_outcomes: new_remaining_outcomes,
-            };
-            let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper);
-            for (state, count) in sub_sub_pool_result {
-                let inner_state = (mapper.f)(&state, outcome, num_with_outcome);
-                // There were binom(self.n, num_with_outcome) ways to choose this combination.
-                *result.entry(inner_state).or_default() +=
-                    count * binom(sub_pool.n as usize, num_with_outcome as usize) * Natural::from(weight).pow(num_with_outcome as u64);
+            .into()
+        } else {
+            let mut result = HashMap::new();
+            for num_with_outcome in 0..=sub_pool.n {
+                let sub_sub_pool = SubPool {
+                    n: sub_pool.n - num_with_outcome,
+                    remaining_outcomes: new_remaining_outcomes,
+                };
+                let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper);
+                for (state, count) in sub_sub_pool_result {
+                    let inner_state = (mapper.f)(&state, outcome, num_with_outcome);
+                    // There were binom(self.n, num_with_outcome) ways to choose this combination.
+                    *result.entry(inner_state).or_default() += count
+                        * binom(sub_pool.n as usize, num_with_outcome as usize)
+                        * Natural::from(weight).pow(num_with_outcome as u64);
+                }
             }
-        }
+            result
+        };
         cache.insert(sub_pool, result.clone());
         result
     }
@@ -390,6 +396,24 @@ mod tests {
                 (10, 3),
                 (11, 3),
                 (15, 1)
+            ])
+        );
+    }
+
+    #[test]
+    fn sum_weighted() {
+        let pool = Pool::from_list(3, vec![-1, -1, 0, 1, 1, 1]);
+        let result = pool.apply(SUM_MAPPER);
+        assert_eq!(
+            result,
+            to_counter(vec![
+                (-3, 8),
+                (-2, 12),
+                (-1, 42),
+                (0, 37),
+                (1, 63),
+                (2, 27),
+                (3, 27)
             ])
         );
     }
