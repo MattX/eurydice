@@ -391,6 +391,7 @@ impl JointDistribution {
     /// For this to work, each sub-distribution must have a consistent outcome size.
     /// 
     /// For instance, use this to compute the distribution of sums over all the underlying variables.
+    #[allow(clippy::redundant_closure)] // This code currently triggers a clippy bug
     pub fn reduce<F>(&self, f: F) -> Result<Distribution, ProbabilityError>
     where
         F: Fn(i32, i32) -> i32,

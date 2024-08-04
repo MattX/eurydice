@@ -230,7 +230,7 @@ pub const SUM_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper 
 };
 
 fn product_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
-    state * outcome.pow(count as u32)
+    state * outcome.pow(count)
 }
 
 /// Mapper that multiplies the outcomes.
@@ -423,9 +423,9 @@ mod tests {
         assert_eq!(
             keep_count_only,
             to_counter(vec![
-                (None, 81usize.into()),
-                (Some(2), 11usize.into()),
-                (Some(3), 124usize.into())
+                (None, 81usize),
+                (Some(2), 11usize),
+                (Some(3), 124usize)
             ])
         )
     }

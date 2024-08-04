@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     ast::{
-        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, Statement, StaticType,
+        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem,
         UnaryOp, WithRange,
     },
     probability::{self, Distribution, JointDistribution, Outcome},
@@ -290,7 +290,7 @@ impl Evaluator {
                     eval_context
                         .env
                         .borrow_mut()
-                        .insert(variable.value.clone(), RuntimeValue::Int(value.clone()));
+                        .insert(variable.value.clone(), RuntimeValue::Int(*value));
                     for statement in body {
                         let res = self.execute_statement(eval_context, statement)?;
                         if res.is_some() {
@@ -350,7 +350,7 @@ impl Evaluator {
     ) -> Result<Vec<i32>, RuntimeError> {
         let (item, repeats) = item;
         let base = match item {
-            ListLiteralItem::Expr(expression) => self.evaluate(eval_context, &expression),
+            ListLiteralItem::Expr(expression) => self.evaluate(eval_context, expression),
             ListLiteralItem::Range(start_expr, end_expr) => {
                 let start = self.evaluate(eval_context, start_expr)?;
                 let start = match start {
@@ -426,7 +426,7 @@ fn make_d(
 
 fn replicate(distribution: JointDistribution, count: i32) -> JointDistribution {
     let negative = count < 0;
-    let abs_count = count.abs() as usize; 
+    let abs_count = count.unsigned_abs() as usize; 
     let dist = distribution.replicate(abs_count);
     if negative {
         dist.map_each(|d| Outcome(d.0.iter().map(|i| -i).collect()))
