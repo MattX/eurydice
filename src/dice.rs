@@ -17,12 +17,16 @@ use malachite::num::arithmetic::traits::Pow;
 use malachite::{Natural, Rational};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
+/// Represents a pool of identical independent dice.
 #[derive(Debug, Clone)]
 pub struct Pool {
-    n: i32,
+    n: u32,
     // Outcomes are ordered by their face value. The tuple represents (value, weight / count).
     // Outcomes must be unique and have nonzero weight.
     ordered_outcomes: Vec<(i32, u32)>,
+    // This vector must be of size `n`. A false element at position `n` means that the n-th
+    // lowest dice should be ignored.
+    keep_list: Vec<bool>,
 }
 
 impl std::fmt::Display for Pool {
@@ -47,7 +51,7 @@ impl std::fmt::Display for Pool {
 /// The outcomes that remain in consideration are the `remaining_count` smallest outcomes.`
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Copy)]
 struct SubPool {
-    n: i32,
+    n: u32,
     remaining_outcomes: usize,
 }
 
@@ -61,14 +65,15 @@ impl SubPool {
 }
 
 impl Pool {
-    pub fn ndn(n: i32, sides: i32) -> Self {
+    pub fn ndn(n: u32, sides: i32) -> Self {
         Self {
             n,
             ordered_outcomes: (1..=sides).map(|side| (side, 1)).collect::<Vec<_>>(),
+            keep_list: vec![true; n as usize],
         }
     }
 
-    pub fn from_list(n: i32, outcomes: Vec<i32>) -> Self {
+    pub fn from_list(n: u32, outcomes: Vec<i32>) -> Self {
         let mut outcomes_map = HashMap::new();
         for outcome in outcomes {
             *outcomes_map.entry(outcome).or_insert(0) += 1;
@@ -78,13 +83,14 @@ impl Pool {
         Self {
             n,
             ordered_outcomes,
+            keep_list: vec![true; n as usize],
         }
     }
 
     pub fn apply<S, F>(&self, mapper: StateMapper<S, F>) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
-        F: Fn(&S, i32, i32) -> S,
+        F: Fn(&S, i32, u32) -> S,
     {
         let mut cache = HashMap::new();
         self.apply_inner(SubPool::initial(self), &mut cache, &mapper)
@@ -98,7 +104,7 @@ impl Pool {
     ) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
-        F: Fn(&S, i32, i32) -> S,
+        F: Fn(&S, i32, u32) -> S,
     {
         if let Some(value) = cache.get(&sub_pool) {
             return value.clone();
@@ -137,7 +143,7 @@ impl Pool {
 pub struct StateMapper<S, F>
 where
     S: Clone + Hash + Eq,
-    F: Fn(&S, i32, i32) -> S,
+    F: Fn(&S, i32, u32) -> S,
 {
     initial_state: S,
     f: F,
@@ -162,42 +168,42 @@ where
         .collect()
 }
 
-fn sum_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
-    state + outcome * count
+fn sum_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
+    state + outcome * (count as i32)
 }
 
 /// Mapper that sums the outcomes.
-pub const SUM_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper {
+pub const SUM_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
     initial_state: 0,
     f: sum_mapper,
 };
 
-fn product_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
+fn product_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
     state * outcome.pow(count as u32)
 }
 
 /// Mapper that multiplies the outcomes.
-pub const PRODUCT_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper {
+pub const PRODUCT_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
     initial_state: 1,
     f: product_mapper,
 };
 
-fn max_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
+fn max_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
     (*state).max(outcome)
 }
 
 /// Mapper that takes the maximum of the outcomes.
-pub const MAX_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper {
+pub const MAX_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
     initial_state: i32::MIN,
     f: max_mapper,
 };
 
-fn min_mapper(state: &i32, outcome: i32, count: i32) -> i32 {
+fn min_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
     (*state).min(outcome)
 }
 
 /// Mapper that takes the minimum of the outcomes.
-pub const MIN_MAPPER: StateMapper<i32, fn(&i32, i32, i32) -> i32> = StateMapper {
+pub const MIN_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
     initial_state: i32::MAX,
     f: min_mapper,
 };
@@ -210,11 +216,12 @@ type MaxDiceToReachState = (Option<i32>, i32);
 /// lowest dice, to reach the target.
 pub fn make_max_dice_to_reach_mapper(
     target: i32,
-) -> StateMapper<MaxDiceToReachState, impl Fn(&MaxDiceToReachState, i32, i32) -> MaxDiceToReachState>
+) -> StateMapper<MaxDiceToReachState, impl Fn(&MaxDiceToReachState, i32, u32) -> MaxDiceToReachState>
 {
     StateMapper {
         initial_state: (Some(0), 0),
         f: move |state, outcome, count| {
+            let count = count as i32;
             let (sum, rolls) = state;
             let sum = match sum {
                 Some(sum) => sum,
