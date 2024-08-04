@@ -87,6 +87,12 @@ impl Pool {
         }
     }
 
+    pub fn set_keep_list(mut self, keep_list: Vec<bool>) -> Self {
+        assert_eq!(keep_list.len(), self.n as usize, "keep list length must be the number of dice in the pool");
+        self.keep_list = keep_list;
+        self
+    }
+
     pub fn apply<S, F>(&self, mapper: StateMapper<S, F>) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
@@ -112,22 +118,28 @@ impl Pool {
         let new_remaining_outcomes = sub_pool.remaining_outcomes - 1;
         let (outcome, weight) = self.ordered_outcomes[new_remaining_outcomes];
         let result = if new_remaining_outcomes == 0 {
+            let num_kept = self.num_kept(sub_pool, sub_pool.n);
             [(
-                (mapper.f)(&mapper.initial_state, outcome, sub_pool.n),
+                (mapper.f)(&mapper.initial_state, outcome, num_kept),
                 Natural::from(weight).pow(sub_pool.n as u64),
             )]
             .into()
         } else {
             let mut result = HashMap::new();
             for num_with_outcome in 0..=sub_pool.n {
+                // Replace num_with_outcome with the actual number of dice to keep in the considered range.
+                // Ignore anything in the keep list above index `sub_pool.n`, and below `sub_pool.n - num_with_outcome`.
+                let num_kept = self.num_kept(sub_pool, num_with_outcome);
+
                 let sub_sub_pool = SubPool {
                     n: sub_pool.n - num_with_outcome,
                     remaining_outcomes: new_remaining_outcomes,
                 };
                 let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper);
                 for (state, count) in sub_sub_pool_result {
-                    let inner_state = (mapper.f)(&state, outcome, num_with_outcome);
-                    // There were binom(self.n, num_with_outcome) ways to choose this combination.
+                    let inner_state = (mapper.f)(&state, outcome, num_kept);
+                    // There were binom(self.n, num_with_outcome) ways to get this outcome,
+                    // times weight^num_with_outcome if the weight is >1.
                     *result.entry(inner_state).or_default() += count
                         * binom(sub_pool.n as usize, num_with_outcome as usize)
                         * Natural::from(weight).pow(num_with_outcome as u64);
@@ -137,6 +149,13 @@ impl Pool {
         };
         cache.insert(sub_pool, result.clone());
         result
+    }
+
+    fn num_kept(&self, sub_pool: SubPool, num_with_outcome: u32) -> u32 {
+        self.keep_list[(sub_pool.n - num_with_outcome) as usize..sub_pool.n as usize]
+            .iter()
+            .filter(|&&keep| keep)
+            .count() as u32
     }
 }
 
@@ -408,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_weighted() {
+    fn test_sum_weighted() {
         let pool = Pool::from_list(3, vec![-1, -1, 0, 1, 1, 1]);
         let result = pool.apply(SUM_MAPPER);
         assert_eq!(
@@ -423,5 +442,13 @@ mod tests {
                 (3, 27)
             ])
         );
+    }
+
+    #[test]
+    fn test_sum_6d10_keep_3() {
+        let pool = Pool::ndn(6, 10).set_keep_list(vec![false, false, false, true, true, true]);
+        let result = pool.apply(SUM_MAPPER);
+        assert_eq!(result.len(), 28);
+        assert_eq!(result[&15], Natural::from(16617u64));
     }
 }
