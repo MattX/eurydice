@@ -13,7 +13,7 @@
 //! Entertainment_, 18(1), 258-265. https://doi.org/10.1609/aiide.v18i1.21971
 
 use lazy_static::lazy_static;
-use malachite::num::arithmetic::traits::Pow;
+use malachite::num::arithmetic::traits::{Factorial, Pow};
 use malachite::{Natural, Rational};
 use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
@@ -93,6 +93,16 @@ impl Pool {
         }
     }
 
+    fn from_weights(outcomes: impl Iterator<Item = (i32, Natural)>) -> Self {
+        let mut ordered_outcomes = outcomes.collect::<Vec<_>>();
+        ordered_outcomes.sort();
+        Self {
+            n: 1,
+            ordered_outcomes,
+            keep_list: vec![true],
+        }
+    }
+
     pub fn set_keep_list(mut self, keep_list: Vec<bool>) -> Self {
         assert_eq!(
             keep_list.len(),
@@ -169,12 +179,66 @@ impl Pool {
         self.ordered_outcomes.into_iter()
     }
 
+    /// This functions call `f` with each multiset outcome from the pool. The distributions returned
+    /// by `f` are flatmapped together to create a new distribution, represented as a size-1 pool.
     pub fn flat_map<F>(&self, f: F) -> Self
     where
-        F: Fn(TinyVec<[i32; 6]>, Natural) -> BTreeMap<i32, Natural>,
+        F: Fn(TinyVec<[i32; 6]>) -> BTreeMap<i32, Natural>,
     {
+        // Positions will take all values between [0, 0, ..., 0] and [self.n - 1, self.n - 1, ..., self.n - 1],
+        // in lexicographic order.
         let mut positions = vec![0; self.n as usize];
-        // find the smallest position that is not equal to the largest outcome
+        let mut new_outcomes = BTreeMap::new();
+        let factorial = Natural::factorial(self.n as u64);
+        'outer: loop {
+            let outcome = positions
+                .iter()
+                .map(|&i| self.ordered_outcomes[i].0)
+                .collect::<TinyVec<[i32; 6]>>();
+
+            // Compute the number of ways to get this outcome, and multiply by the weight of all
+            // elements that make it up.
+            // TODO there's probably better options than creating a hashmap here, especially since
+            // the elements are sorted already.
+            let mut item_counts = HashMap::new();
+            for o in &outcome {
+                *item_counts.entry(o).or_insert(0) += 1;
+            }
+            let mut permutations = Natural::from(1usize);
+            for item_count in item_counts.into_values() {
+                permutations *= Natural::factorial(item_count as u64);
+            }
+            let weight: Natural = positions
+                .iter()
+                .map(|&i| &self.ordered_outcomes[i].1)
+                .product();
+            let ways = factorial.clone() / permutations * weight;
+
+            for (new_outcome, sub_weight) in f(outcome) {
+                *new_outcomes
+                    .entry(new_outcome)
+                    .or_insert(Natural::from(0usize)) += &ways * sub_weight;
+            }
+
+            // Inner loop increments the position vector by 1, possibly carrying over.
+            let mut position_index = self.n as isize - 1;
+            while position_index >= 0 {
+                positions[position_index as usize] += 1;
+                if positions[position_index as usize] == self.ordered_outcomes.len() {
+                    if position_index == 0 {
+                        break 'outer;
+                    }
+                    position_index -= 1;
+                } else {
+                    break;
+                }
+            }
+            // Now go back and fix up the position indices
+            for i in position_index + 1..self.n as isize {
+                positions[i as usize] = positions[i as usize - 1];
+            }
+        }
+        Pool::from_weights(new_outcomes.into_iter())
     }
 
     fn num_kept(&self, sub_pool: SubPool, num_with_outcome: u32) -> u32 {
@@ -280,7 +344,7 @@ pub const PRODUCT_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMap
     f: product_mapper,
 };
 
-fn max_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
+fn max_mapper(state: &i32, outcome: i32, _count: u32) -> i32 {
     (*state).max(outcome)
 }
 
@@ -290,7 +354,7 @@ pub const MAX_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper 
     f: max_mapper,
 };
 
-fn min_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
+fn min_mapper(state: &i32, outcome: i32, _count: u32) -> i32 {
     (*state).min(outcome)
 }
 
@@ -565,5 +629,27 @@ mod tests {
         assert_eq!(mapped[&8], Natural::from(111u32));
         assert_eq!(mapped[&12], Natural::from(201u32));
         assert_eq!(mapped[&29], Natural::from(1u32));
+    }
+
+    #[test]
+    fn test_flat_map() {
+        let pool = Pool::from_list(5, vec![1, 2, 3, 4, 5]);
+        fn multiset_to_int(multiset: TinyVec<[i32; 6]>) -> BTreeMap<i32, Natural> {
+            let mut total = 0;
+            for (idx, item) in multiset.iter().rev().enumerate() {
+                total += (item - 1) * 5i32.pow(idx as u32);
+            }
+            BTreeMap::from([(total, 1usize.into())])
+        }
+
+        let result = pool.flat_map(multiset_to_int);
+
+        let map = result.into_iter().collect::<HashMap<_, _>>();
+        println!("{:?}", map);
+        assert_eq!(map.len(), 126);
+        assert_eq!(map[&0], Natural::from(1u32));
+        assert_eq!(map[&974], Natural::from(60u32));
+        assert_eq!(map[&999], Natural::from(20u32));
+        assert_eq!(map[&1093], Natural::from(5u32));
     }
 }

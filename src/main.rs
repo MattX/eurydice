@@ -1,13 +1,10 @@
 mod ast;
 mod dice;
-mod distribution;
 mod eval;
 mod output;
-mod probability;
 
 use lalrpop_util::lalrpop_mod;
 use miette::{Diagnostic, GraphicalReportHandler};
-use output::print_distribution;
 
 lalrpop_mod!(grammar);
 

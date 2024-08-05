@@ -1,26 +1,26 @@
-use crate::probability::Distribution;
+// use crate::probability::Distribution;
 
-pub fn print_distribution(distribution: &Distribution) {
-    let mut outcome = Vec::new();
-    let mut probs = Vec::new();
+// pub fn print_distribution(distribution: &Distribution) {
+//     let mut outcome = Vec::new();
+//     let mut probs = Vec::new();
 
-    for (out, prob) in &distribution.probabilities {
-        outcome.push(
-            out.0
-                .iter()
-                .map(|&x| x.to_string())
-                .collect::<Vec<String>>()
-                .join(","),
-        );
-        probs.push(format!("{:.2}", prob));
-    }
-    Table {
-        first_row_is_header: true,
-        first_column_is_header: false,
-        data: vec![outcome, probs],
-    }
-    .print();
-}
+//     for (out, prob) in &distribution.probabilities {
+//         outcome.push(
+//             out.0
+//                 .iter()
+//                 .map(|&x| x.to_string())
+//                 .collect::<Vec<String>>()
+//                 .join(","),
+//         );
+//         probs.push(format!("{:.2}", prob));
+//     }
+//     Table {
+//         first_row_is_header: true,
+//         first_column_is_header: false,
+//         data: vec![outcome, probs],
+//     }
+//     .print();
+// }
 
 #[derive(Clone)]
 struct Table {

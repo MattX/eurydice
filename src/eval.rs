@@ -6,7 +6,8 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
-    ast::{self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, UnaryOp, WithRange}, dice::Pool,
+    ast::{self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, UnaryOp, WithRange},
+    dice::Pool,
 };
 
 #[derive(Debug, Clone)]
@@ -396,7 +397,11 @@ enum DRightSide {
 }
 
 /// Executes the unary or binary version of the _n_ `d` _m_ operator.
-fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue, range: ast::Range) -> Result<RuntimeValue, RuntimeError> {
+fn make_d(
+    left: Option<&RuntimeValue>,
+    right: &RuntimeValue,
+    range: ast::Range,
+) -> Result<RuntimeValue, RuntimeError> {
     let repeat = match left {
         Some(RuntimeValue::Int(i)) => DLeftSide::Int(*i),
         Some(RuntimeValue::List(list)) => DLeftSide::Int(list.iter().sum()),
@@ -414,14 +419,14 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue, range: ast::Range) 
         return Ok(make_pool(repeat, sides).into());
     }
     // Otherwise we turn both sides into distributions, then cross-product-multiply them
-    let right_dist = match right {
-        DRightSide::List(sides) => Pool::from_list(1, sides).sum().into(),
-        DRightSide::Pool(d) => d,
-    };
-    let left_dist = match repeat {
-        DLeftSide::Int(count) => Pool::from_list(1, vec![count]).into(),
-        DLeftSide::Pool(d) => d.sum(),
-    };
+    // let right_dist = match right {
+    //     DRightSide::List(sides) => Pool::from_list(1, sides).sum().into(),
+    //     DRightSide::Pool(d) => d,
+    // };
+    // let left_dist = match repeat {
+    //     DLeftSide::Int(count) => Pool::from_list(1, vec![count]).into(),
+    //     DLeftSide::Pool(d) => d.sum(),
+    // };
     todo!()
 }
 
@@ -470,7 +475,6 @@ pub enum RuntimeError {
 
     //     underlying: probability::ProbabilityError,
     // },
-
     #[error("Output statement inside a function")]
     #[diagnostic(help("Output statements can only appear outside functions."))]
     OutputNotAtTopLevel {
@@ -517,7 +521,7 @@ pub enum RuntimeError {
     NotYetImplemented {
         #[label = "Not yet implemented"]
         range: SourceSpan,
-    }
+    },
 }
 
 #[derive(Debug, Error, Diagnostic)]
