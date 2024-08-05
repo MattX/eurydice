@@ -29,6 +29,9 @@ malachite = "0.4.14"
 # Random utility stuff
 lazy_static = "1.5.0"
 
+# Used for multiset iteration
+tinyvec = { version = "1.8.0", features = ["alloc"] }
+
 [build-dependencies]
 cc="*"
 lalrpop = "0.20.2"

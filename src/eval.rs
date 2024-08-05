@@ -6,24 +6,23 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
-    ast::{
-        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem,
-        UnaryOp, WithRange,
-    },
-    probability::{self, Distribution, JointDistribution, Outcome},
+    ast::{self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, UnaryOp, WithRange}, dice::Pool,
 };
 
 #[derive(Debug, Clone)]
 pub enum RuntimeValue {
     Int(i32),
     List(Rc<Vec<i32>>),
-    Distribution(Rc<JointDistribution>),
+    Pool(Rc<Pool>),
     Primitive(fn(&[RuntimeValue]) -> Result<RuntimeValue, PrimitiveError>),
     // TODO ideally this would instead be a reference into the AST, but what can we do
-    Function {
-        definition: Rc<FunctionDefinition>,
-        env: RcValEnv,
-    },
+    Function(Box<Function>),
+}
+
+#[derive(Debug, Clone)]
+struct Function {
+    definition: Rc<FunctionDefinition>,
+    env: RcValEnv,
 }
 
 impl RuntimeValue {
@@ -31,24 +30,9 @@ impl RuntimeValue {
         match self {
             RuntimeValue::Int(_) => RuntimeType::Int,
             RuntimeValue::List(_) => RuntimeType::Sequence,
-            RuntimeValue::Distribution(_) => RuntimeType::Distribution,
+            RuntimeValue::Pool(_) => RuntimeType::Distribution,
             RuntimeValue::Primitive(_) => RuntimeType::Function,
             RuntimeValue::Function { .. } => RuntimeType::Function,
-        }
-    }
-
-    fn sum(&self) -> RuntimeValue {
-        match self {
-            RuntimeValue::Int(i) => RuntimeValue::Int(*i),
-            RuntimeValue::List(list) => {
-                let sum = list.iter().sum();
-                RuntimeValue::Int(sum)
-            }
-            RuntimeValue::Distribution(d) => {
-                let sum = d.sum();
-                RuntimeValue::Distribution(Rc::new(JointDistribution::from(sum)))
-            }
-            _ => panic!("sum called on {}", self.runtime_type()),
         }
     }
 
@@ -56,11 +40,10 @@ impl RuntimeValue {
         match self {
             RuntimeValue::Int(i) => vec![*i; repeat],
             RuntimeValue::List(list) => Rc::clone(list).repeat(repeat),
-            RuntimeValue::Distribution(d) => d
+            RuntimeValue::Pool(d) => (**d)
                 .sum()
-                .probabilities
-                .keys()
-                .map(|i| i.0[0])
+                .into_iter()
+                .map(|(k, _)| k)
                 .collect::<Vec<_>>()
                 .repeat(repeat),
             _ => panic!("to_list called on {}", self.runtime_type()),
@@ -86,9 +69,9 @@ impl From<Vec<i32>> for RuntimeValue {
     }
 }
 
-impl From<JointDistribution> for RuntimeValue {
-    fn from(value: JointDistribution) -> Self {
-        RuntimeValue::Distribution(Rc::new(value))
+impl From<Pool> for RuntimeValue {
+    fn from(value: Pool) -> Self {
+        RuntimeValue::Pool(Rc::new(value))
     }
 }
 
@@ -214,11 +197,11 @@ impl Evaluator {
                 let env = Rc::new(RefCell::new(ValEnv::with_parent(Rc::clone(
                     &eval_context.env,
                 ))));
-                let value = RuntimeValue::Function {
+                let value = RuntimeValue::Function(Box::new(Function {
                     // TODO make the parser parse the FD directly into an Rc
                     definition: Rc::new(fd.clone()),
                     env,
-                };
+                }));
                 eval_context
                     .env
                     .borrow_mut()
@@ -385,7 +368,7 @@ fn apply_unary_op(
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
     match &op.value {
-        UnaryOp::D => make_d(None, operand),
+        UnaryOp::D => make_d(None, operand, range),
         _ => todo!(),
     }
 }
@@ -397,42 +380,59 @@ fn apply_binary_op(
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
     match &op.value {
-        BinaryOp::D => make_d(Some(left), right),
+        BinaryOp::D => make_d(Some(left), right, range),
         _ => todo!(),
     }
 }
 
-/// Executes the unary or binary version of the _n_ `d` _m_ operator.
-fn make_d(
-    left: Option<&RuntimeValue>,
-    right: &RuntimeValue,
-) -> Result<RuntimeValue, RuntimeError> {
-    let single_dist = match right {
-        RuntimeValue::Int(i) => JointDistribution::from(Distribution::uniform(1, *i)),
-        RuntimeValue::List(lst) => JointDistribution::from(Distribution::uniform_items(lst)),
-        RuntimeValue::Distribution(d) => (**d).clone(),
-        _ => panic!("make_d called on {}", right.runtime_type()),
-    };
-    match left {
-        Some(RuntimeValue::Int(i)) => Ok(replicate(single_dist, *i).into()),
-        Some(RuntimeValue::List(lst)) => Ok(replicate(single_dist, lst.iter().sum()).into()),
-        Some(RuntimeValue::Distribution(left_dist)) => {
-            Ok(JointDistribution::from(left_dist.sum()).flat_map(|i| replicate(single_dist.clone(), i.0[0]).cross_product()).into())
-        }
-        Some(t) => panic!("make_d called on {}", t.runtime_type()),
-        None => Ok(single_dist.into()),
-    }
+enum DLeftSide {
+    Int(i32),
+    Pool(Rc<Pool>),
 }
 
-fn replicate(distribution: JointDistribution, count: i32) -> JointDistribution {
-    let negative = count < 0;
-    let abs_count = count.unsigned_abs() as usize; 
-    let dist = distribution.replicate(abs_count);
-    if negative {
-        dist.map_each(|d| Outcome(d.0.iter().map(|i| -i).collect()))
-    } else {
-        dist
+enum DRightSide {
+    List(Vec<i32>),
+    Pool(Rc<Pool>),
+}
+
+/// Executes the unary or binary version of the _n_ `d` _m_ operator.
+fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue, range: ast::Range) -> Result<RuntimeValue, RuntimeError> {
+    let repeat = match left {
+        Some(RuntimeValue::Int(i)) => DLeftSide::Int(*i),
+        Some(RuntimeValue::List(list)) => DLeftSide::Int(list.iter().sum()),
+        Some(RuntimeValue::Pool(d)) => DLeftSide::Pool(Rc::clone(d)),
+        None => DLeftSide::Int(1),
+        _ => panic!("make_d called with invalid left operand"),
+    };
+    let right = match right {
+        RuntimeValue::Int(sides) => DRightSide::List((1..=*sides).collect()),
+        RuntimeValue::List(list) => DRightSide::List(Rc::clone(list).to_vec()),
+        RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
+        _ => panic!("make_d called with invalid right operand"),
+    };
+    if let (DLeftSide::Int(repeat), DRightSide::List(sides)) = (repeat, right) {
+        return Ok(make_pool(repeat, sides).into());
     }
+    // Otherwise we turn both sides into distributions, then cross-product-multiply them
+    let right_dist = match right {
+        DRightSide::List(sides) => Pool::from_list(1, sides).sum().into(),
+        DRightSide::Pool(d) => d,
+    };
+    let left_dist = match repeat {
+        DLeftSide::Int(count) => Pool::from_list(1, vec![count]).into(),
+        DLeftSide::Pool(d) => d.sum(),
+    };
+    todo!()
+}
+
+fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {
+    if n < 0 {
+        for side in sides.iter_mut() {
+            *side = -*side;
+        }
+        n = -n;
+    }
+    Pool::from_list(n as u32, sides)
 }
 
 impl From<ast::Range> for SourceSpan {
@@ -463,13 +463,13 @@ pub enum RuntimeError {
         right_range: SourceSpan,
     },
 
-    #[error("Probability error")]
-    ProbabilityError {
-        #[label = "Probability error: {underlying}"]
-        range: SourceSpan,
+    // #[error("Probability error")]
+    // ProbabilityError {
+    //     #[label = "Probability error: {underlying}"]
+    //     range: SourceSpan,
 
-        underlying: probability::ProbabilityError,
-    },
+    //     underlying: probability::ProbabilityError,
+    // },
 
     #[error("Output statement inside a function")]
     #[diagnostic(help("Output statements can only appear outside functions."))]
@@ -511,6 +511,13 @@ pub enum RuntimeError {
         range: SourceSpan,
         found: RuntimeType,
     },
+
+    #[error("Not yet implemented")]
+    #[diagnostic(help("The developer is a lazy bum."))]
+    NotYetImplemented {
+        #[label = "Not yet implemented"]
+        range: SourceSpan,
+    }
 }
 
 #[derive(Debug, Error, Diagnostic)]

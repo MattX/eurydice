@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 
 use malachite::Natural;
+
+use crate::dice::{Pool, SUM_MAPPER};
 
 /// A fully denormalized distribution over a type `T`.
 #[derive(Debug, Clone)]
@@ -42,6 +44,14 @@ impl<T: Eq + PartialEq + Ord + PartialOrd + Debug> FromIterator<(T, Natural)> fo
 impl<T: Eq + PartialEq + Ord + PartialOrd + Debug> From<BTreeMap<T, Natural>> for Distribution<T> {
     fn from(values: BTreeMap<T, Natural>) -> Self {
         Self { values }
+    }
+}
+
+impl<T: Eq + PartialEq + Ord + PartialOrd + Debug> From<HashMap<T, Natural>> for Distribution<T> {
+    fn from(values: HashMap<T, Natural>) -> Self {
+        Self {
+            values: values.into_iter().collect(),
+        }
     }
 }
 
@@ -134,5 +144,44 @@ impl Distribution<i32> {
             self.clone()
                 .map_values(move |right_outcome| left_outcome * right_outcome)
         })
+    }
+}
+
+/// The type used at runtime by the interpreter.
+#[derive(Debug, Clone)]
+pub enum PoolOrDistribution {
+    Pool(Pool),
+    Distribution(Distribution<i32>),
+}
+
+impl From<Pool> for PoolOrDistribution {
+    fn from(pool: Pool) -> Self {
+        PoolOrDistribution::Pool(pool)
+    }
+}
+
+impl From<Distribution<i32>> for PoolOrDistribution {
+    fn from(distribution: Distribution<i32>) -> Self {
+        PoolOrDistribution::Distribution(distribution)
+    }
+}
+
+impl PoolOrDistribution {
+    /// If this is a pool, returns a distribution over the sum of the dice. Has no effect otherwise.
+    pub fn to_sum_distribution(self) -> Distribution<i32> {
+        match self {
+            PoolOrDistribution::Pool(pool) => pool.apply(SUM_MAPPER).into(),
+            PoolOrDistribution::Distribution(distribution) => distribution,
+        }
+    }
+
+    /// Creates a pool of `num` dice with `sides` sides.
+    pub fn pool(num: u32, sides: u32) -> Self {
+        PoolOrDistribution::Pool(Pool::ndn(num, sides))
+    }
+
+    /// Creates a pool of dice with the given sides.
+    pub fn pool_from_list(num: u32, sides: Vec<i32>) -> Self {
+        PoolOrDistribution::Pool(Pool::from_list(num, sides))
     }
 }

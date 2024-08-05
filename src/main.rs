@@ -43,11 +43,8 @@ fn main() {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
-                eval::RuntimeValue::Distribution(d) => {
-                    for distribution in d.inner().iter() {
-                        println!("dist: {:?}", distribution);
-                        print_distribution(distribution);
-                    }
+                eval::RuntimeValue::Pool(d) => {
+                    println!("dist {:?}", d);
                 }
                 eval::RuntimeValue::Primitive(_) => println!("#<primitive>"),
                 eval::RuntimeValue::Function { .. } => println!("#<function>"),

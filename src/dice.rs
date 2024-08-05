@@ -17,6 +17,7 @@ use malachite::num::arithmetic::traits::Pow;
 use malachite::{Natural, Rational};
 use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
+use tinyvec::TinyVec;
 
 /// Represents a pool of identical independent dice.
 #[derive(Debug, Clone)]
@@ -66,16 +67,18 @@ impl SubPool {
 }
 
 impl Pool {
-    pub fn ndn(n: u32, sides: i32) -> Self {
+    /// Creates a new pool of `n` dice, each with `sides` sides.
+    pub fn ndn(n: u32, sides: u32) -> Self {
         Self {
             n,
             ordered_outcomes: (1..=sides)
-                .map(|side| (side, 1usize.into()))
+                .map(|side| (side as i32, 1usize.into()))
                 .collect::<Vec<_>>(),
             keep_list: vec![true; n as usize],
         }
     }
 
+    /// Creates a new pool from a list of outcomes. Repeats are allowed and will count as multiple weights.
     pub fn from_list(n: u32, outcomes: Vec<i32>) -> Self {
         let mut outcomes_map = HashMap::new();
         for outcome in outcomes {
@@ -158,6 +161,22 @@ impl Pool {
         result
     }
 
+    pub fn sum(&self) -> Pool {
+        self.apply(SUM_MAPPER).into_iter().collect()
+    }
+
+    pub fn into_iter(self) -> impl Iterator<Item = (i32, Natural)> {
+        self.ordered_outcomes.into_iter()
+    }
+
+    pub fn flat_map<F>(&self, f: F) -> Self
+    where
+        F: Fn(TinyVec<[i32; 6]>, Natural) -> BTreeMap<i32, Natural>,
+    {
+        let mut positions = vec![0; self.n as usize];
+        // find the smallest position that is not equal to the largest outcome
+    }
+
     fn num_kept(&self, sub_pool: SubPool, num_with_outcome: u32) -> u32 {
         self.keep_list[(sub_pool.n - num_with_outcome) as usize..sub_pool.n as usize]
             .iter()
@@ -166,12 +185,34 @@ impl Pool {
     }
 }
 
+impl FromIterator<(i32, Natural)> for Pool {
+    fn from_iter<I: IntoIterator<Item = (i32, Natural)>>(iter: I) -> Self {
+        let mut ordered_outcomes = iter.into_iter().collect::<Vec<_>>();
+        ordered_outcomes.sort();
+        Self {
+            n: 1,
+            ordered_outcomes,
+            keep_list: vec![true],
+        }
+    }
+}
+
+impl From<Pool> for BTreeMap<i32, Natural> {
+    fn from(pool: Pool) -> Self {
+        pool.into_iter().collect()
+    }
+}
+
 pub fn explode(die: Vec<(i32, Natural)>, on: &[i32], depth: usize) -> Vec<(i32, Natural)> {
     if depth == 0 {
         return die;
     }
     let total_weight: Natural = die.iter().map(|(_, weight)| weight).sum();
-    let exploder_weights = die.iter().filter(|(outcome, _)| on.contains(outcome)).cloned().collect::<HashMap<_, _>>();
+    let exploder_weights = die
+        .iter()
+        .filter(|(outcome, _)| on.contains(outcome))
+        .cloned()
+        .collect::<HashMap<_, _>>();
     let inner_explode = explode(die.clone(), on, depth - 1);
     let mut die_dist = die
         .into_iter()
@@ -300,6 +341,7 @@ lazy_static! {
 ///
 /// Panics if k > n.
 // TODO - this can likely be made faster / smaller by only caching factorials.
+#[allow(clippy::needless_range_loop)]
 fn binom(n: usize, k: usize) -> Natural {
     if n == k {
         return ONE.clone();
@@ -517,9 +559,7 @@ mod tests {
             .map(|i| (i, 1usize.into()))
             .collect();
         let result = explode(die, &[2, 8], 3);
-        assert_eq!(
-            result.len(), 33
-        );
+        assert_eq!(result.len(), 33);
         let mapped = result.into_iter().collect::<HashMap<_, _>>();
         assert_eq!(mapped[&1], Natural::from(1000u32));
         assert_eq!(mapped[&8], Natural::from(111u32));
