@@ -673,7 +673,7 @@ pub enum RuntimeError {
         range: SourceSpan,
     },
 
-    #[error("Return statement outside a function")]
+    #[error("Return statxement outside a function")]
     ReturnOutsideFunction {
         #[label = "Return statement outside a function"]
         range: SourceSpan,

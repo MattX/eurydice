@@ -229,6 +229,10 @@ impl Pool {
         &self.ordered_outcomes
     }
 
+    pub fn multiset_iterator(&self) -> PoolMultisetIterator {
+        PoolMultisetIterator::new(self)
+    }
+
     /// This functions call `f` with each multiset outcome from the pool. The distributions returned
     /// by `f` are flatmapped together to create a new distribution, stored as a size-1 pool.
     pub fn flat_map<F>(&self, f: F) -> Self
@@ -237,34 +241,10 @@ impl Pool {
     {
         // Positions will take all values between [0, 0, ..., 0] and [self.n - 1, self.n - 1, ..., self.n - 1],
         // in lexicographic order.
-        let mut positions = vec![0; self.n as usize];
         let mut new_outcomes = BTreeMap::new();
         let mut outcome_sum_lcm = Natural::from(1usize);
-        let factorial = Natural::factorial(self.n as u64);
-        'outer: loop {
-            let outcome = positions
-                .iter()
-                .map(|&i| self.ordered_outcomes[i].0)
-                .collect::<TinyVec<[i32; 6]>>();
 
-            // Compute the number of ways to get this outcome, and multiply by the weight of all
-            // elements that make it up.
-            // TODO there's probably better options than creating a hashmap here, especially since
-            // the elements are sorted already.
-            let mut item_counts = HashMap::new();
-            for o in &outcome {
-                *item_counts.entry(o).or_insert(0) += 1;
-            }
-            let mut permutations = Natural::from(1usize);
-            for item_count in item_counts.into_values() {
-                permutations *= Natural::factorial(item_count as u64);
-            }
-            let weight: Natural = positions
-                .iter()
-                .map(|&i| &self.ordered_outcomes[i].1)
-                .product();
-            let ways = weight * (&factorial).div_exact(permutations);
-
+        for (outcome, ways) in self.multiset_iterator() {
             // Map the outcome. The weights returned by the outcome distribution should still sum to
             // |weight|, but instead, the sum can be an arbitrary value.
             // To solve this, we store each weight in |new_outcomes| as a fraction (divided by the total
@@ -276,24 +256,6 @@ impl Pool {
             for (new_outcome, sub_weight) in f_outcome {
                 *new_outcomes.entry(new_outcome).or_insert(Rational::ZERO) +=
                     Rational::from_naturals(&ways * sub_weight, f_outcome_sum.clone());
-            }
-
-            // Inner loop increments the position vector by 1, possibly carrying over.
-            let mut position_index = self.n as isize - 1;
-            while position_index >= 0 {
-                positions[position_index as usize] += 1;
-                if positions[position_index as usize] == self.ordered_outcomes.len() {
-                    if position_index == 0 {
-                        break 'outer;
-                    }
-                    position_index -= 1;
-                } else {
-                    break;
-                }
-            }
-            // Now go back and fix up the position indices
-            for i in position_index + 1..self.n as isize {
-                positions[i as usize] = positions[i as usize - 1];
             }
         }
         let new_outcomes = new_outcomes
@@ -324,6 +286,94 @@ impl Pool {
                 .into()
         })
     }
+}
+
+struct PoolMultisetIterator<'a> {
+    pool: &'a Pool,
+    positions: Vec<usize>,
+    // Factorial of the number of outcomes in the dice pool.
+    factorial: Natural,
+    // Whether we're finished; if true, then |positions| may contain invalid indices.
+    done: bool,
+}
+
+impl<'a> PoolMultisetIterator<'a> {
+    fn new(pool: &'a Pool) -> Self {
+        Self {
+            pool,
+            positions: vec![0; pool.n as usize],
+            factorial: Natural::factorial(pool.n as u64),
+            done: false,
+        }
+    }
+
+    fn advance_position(&mut self) {
+        let pool_size = self.pool.n as isize;
+        let mut position_index = pool_size - 1;
+        while position_index >= 0 {
+            self.positions[position_index as usize] += 1;
+            if self.positions[position_index as usize] == self.pool.ordered_outcomes.len() {
+                if position_index == 0 {
+                    self.done = true;
+                    return;
+                }
+                position_index -= 1;
+            } else {
+                break;
+            }
+        }
+        // Now go back and fix up the position indices
+        for i in position_index + 1..pool_size {
+            self.positions[i as usize] = self.positions[i as usize - 1];
+        }
+    }
+}
+
+impl<'a> Iterator for PoolMultisetIterator<'a> {
+    type Item = (TinyVec<[i32; 6]>, Natural);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        let outcome = self
+            .positions
+            .iter()
+            .map(|&i| self.pool.ordered_outcomes[i].0)
+            .collect::<TinyVec<[i32; 6]>>();
+
+        // Compute the number of ways to get this outcome, and multiply by the weight of all
+        // elements that make it up.
+        let weight: Natural = self
+            .positions
+            .iter()
+            .map(|&i| &self.pool.ordered_outcomes[i].1)
+            .product();
+        let permutations = item_factorials(&outcome);
+        let ways = weight * (&self.factorial).div_exact(permutations);
+
+        self.advance_position();
+        Some((outcome, ways))
+    }
+}
+
+/// For each group of consecutive equal values in the outcomes, this computes
+/// factorial(numer of same outcomes). The result is the product of all these
+/// factorials.
+fn item_factorials(outcome: &TinyVec<[i32; 6]>) -> Natural {
+    let mut product = Natural::ONE;
+    let mut count = 1;
+    for i in 1..outcome.len() {
+        let prev = outcome.get(i - 1);
+        if prev.is_some() && *prev.unwrap() == outcome[i] {
+            count += 1;
+        } else {
+            product *= Natural::factorial(count as u64);
+            count = 1;
+        }
+    }
+    product *= Natural::factorial(count as u64);
+    product
 }
 
 impl FromIterator<(i32, Natural)> for Pool {

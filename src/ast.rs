@@ -6,12 +6,6 @@ pub struct Range {
     pub end: usize,
 }
 
-pub fn merge_ranges(range: &[Range]) -> Range {
-    let start = range.iter().map(|r| r.start).min().unwrap();
-    let end = range.iter().map(|r| r.end).max().unwrap();
-    Range { start, end }
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct WithRange<T> {
     pub value: T,
@@ -353,6 +347,6 @@ mod tests {
         let ast = grammar::FunctionDefinitionParser::new()
             .parse(text)
             .unwrap();
-        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value . #(\"DIE\" Distribution))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
+        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value . #(\"DIE\" Pool))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
     }
 }
