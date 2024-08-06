@@ -1,26 +1,101 @@
-// use crate::probability::Distribution;
+use malachite::{num::basic::traits::Zero, Natural, Rational};
+use miette::{Diagnostic, GraphicalReportHandler};
+use std::fmt::Write;
 
-// pub fn print_distribution(distribution: &Distribution) {
-//     let mut outcome = Vec::new();
-//     let mut probs = Vec::new();
+use crate::dice::Pool;
 
-//     for (out, prob) in &distribution.probabilities {
-//         outcome.push(
-//             out.0
-//                 .iter()
-//                 .map(|&x| x.to_string())
-//                 .collect::<Vec<String>>()
-//                 .join(","),
-//         );
-//         probs.push(format!("{:.2}", prob));
-//     }
-//     Table {
-//         first_row_is_header: true,
-//         first_column_is_header: false,
-//         data: vec![outcome, probs],
-//     }
-//     .print();
-// }
+pub fn print_distribution(pool: &Pool) {
+    let mut outcome = Vec::new();
+    let mut counts = Vec::new();
+    let mut probs = Vec::new();
+
+    let mut total = Natural::ZERO;
+    for (out, count) in pool.ordered_outcomes().iter() {
+        outcome.push(out.to_string());
+        total += count;
+        counts.push(count);
+    }
+    for count in counts {
+        probs.push(format!(
+            "{:.02}",
+            Rational::from_naturals(count.clone(), total.clone())
+                .approx_log()
+                .exp()
+        ));
+    }
+    println!("Pool of {} dice:", pool.get_n());
+    Table {
+        first_row_is_header: true,
+        first_column_is_header: false,
+        data: vec![outcome, probs],
+    }
+    .print();
+}
+
+pub fn export_anydice_format(name: &str, pool: &Pool) -> String {
+    let probabilities = to_probabilities(pool.sum().ordered_outcomes());
+    let mean = mean(&probabilities);
+    let stddev = stddev(&probabilities, mean);
+    let (min, max) = min_and_max(&probabilities);
+
+    let mut string = String::new();
+    writeln!(string, "\"{}\",{},{},{},{}", name, mean, stddev, min, max).unwrap();
+    writeln!(string, "#,%").unwrap();
+    for (outcome, prob) in probabilities {
+        writeln!(string, "{},{}", outcome, prob * 100.0).unwrap();
+    }
+    string
+}
+
+pub fn print_diagnostic<T>(diagnostic: T, source_code: &str)
+where
+    T: Diagnostic,
+{
+    let handler = GraphicalReportHandler::new();
+    let mut string = String::new();
+    let wrapped = DiagnosticSourceAdapter {
+        source: diagnostic,
+        source_code,
+    };
+    let _ = handler.render_report(&mut string, &wrapped);
+    eprintln!("{}", string);
+}
+
+fn to_probabilities(ordered_outcomes: &[(i32, Natural)]) -> Vec<(i32, f64)> {
+    let total: Natural = ordered_outcomes.iter().map(|(_, count)| count).sum();
+    ordered_outcomes
+        .iter()
+        .map(|(outcome, count)| {
+            (
+                *outcome,
+                Rational::from_naturals(count.clone(), total.clone())
+                    .approx_log()
+                    .exp(),
+            )
+        })
+        .collect()
+}
+
+fn mean(probabilities: &[(i32, f64)]) -> f64 {
+    probabilities
+        .iter()
+        .map(|(outcome, prob)| *outcome as f64 * *prob)
+        .sum()
+}
+
+fn stddev(probabilities: &[(i32, f64)], mean: f64) -> f64 {
+    let variance: f64 = probabilities
+        .iter()
+        .map(|(outcome, prob)| (*outcome as f64 - mean).powi(2) * *prob)
+        .sum();
+    variance.sqrt()
+}
+
+fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
+    let min = probabilities.iter().map(|(outcome, _)| *outcome).min();
+    let max = probabilities.iter().map(|(outcome, _)| *outcome).max();
+    (min.unwrap(), max.unwrap())
+}
 
 #[derive(Clone)]
 struct Table {
@@ -139,4 +214,82 @@ fn print_row(row: &[String], column_widths: &[usize]) {
         print!("│");
     }
     println!();
+}
+
+struct DiagnosticSourceAdapter<T, U: miette::SourceCode>
+where
+    T: std::error::Error,
+    T: Diagnostic,
+{
+    source: T,
+    source_code: U,
+}
+
+impl<T, U> std::fmt::Display for DiagnosticSourceAdapter<T, U>
+where
+    T: std::error::Error,
+    T: Diagnostic,
+    U: miette::SourceCode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.source)
+    }
+}
+
+impl<T, U> std::fmt::Debug for DiagnosticSourceAdapter<T, U>
+where
+    T: std::error::Error,
+    T: Diagnostic,
+    U: miette::SourceCode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.source)
+    }
+}
+
+impl<T, U> std::error::Error for DiagnosticSourceAdapter<T, U>
+where
+    T: std::error::Error,
+    T: Diagnostic,
+    U: miette::SourceCode,
+{
+}
+
+impl<T, U> Diagnostic for DiagnosticSourceAdapter<T, U>
+where
+    T: std::error::Error,
+    T: Diagnostic,
+    U: miette::SourceCode,
+{
+    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
+        Some(&self.source_code)
+    }
+
+    fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        self.source.code()
+    }
+
+    fn severity(&self) -> Option<miette::Severity> {
+        self.source.severity()
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        self.source.help()
+    }
+
+    fn url<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        self.source.url()
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        self.source.labels()
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        self.source.related()
+    }
+
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        self.source.diagnostic_source()
+    }
 }

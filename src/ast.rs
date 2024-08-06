@@ -346,4 +346,13 @@ mod tests {
         let ast = grammar::ExprParser::new().parse(text).unwrap();
         assert_eq!(print_expression(&ast), "((value\n  FunctionCall\n  (name (value . \"test {}\"))\n  (args\n   ((value\n     BinaryOp\n     (op (value . Sub))\n     (left (value Int . 1))\n     (right (value Int . 2)))))))");
     }
+
+    #[test]
+    fn test_parse_function_definition() {
+        let text = "function: explode DIE:d { result: DIE }";
+        let ast = grammar::FunctionDefinitionParser::new()
+            .parse(text)
+            .unwrap();
+        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value . #(\"DIE\" Distribution))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
+    }
 }

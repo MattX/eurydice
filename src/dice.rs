@@ -225,6 +225,10 @@ impl Pool {
         self.ordered_outcomes.into_iter()
     }
 
+    pub fn ordered_outcomes(&self) -> &[(i32, Natural)] {
+        &self.ordered_outcomes
+    }
+
     /// This functions call `f` with each multiset outcome from the pool. The distributions returned
     /// by `f` are flatmapped together to create a new distribution, stored as a size-1 pool.
     pub fn flat_map<F>(&self, f: F) -> Self

@@ -3,6 +3,14 @@ name = "everydice"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "everydice"
+path = "src/lib.rs"
+
+[[bin]]
+name = "everydice"
+path = "src/main.rs"
+
 [dependencies]
 # Used to output distributions vaguely fancily.
 crossterm = "0.28.1"
@@ -37,4 +45,4 @@ cc="*"
 lalrpop = "0.20.2"
 
 [dev-dependencies]
-approx = "0.5.1"
+pretty_assertions = "1.4.0"

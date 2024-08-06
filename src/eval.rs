@@ -42,7 +42,7 @@ impl RuntimeValue {
     fn map_outcomes(&self, f: impl Fn(i32) -> i32) -> Self {
         match self {
             RuntimeValue::Int(i) => f(*i).into(),
-            RuntimeValue::List(list) => list.iter().map(|i| f(*i)).collect::<Vec<_>>().into(),
+            RuntimeValue::List(list) => f(list.iter().sum()).into(),
             RuntimeValue::Pool(d) => (**d).clone().map_outcomes(f).into(),
         }
     }
@@ -158,11 +158,17 @@ impl EvalContext {
 
 pub struct Evaluator {
     global_env: RcValEnv,
-    outputs: Vec<RuntimeValue>,
+    outputs: Vec<(RuntimeValue, String)>,
     functions: HashMap<String, FunctionDefinition>,
     explode_depth: usize,
     recursion_depth: usize,
     lowest_first: bool,
+}
+
+impl Default for Evaluator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Evaluator {
@@ -187,7 +193,7 @@ impl Evaluator {
         Ok(())
     }
 
-    pub fn get_outputs(&mut self) -> Vec<RuntimeValue> {
+    pub fn get_outputs(&mut self) -> Vec<(RuntimeValue, String)> {
         std::mem::take(&mut self.outputs)
     }
 
@@ -215,7 +221,13 @@ impl Evaluator {
                     });
                 }
                 let value = self.evaluate(eval_context, value)?;
-                self.outputs.push(value);
+                self.outputs.push((
+                    value,
+                    named
+                        .as_ref()
+                        .map(|v| v.value.clone())
+                        .unwrap_or_else(|| format!("output {}", self.outputs.len() + 1)),
+                ));
             }
             ast::Statement::Return { value } => {
                 if eval_context.at_top_level {
@@ -314,7 +326,9 @@ impl Evaluator {
                     .collect::<Vec<i32>>();
                 Ok(elems.into())
             }
-            Expression::FunctionCall { name, args } => todo!(),
+            Expression::FunctionCall { name, args } => Err(RuntimeError::NotYetImplemented {
+                range: expression.range.into(),
+            }),
             Expression::Reference(name) => eval_context.env.borrow().get(name).ok_or_else(|| {
                 RuntimeError::UndefinedReference {
                     range: expression.range.into(),
