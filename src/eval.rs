@@ -415,19 +415,35 @@ fn make_d(
         RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
         _ => panic!("make_d called with invalid right operand"),
     };
-    if let (DLeftSide::Int(repeat), DRightSide::List(sides)) = (repeat, right) {
-        return Ok(make_pool(repeat, sides).into());
+    match (repeat, right) {
+        (DLeftSide::Int(i), DRightSide::List(list)) => Ok(make_pool(i, list).into()),
+        (DLeftSide::Int(i), DRightSide::Pool(p)) => {
+            let mut new_pool = (*p).clone();
+            if i < 0 {
+                new_pool = new_pool.map_outcomes(|o| -o);
+            }
+            new_pool.set_n(new_pool.get_n() * i.unsigned_abs());
+            Ok(new_pool.into())
+        }
+        (DLeftSide::Pool(left_p), right) => {
+            let left_p = (*left_p).sum();
+            let right = match right {
+                DRightSide::List(list) => Pool::from_list(1, list),
+                DRightSide::Pool(p) => (*p).sum(),
+            };
+            // For each outcome in the left pool, sum the right pool with itself k times
+            Ok(left_p
+                .flat_map(|count| {
+                    debug_assert_eq!(count.len(), 1);
+                    let mut dup_right = right.clone();
+                    debug_assert_eq!(dup_right.get_n(), 1);
+                    dup_right.set_n(count[0] as u32);
+                    println!("dup_right: {:?}, sum: {:?}", dup_right, dup_right.sum());
+                    dup_right.sum().into()
+                })
+                .into())
+        }
     }
-    // Otherwise we turn both sides into distributions, then cross-product-multiply them
-    // let right_dist = match right {
-    //     DRightSide::List(sides) => Pool::from_list(1, sides).sum().into(),
-    //     DRightSide::Pool(d) => d,
-    // };
-    // let left_dist = match repeat {
-    //     DLeftSide::Int(count) => Pool::from_list(1, vec![count]).into(),
-    //     DLeftSide::Pool(d) => d.sum(),
-    // };
-    todo!()
 }
 
 fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {

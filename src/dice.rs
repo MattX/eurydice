@@ -11,9 +11,11 @@
 //! [^icepool]: Liu, A. J. (2022). Icepool: Efficient Computation of Dice Pool Probabilities.
 //! _Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital
 //! Entertainment_, 18(1), 258-265. https://doi.org/10.1609/aiide.v18i1.21971
+// TODO some functions in this file take ownership (or a mutable reference), but don't really need to.
 
 use lazy_static::lazy_static;
-use malachite::num::arithmetic::traits::{Factorial, Pow};
+use malachite::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
+use malachite::num::basic::traits::{One, Zero};
 use malachite::{Natural, Rational};
 use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
@@ -80,16 +82,41 @@ impl Pool {
 
     /// Creates a new pool from a list of outcomes. Repeats are allowed and will count as multiple weights.
     pub fn from_list(n: u32, outcomes: Vec<i32>) -> Self {
-        let mut outcomes_map = HashMap::new();
+        let mut outcomes_map = BTreeMap::new();
         for outcome in outcomes {
             *outcomes_map.entry(outcome).or_insert(Natural::from(0usize)) += Natural::from(1usize);
         }
-        let mut ordered_outcomes = outcomes_map.into_iter().collect::<Vec<_>>();
-        ordered_outcomes.sort();
+        let ordered_outcomes = outcomes_map.into_iter().collect::<Vec<_>>();
         Self {
             n,
             ordered_outcomes,
             keep_list: vec![true; n as usize],
+        }
+    }
+
+    /// Sets the number of dice in the pool, resetting the keep list.
+    pub fn set_n(&mut self, n: u32) {
+        self.n = n;
+        self.keep_list = vec![true; n as usize];
+    }
+
+    /// Gets the number of dice in the pool.
+    pub fn get_n(&self) -> u32 {
+        self.n
+    }
+
+    /// Maps the outcomes of the pool using the given function. The function can be non-injective,
+    /// in which case the weights of the outcomes are summed.
+    pub fn map_outcomes(self, f: impl Fn(i32) -> i32) -> Self {
+        let mut new_outcomes = BTreeMap::new();
+        for (outcome, weight) in self.ordered_outcomes.into_iter() {
+            *new_outcomes
+                .entry(f(outcome))
+                .or_insert(Natural::from(0usize)) += weight;
+        }
+        Self {
+            ordered_outcomes: new_outcomes.into_iter().collect(),
+            ..self
         }
     }
 
@@ -171,6 +198,14 @@ impl Pool {
         result
     }
 
+    fn num_kept(&self, sub_pool: SubPool, num_with_outcome: u32) -> u32 {
+        self.keep_list[(sub_pool.n - num_with_outcome) as usize..sub_pool.n as usize]
+            .iter()
+            .filter(|&&keep| keep)
+            .count() as u32
+    }
+
+    /// Sums the distribution; the resulting pool is guaranteed to have n=1.
     pub fn sum(&self) -> Pool {
         self.apply(SUM_MAPPER).into_iter().collect()
     }
@@ -180,7 +215,7 @@ impl Pool {
     }
 
     /// This functions call `f` with each multiset outcome from the pool. The distributions returned
-    /// by `f` are flatmapped together to create a new distribution, represented as a size-1 pool.
+    /// by `f` are flatmapped together to create a new distribution, stored as a size-1 pool.
     pub fn flat_map<F>(&self, f: F) -> Self
     where
         F: Fn(TinyVec<[i32; 6]>) -> BTreeMap<i32, Natural>,
@@ -189,6 +224,7 @@ impl Pool {
         // in lexicographic order.
         let mut positions = vec![0; self.n as usize];
         let mut new_outcomes = BTreeMap::new();
+        let mut outcome_sum_lcm = Natural::from(1usize);
         let factorial = Natural::factorial(self.n as u64);
         'outer: loop {
             let outcome = positions
@@ -212,12 +248,14 @@ impl Pool {
                 .iter()
                 .map(|&i| &self.ordered_outcomes[i].1)
                 .product();
-            let ways = factorial.clone() / permutations * weight;
+            let ways = weight * (&factorial).div_exact(permutations);
 
-            for (new_outcome, sub_weight) in f(outcome) {
-                *new_outcomes
-                    .entry(new_outcome)
-                    .or_insert(Natural::from(0usize)) += &ways * sub_weight;
+            let f_outcome = f(outcome);
+            let f_outcome_sum = f_outcome.values().sum();
+            outcome_sum_lcm = outcome_sum_lcm.lcm(&f_outcome_sum);
+            for (new_outcome, sub_weight) in f_outcome {
+                *new_outcomes.entry(new_outcome).or_insert(Rational::ZERO) +=
+                    Rational::from_naturals(&ways * sub_weight, f_outcome_sum.clone());
             }
 
             // Inner loop increments the position vector by 1, possibly carrying over.
@@ -238,14 +276,33 @@ impl Pool {
                 positions[i as usize] = positions[i as usize - 1];
             }
         }
+        let new_outcomes = new_outcomes
+            .into_iter()
+            .map(|(outcome, weight)| {
+                let (numerator, denominator) =
+                    (weight * Rational::from(&outcome_sum_lcm)).into_numerator_and_denominator();
+                debug_assert_eq!(denominator, Natural::ONE);
+                (outcome, numerator)
+            })
+            .collect::<BTreeMap<_, _>>();
         Pool::from_weights(new_outcomes.into_iter())
     }
 
-    fn num_kept(&self, sub_pool: SubPool, num_with_outcome: u32) -> u32 {
-        self.keep_list[(sub_pool.n - num_with_outcome) as usize..sub_pool.n as usize]
-            .iter()
-            .filter(|&&keep| keep)
-            .count() as u32
+    /// Maps multiset outcomes to a single value each.
+    pub fn map<F>(&self, f: F) -> Self
+    where
+        F: Fn(TinyVec<[i32; 6]>) -> i32,
+    {
+        self.flat_map(|outcome| BTreeMap::from([(f(outcome), 1usize.into())]))
+    }
+
+    pub fn add(&self, other: &Pool) -> Pool {
+        let other_summed = other.sum();
+        self.sum().flat_map(|outcome| {
+            other_summed
+                .map(|other_outcome| outcome[0] + other_outcome[0])
+                .into()
+        })
     }
 }
 
@@ -303,25 +360,6 @@ where
 {
     initial_state: S,
     f: F,
-}
-
-/// Converts a distribution represented as counts into a distribution represented as probabilities.
-pub fn counter_to_probability<S>(counter: &HashMap<S, Natural>) -> HashMap<S, f64>
-where
-    S: Clone + Hash + Eq,
-{
-    let total = counter.values().sum();
-    counter
-        .iter()
-        .map(|(state, count)| {
-            (
-                state.clone(),
-                Rational::from_naturals_ref(count, &total)
-                    .approx_log()
-                    .exp(),
-            )
-        })
-        .collect()
 }
 
 fn sum_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
@@ -623,33 +661,224 @@ mod tests {
             .map(|i| (i, 1usize.into()))
             .collect();
         let result = explode(die, &[2, 8], 3);
-        assert_eq!(result.len(), 33);
-        let mapped = result.into_iter().collect::<HashMap<_, _>>();
-        assert_eq!(mapped[&1], Natural::from(1000u32));
-        assert_eq!(mapped[&8], Natural::from(111u32));
-        assert_eq!(mapped[&12], Natural::from(201u32));
-        assert_eq!(mapped[&29], Natural::from(1u32));
+        let map = result.into_iter().collect::<HashMap<_, _>>();
+        let expected = [
+            (1, 1000),
+            (2, 1000),
+            (4, 1100),
+            (5, 1100),
+            (6, 1000),
+            (7, 1110),
+            (8, 110),
+            (9, 1200),
+            (10, 1211),
+            (11, 11),
+            (12, 231),
+            (13, 231),
+            (14, 101),
+            (15, 134),
+            (16, 34),
+            (17, 134),
+            (18, 134),
+            (19, 4),
+            (20, 36),
+            (21, 36),
+            (22, 16),
+            (23, 16),
+            (24, 6),
+            (25, 14),
+            (26, 14),
+            (27, 4),
+            (28, 4),
+            (29, 4),
+            (30, 1),
+            (31, 1),
+            (32, 1),
+            (33, 1),
+            (34, 1),
+        ]
+        .into_iter()
+        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .collect::<HashMap<_, _>>();
+        assert_eq!(map, expected);
     }
 
     #[test]
-    fn test_flat_map() {
+    fn test_map() {
         let pool = Pool::from_list(5, vec![1, 2, 3, 4, 5]);
-        fn multiset_to_int(multiset: TinyVec<[i32; 6]>) -> BTreeMap<i32, Natural> {
+        fn multiset_to_int(multiset: TinyVec<[i32; 6]>) -> i32 {
             let mut total = 0;
             for (idx, item) in multiset.iter().rev().enumerate() {
                 total += (item - 1) * 5i32.pow(idx as u32);
             }
-            BTreeMap::from([(total, 1usize.into())])
+            total
         }
 
-        let result = pool.flat_map(multiset_to_int);
+        let result = pool.map(multiset_to_int);
 
         let map = result.into_iter().collect::<HashMap<_, _>>();
-        println!("{:?}", map);
-        assert_eq!(map.len(), 126);
-        assert_eq!(map[&0], Natural::from(1u32));
-        assert_eq!(map[&974], Natural::from(60u32));
-        assert_eq!(map[&999], Natural::from(20u32));
-        assert_eq!(map[&1093], Natural::from(5u32));
+        let expected = [
+            (0, 1),
+            (1, 5),
+            (2, 5),
+            (3, 5),
+            (4, 5),
+            (6, 10),
+            (7, 20),
+            (8, 20),
+            (9, 20),
+            (12, 10),
+            (13, 20),
+            (14, 20),
+            (18, 10),
+            (19, 20),
+            (24, 10),
+            (31, 10),
+            (32, 30),
+            (33, 30),
+            (34, 30),
+            (37, 30),
+            (38, 60),
+            (39, 60),
+            (43, 30),
+            (44, 60),
+            (49, 30),
+            (62, 10),
+            (63, 30),
+            (64, 30),
+            (68, 30),
+            (69, 60),
+            (74, 30),
+            (93, 10),
+            (94, 30),
+            (99, 30),
+            (124, 10),
+            (156, 5),
+            (157, 20),
+            (158, 20),
+            (159, 20),
+            (162, 30),
+            (163, 60),
+            (164, 60),
+            (168, 30),
+            (169, 60),
+            (174, 30),
+            (187, 20),
+            (188, 60),
+            (189, 60),
+            (193, 60),
+            (194, 120),
+            (199, 60),
+            (218, 20),
+            (219, 60),
+            (224, 60),
+            (249, 20),
+            (312, 5),
+            (313, 20),
+            (314, 20),
+            (318, 30),
+            (319, 60),
+            (324, 30),
+            (343, 20),
+            (344, 60),
+            (349, 60),
+            (374, 20),
+            (468, 5),
+            (469, 20),
+            (474, 30),
+            (499, 20),
+            (624, 5),
+            (781, 1),
+            (782, 5),
+            (783, 5),
+            (784, 5),
+            (787, 10),
+            (788, 20),
+            (789, 20),
+            (793, 10),
+            (794, 20),
+            (799, 10),
+            (812, 10),
+            (813, 30),
+            (814, 30),
+            (818, 30),
+            (819, 60),
+            (824, 30),
+            (843, 10),
+            (844, 30),
+            (849, 30),
+            (874, 10),
+            (937, 5),
+            (938, 20),
+            (939, 20),
+            (943, 30),
+            (944, 60),
+            (949, 30),
+            (968, 20),
+            (969, 60),
+            (974, 60),
+            (999, 20),
+            (1093, 5),
+            (1094, 20),
+            (1099, 30),
+            (1124, 20),
+            (1249, 5),
+            (1562, 1),
+            (1563, 5),
+            (1564, 5),
+            (1568, 10),
+            (1569, 20),
+            (1574, 10),
+            (1593, 10),
+            (1594, 30),
+            (1599, 30),
+            (1624, 10),
+            (1718, 5),
+            (1719, 20),
+            (1724, 30),
+            (1749, 20),
+            (1874, 5),
+            (2343, 1),
+            (2344, 5),
+            (2349, 10),
+            (2374, 10),
+            (2499, 5),
+            (3124, 1),
+        ]
+        .into_iter()
+        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .collect::<HashMap<_, _>>();
+        assert_eq!(map, expected);
+    }
+
+    #[test]
+    // Computes (d3 @ d4) in AnyDice or Icepool notation.
+    fn test_flat_map() {
+        let pool1 = Pool::from_list(1, vec![1, 2, 3]);
+        let pool2 = Pool::from_list(1, vec![1, 2, 3, 4]);
+        let result = pool1.flat_map(|outcome| {
+            let mut summed_pool = pool2.clone();
+            summed_pool.set_n(outcome[0] as u32);
+            summed_pool.sum().into_iter().collect::<BTreeMap<_, _>>()
+        });
+        let map = result.into_iter().collect::<HashMap<_, _>>();
+        let expected = [
+            (1, 16),
+            (2, 20),
+            (3, 25),
+            (4, 31),
+            (5, 22),
+            (6, 22),
+            (7, 20),
+            (8, 16),
+            (9, 10),
+            (10, 6),
+            (11, 3),
+            (12, 1),
+        ]
+        .into_iter()
+        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .collect::<HashMap<_, _>>();
+        assert_eq!(map, expected);
     }
 }
