@@ -175,19 +175,19 @@ pub fn apply_string_escapes(s: &str) -> String {
     result
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub enum StaticType {
     Int,
-    Sequence,
-    Distribution,
+    List,
+    Pool,
 }
 
 impl std::fmt::Display for StaticType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StaticType::Int => write!(f, "int"),
-            StaticType::Sequence => write!(f, "sequence"),
-            StaticType::Distribution => write!(f, "distribution"),
+            StaticType::List => write!(f, "sequence"),
+            StaticType::Pool => write!(f, "die"),
         }
     }
 }

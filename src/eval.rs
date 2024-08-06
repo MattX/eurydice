@@ -6,7 +6,7 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
-    ast::{self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, UnaryOp, WithRange},
+    ast::{self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, StaticType, UnaryOp, WithRange},
     dice::Pool,
 };
 
@@ -18,11 +18,11 @@ pub enum RuntimeValue {
 }
 
 impl RuntimeValue {
-    fn runtime_type(&self) -> RuntimeType {
+    fn runtime_type(&self) -> StaticType {
         match self {
-            RuntimeValue::Int(_) => RuntimeType::Int,
-            RuntimeValue::List(_) => RuntimeType::List,
-            RuntimeValue::Pool(_) => RuntimeType::Pool,
+            RuntimeValue::Int(_) => StaticType::Int,
+            RuntimeValue::List(_) => StaticType::List,
+            RuntimeValue::Pool(_) => StaticType::Pool,
         }
     }
 
@@ -69,23 +69,6 @@ impl From<Vec<i32>> for RuntimeValue {
 impl From<Pool> for RuntimeValue {
     fn from(value: Pool) -> Self {
         RuntimeValue::Pool(Rc::new(value))
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum RuntimeType {
-    Int,
-    List,
-    Pool,
-}
-
-impl std::fmt::Display for RuntimeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RuntimeType::Int => write!(f, "int"),
-            RuntimeType::List => write!(f, "sequence"),
-            RuntimeType::Pool => write!(f, "distribution"),
-        }
     }
 }
 
@@ -140,6 +123,48 @@ impl ValEnv {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Primitive {
+    Absolute,
+    Contains,
+    Count,
+    Explode,
+    Highest,
+    Lowest,
+    Middle,
+    HighestOf,
+    LowestOf,
+    Maximum,
+    Reverse,
+    Sort,
+}
+
+#[derive(Debug, Clone)]
+pub enum Function {
+    Primitive(Primitive),
+    UserDefined(FunctionDefinition),
+}
+
+impl Function {
+    fn get_arg_types(&self) -> Vec<StaticType> {
+        match self {
+            Function::Primitive(Primitive::Absolute) => vec![StaticType::Int],
+            Function::Primitive(Primitive::Contains) => vec![StaticType::List, StaticType::Int],
+            Function::Primitive(Primitive::Count) => vec![StaticType::List, StaticType::List],
+            Function::Primitive(Primitive::Explode) => vec![StaticType::Pool],
+            Function::Primitive(Primitive::Highest) => vec![StaticType::Int, StaticType::Pool],
+            Function::Primitive(Primitive::Lowest) => vec![StaticType::Int, StaticType::Pool],
+            Function::Primitive(Primitive::Middle) => vec![StaticType::Int, StaticType::Pool],
+            Function::Primitive(Primitive::HighestOf) => vec![StaticType::Int, StaticType::Int],
+            Function::Primitive(Primitive::LowestOf) => vec![StaticType::Int, StaticType::Int],
+            Function::Primitive(Primitive::Maximum) => vec![StaticType::Pool],
+            Function::Primitive(Primitive::Reverse) => vec![StaticType::List],
+            Function::Primitive(Primitive::Sort) => vec![StaticType::List],
+            Function::UserDefined(fd) => fd.args.iter().map(|arg| arg.value.1).collect(),
+        }
+    }
+}
+
 struct EvalContext {
     env: RcValEnv,
     recursion_depth: usize,
@@ -159,7 +184,7 @@ impl EvalContext {
 pub struct Evaluator {
     global_env: RcValEnv,
     outputs: Vec<(RuntimeValue, String)>,
-    functions: HashMap<String, FunctionDefinition>,
+    functions: HashMap<String, Function>,
     explode_depth: usize,
     recursion_depth: usize,
     lowest_first: bool,
@@ -173,6 +198,19 @@ impl Default for Evaluator {
 
 impl Evaluator {
     pub fn new() -> Self {
+        let mut functions = HashMap::new();
+        functions.insert("absolute {}", Function::Primitive(Primitive::Absolute));
+        functions.insert("{} contains {}", Function::Primitive(Primitive::Contains));
+        functions.insert("count {} in {}", Function::Primitive(Primitive::Count));
+        functions.insert("explode {}", Function::Primitive(Primitive::Explode));
+        functions.insert("highest {} of {}", Function::Primitive(Primitive::Highest));
+        functions.insert("lowest {} of {}", Function::Primitive(Primitive::Lowest));
+        functions.insert("middle {} of {}", Function::Primitive(Primitive::Middle));
+        functions.insert("highest of {} and {}", Function::Primitive(Primitive::HighestOf));
+        functions.insert("lowest of {} and {}", Function::Primitive(Primitive::LowestOf));
+        functions.insert("maximum of {}", Function::Primitive(Primitive::Maximum));
+        functions.insert("reverse {}", Function::Primitive(Primitive::Reverse));
+        functions.insert("sort {}", Function::Primitive(Primitive::Sort));
         Self {
             global_env: Rc::new(RefCell::new(ValEnv::new())),
             outputs: Vec::new(),
@@ -212,7 +250,7 @@ impl Evaluator {
                     .insert(name.value.clone(), value, name.range);
             }
             ast::Statement::FunctionDefinition(fd) => {
-                self.functions.insert(fd.name.value.clone(), fd.clone());
+                self.functions.insert(fd.name.value.clone(), Function::UserDefined(fd.clone()));
             }
             ast::Statement::Output { value, named } => {
                 if !eval_context.at_top_level {
@@ -326,9 +364,17 @@ impl Evaluator {
                     .collect::<Vec<i32>>();
                 Ok(elems.into())
             }
-            Expression::FunctionCall { name, args } => Err(RuntimeError::NotYetImplemented {
-                range: expression.range.into(),
-            }),
+            Expression::FunctionCall { name, args } => {
+                let func = self.functions.get(&name.value).ok_or_else(|| {
+                    RuntimeError::UndefinedFunction {
+                        range: expression.range.into(),
+                        name: name.value.clone(),
+                    }
+                })?;
+                Err(RuntimeError::NotYetImplemented {
+                    range: expression.range.into(),
+                })
+            }
             Expression::Reference(name) => eval_context.env.borrow().get(name).ok_or_else(|| {
                 RuntimeError::UndefinedReference {
                     range: expression.range.into(),
@@ -404,7 +450,7 @@ fn apply_binary_op(
             let left = match left {
                 RuntimeValue::Int(i) => Rc::new(vec![*i]),
                 RuntimeValue::List(lst) => Rc::clone(lst),
-                RuntimeValue::Pool(p) => {
+                RuntimeValue::Pool(_) => {
                     return Err(RuntimeError::InvalidArgumentToOperator {
                         operator_range: op.range.into(),
                         op: op.value,
@@ -637,7 +683,7 @@ pub enum RuntimeError {
     LoopOverNonSequence {
         #[label = "This is a {found}."]
         range: SourceSpan,
-        found: RuntimeType,
+        found: StaticType,
     },
 
     #[error("Reference to undefined to variable {name}")]
@@ -647,18 +693,25 @@ pub enum RuntimeError {
         name: String,
     },
 
+    #[error("Reference to undefined function {name}")]
+    UndefinedFunction {
+        #[label = "No function named {name}"]
+        range: SourceSpan,
+        name: String,
+    },
+
     #[error("Conditions to `if` statements must be numbers.")]
     InvalidCondition {
         #[label = "This is a {found}."]
         range: SourceSpan,
-        found: RuntimeType,
+        found: StaticType,
     },
 
     #[error("Both sides of a range constructor must evaluate to numbers.")]
     RangeHasNonSequenceEndpoints {
         #[label = "This is a {found}."]
         range: SourceSpan,
-        found: RuntimeType,
+        found: StaticType,
     },
 
     #[error("Not yet implemented")]
@@ -677,7 +730,7 @@ pub enum RuntimeError {
 
         #[label = "This is a {found}."]
         found_range: SourceSpan,
-        found: RuntimeType,
+        found: StaticType,
     },
 }
 

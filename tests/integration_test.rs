@@ -77,13 +77,13 @@ fn test_anydice_programs() {
             }
         }
     }
-    println!("Paths with errors:");
-    for path in &paths_with_errors {
-        println!("❌ {}", path);
-    }
     println!("Paths without errors:");
     for path in &ok_paths {
         println!("✅ {}", path);
+    }
+    println!("Paths with errors:");
+    for path in &paths_with_errors {
+        println!("❌ {}", path);
     }
     assert_eq!(paths_with_errors.len(), 0, "Some test files had errors");
 }

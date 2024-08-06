@@ -171,8 +171,8 @@ pub SingleArg: FunctionDefinitionItem = {
 
 pub StaticType: StaticType = {
     "n" => StaticType::Int,
-    "s" => StaticType::Sequence,
-    "d" => StaticType::Distribution,
+    "s" => StaticType::List,
+    "d" => StaticType::Pool,
 };
 
 // TOOD: avoid unwrap here
