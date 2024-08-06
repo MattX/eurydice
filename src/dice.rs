@@ -233,6 +233,10 @@ impl Pool {
         PoolMultisetIterator::new(self)
     }
 
+    pub fn outcome_iterator(&self) -> PoolIterator {
+        PoolIterator::new(self)
+    }
+
     /// This functions call `f` with each multiset outcome from the pool. The distributions returned
     /// by `f` are flatmapped together to create a new distribution, stored as a size-1 pool.
     pub fn flat_map<F>(&self, f: F) -> Self
@@ -288,7 +292,8 @@ impl Pool {
     }
 }
 
-struct PoolMultisetIterator<'a> {
+/// Iterator over multisets of outcomes in a pool, with their weight.
+pub struct PoolMultisetIterator<'a> {
     pool: &'a Pool,
     positions: Vec<usize>,
     // Factorial of the number of outcomes in the dice pool.
@@ -374,6 +379,55 @@ fn item_factorials(outcome: &TinyVec<[i32; 6]>) -> Natural {
     }
     product *= Natural::factorial(count as u64);
     product
+}
+
+/// Iterator over all possible outcomes in a pool.
+pub struct PoolIterator<'a> {
+    pool: &'a Pool,
+    positions: Vec<usize>,
+    /// Whether we're finished; if true, then |positions| may contain invalid indices.
+    done: bool,
+}
+
+impl<'a> PoolIterator<'a> {
+    fn new(pool: &'a Pool) -> Self {
+        Self { pool, positions: vec![0; pool.n as usize], done: false }
+    }
+}
+
+impl<'a> Iterator for PoolIterator<'a> {
+    type Item = (TinyVec<[i32; 6]>, Natural);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        let outcome = self
+            .positions
+            .iter()
+            .map(|&i| self.pool.ordered_outcomes[i].0)
+            .collect::<TinyVec<[i32; 6]>>();
+        let weight: Natural = self
+            .positions
+            .iter()
+            .map(|&i| &self.pool.ordered_outcomes[i].1)
+            .product();
+        let mut position = self.pool.n as isize - 1;
+        while position >= 0 {
+            self.positions[position as usize] += 1;
+            if self.positions[position as usize] == self.pool.ordered_outcomes.len() {
+                if position == 0 {
+                    self.done = true;
+                    break;
+                }
+                self.positions[position as usize] = 0;
+                position -= 1;
+            } else {
+                break;
+            }
+        }
+        Some((outcome, weight))
+    }
 }
 
 impl FromIterator<(i32, Natural)> for Pool {
@@ -981,5 +1035,47 @@ mod tests {
         .map(|(i, w)| (i, Natural::from(w as u32)))
         .collect::<HashMap<_, _>>();
         assert_eq!(map, expected);
+    }
+
+    #[test]
+    fn test_multiset_iterator() {
+        let pool = Pool::from_list(2, vec![1, 2, 3]);
+        let mut iter = pool.multiset_iterator();
+        assert_eq!(iter.next(), Some((vec![1, 1].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), Some((vec![1, 2].as_slice().into(), 2usize.into())));
+        assert_eq!(iter.next(), Some((vec![1, 3].as_slice().into(), 2usize.into())));
+        assert_eq!(iter.next(), Some((vec![2, 2].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), Some((vec![2, 3].as_slice().into(), 2usize.into())));
+        assert_eq!(iter.next(), Some((vec![3, 3].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_multiset_iterator_weighted() {
+        let pool = Pool::from_list(2, vec![1, 1, 2, 3, 3, 3]);
+        let mut iter = pool.multiset_iterator();
+        assert_eq!(iter.next(), Some((vec![1, 1].as_slice().into(), 4usize.into())));
+        assert_eq!(iter.next(), Some((vec![1, 2].as_slice().into(), 4usize.into())));
+        assert_eq!(iter.next(), Some((vec![1, 3].as_slice().into(), 12usize.into())));
+        assert_eq!(iter.next(), Some((vec![2, 2].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), Some((vec![2, 3].as_slice().into(), 6usize.into())));
+        assert_eq!(iter.next(), Some((vec![3, 3].as_slice().into(), 9usize.into())));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_pool_iterator() {
+        let pool = Pool::from_list(2, vec![1, 2, 2, 3]);
+        let mut iter = pool.outcome_iterator();
+        assert_eq!(iter.next(), Some((vec![1, 1].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), Some((vec![1, 2].as_slice().into(), 2usize.into())));
+        assert_eq!(iter.next(), Some((vec![1, 3].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), Some((vec![2, 1].as_slice().into(), 2usize.into())));
+        assert_eq!(iter.next(), Some((vec![2, 2].as_slice().into(), 4usize.into())));
+        assert_eq!(iter.next(), Some((vec![2, 3].as_slice().into(), 2usize.into())));
+        assert_eq!(iter.next(), Some((vec![3, 1].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), Some((vec![3, 2].as_slice().into(), 2usize.into())));
+        assert_eq!(iter.next(), Some((vec![3, 3].as_slice().into(), 1usize.into())));
+        assert_eq!(iter.next(), None);
     }
 }
