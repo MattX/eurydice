@@ -120,6 +120,18 @@ impl Pool {
         }
     }
 
+    /// Maps the weights of the pool using the given function.
+    pub fn map_weights(self, f: impl Fn(Natural) -> Natural) -> Self {
+        Self {
+            ordered_outcomes: self
+                .ordered_outcomes
+                .into_iter()
+                .map(|(outcome, weight)| (outcome, f(weight)))
+                .collect(),
+            ..self
+        }
+    }
+
     fn from_weights(outcomes: impl Iterator<Item = (i32, Natural)>) -> Self {
         let mut ordered_outcomes = outcomes.collect::<Vec<_>>();
         ordered_outcomes.sort();
@@ -318,6 +330,16 @@ impl FromIterator<(i32, Natural)> for Pool {
     }
 }
 
+impl From<Vec<(i32, Natural)>> for Pool {
+    fn from(ordered_outcomes: Vec<(i32, Natural)>) -> Self {
+        Self {
+            n: 1,
+            ordered_outcomes,
+            keep_list: vec![true],
+        }
+    }
+}
+
 impl From<Pool> for BTreeMap<i32, Natural> {
     fn from(pool: Pool) -> Self {
         pool.into_iter().collect()
@@ -328,29 +350,20 @@ pub fn explode(die: Vec<(i32, Natural)>, on: &[i32], depth: usize) -> Vec<(i32, 
     if depth == 0 {
         return die;
     }
-    let total_weight: Natural = die.iter().map(|(_, weight)| weight).sum();
-    let exploder_weights = die
-        .iter()
-        .filter(|(outcome, _)| on.contains(outcome))
-        .cloned()
-        .collect::<HashMap<_, _>>();
-    let inner_explode = explode(die.clone(), on, depth - 1);
-    let mut die_dist = die
-        .into_iter()
-        .map(|(outcome, weight)| (outcome, weight * (&total_weight).pow(depth as u64)))
-        .collect::<BTreeMap<_, _>>();
-    for exploder in on {
-        // Remove the value from the inner die
-        die_dist.remove(exploder);
-    }
-    for (exploder, exploder_weight) in exploder_weights {
-        for (outcome, weight) in inner_explode.iter() {
-            let new_outcome = outcome + exploder;
-            let new_weight = weight * &exploder_weight;
-            *die_dist.entry(new_outcome).or_insert(Natural::from(0usize)) += new_weight;
+
+    let inner_explode: Pool = explode(die.clone(), on, depth - 1).into();
+    let die_dist: Pool = die.into_iter().collect::<Pool>().flat_map(|outcome| {
+        let exploder = outcome[0];
+        if on.contains(&exploder) {
+            inner_explode
+                .clone()
+                .map(|exploded_outcome| exploder + exploded_outcome[0])
+                .into()
+        } else {
+            vec![(exploder, Natural::ONE)].into_iter().collect()
         }
-    }
-    die_dist.into_iter().collect()
+    });
+    die_dist.ordered_outcomes
 }
 
 pub struct StateMapper<S, F>
@@ -664,33 +677,33 @@ mod tests {
         let map = result.into_iter().collect::<HashMap<_, _>>();
         let expected = [
             (1, 1000),
-            (2, 1000),
-            (4, 1100),
-            (5, 1100),
-            (6, 1000),
-            (7, 1110),
-            (8, 110),
-            (9, 1200),
-            (10, 1211),
-            (11, 11),
-            (12, 231),
-            (13, 231),
-            (14, 101),
-            (15, 134),
-            (16, 34),
-            (17, 134),
-            (18, 134),
-            (19, 4),
+            (3, 1100),
+            (4, 1000),
+            (5, 1110),
+            (6, 1100),
+            (7, 1111),
+            (8, 111),
+            (9, 1211),
+            (10, 1011),
+            (11, 231),
+            (12, 201),
+            (13, 134),
+            (14, 134),
+            (15, 124),
+            (16, 24),
+            (17, 133),
+            (18, 103),
+            (19, 36),
             (20, 36),
-            (21, 36),
+            (21, 16),
             (22, 16),
-            (23, 16),
-            (24, 6),
+            (23, 13),
+            (24, 3),
             (25, 14),
             (26, 14),
             (27, 4),
             (28, 4),
-            (29, 4),
+            (29, 1),
             (30, 1),
             (31, 1),
             (32, 1),
@@ -700,6 +713,32 @@ mod tests {
         .into_iter()
         .map(|(i, w)| (i, Natural::from(w as u32)))
         .collect::<HashMap<_, _>>();
+        assert_eq!(map, expected);
+    }
+
+    #[test]
+    fn test_explode_weighted() {
+        let pool = Pool::from_list(1, vec![1, 1, 3, 4, 4, 4, 5, 5]);
+        let die = pool.ordered_outcomes;
+        let result = explode(die, &[1, 4], 3);
+        let map = result.into_iter().collect::<HashMap<_, _>>();
+        let expected = [
+            (3, 512),
+            (4, 144),
+            (5, 1056),
+            (6, 264),
+            (7, 352),
+            (8, 112),
+            (9, 420),
+            (10, 408),
+            (11, 144),
+            (12, 54),
+            (13, 360),
+            (14, 108),
+            (15, 27),
+            (16, 81),
+            (17, 54),
+        ].into_iter().map(|(i, w)| (i, Natural::from(w as u32))).collect::<HashMap<_, _>>();
         assert_eq!(map, expected);
     }
 
