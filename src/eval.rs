@@ -15,25 +15,14 @@ pub enum RuntimeValue {
     Int(i32),
     List(Rc<Vec<i32>>),
     Pool(Rc<Pool>),
-    Primitive(fn(&[RuntimeValue]) -> Result<RuntimeValue, PrimitiveError>),
-    // TODO ideally this would instead be a reference into the AST, but what can we do
-    Function(Box<Function>),
-}
-
-#[derive(Debug, Clone)]
-struct Function {
-    definition: Rc<FunctionDefinition>,
-    env: RcValEnv,
 }
 
 impl RuntimeValue {
     fn runtime_type(&self) -> RuntimeType {
         match self {
             RuntimeValue::Int(_) => RuntimeType::Int,
-            RuntimeValue::List(_) => RuntimeType::Sequence,
-            RuntimeValue::Pool(_) => RuntimeType::Distribution,
-            RuntimeValue::Primitive(_) => RuntimeType::Function,
-            RuntimeValue::Function { .. } => RuntimeType::Function,
+            RuntimeValue::List(_) => RuntimeType::List,
+            RuntimeValue::Pool(_) => RuntimeType::Pool,
         }
     }
 
@@ -47,7 +36,14 @@ impl RuntimeValue {
                 .map(|(k, _)| k)
                 .collect::<Vec<_>>()
                 .repeat(repeat),
-            _ => panic!("to_list called on {}", self.runtime_type()),
+        }
+    }
+
+    fn map_outcomes(&self, f: impl Fn(i32) -> i32) -> Self {
+        match self {
+            RuntimeValue::Int(i) => f(*i).into(),
+            RuntimeValue::List(list) => list.iter().map(|i| f(*i)).collect::<Vec<_>>().into(),
+            RuntimeValue::Pool(d) => (**d).clone().map_outcomes(f).into(),
         }
     }
 }
@@ -79,18 +75,16 @@ impl From<Pool> for RuntimeValue {
 #[derive(Debug, Clone, Copy)]
 pub enum RuntimeType {
     Int,
-    Sequence,
-    Distribution,
-    Function,
+    List,
+    Pool,
 }
 
 impl std::fmt::Display for RuntimeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuntimeType::Int => write!(f, "int"),
-            RuntimeType::Sequence => write!(f, "sequence"),
-            RuntimeType::Distribution => write!(f, "distribution"),
-            RuntimeType::Function => write!(f, "function"),
+            RuntimeType::List => write!(f, "sequence"),
+            RuntimeType::Pool => write!(f, "distribution"),
         }
     }
 }
@@ -99,10 +93,10 @@ impl std::fmt::Display for RuntimeType {
 ///
 /// Lambdas capture their arguments, so we need RCs to keep the environments alive;
 /// we also need RefCells because the bindings are mutable.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ValEnv {
     parent: Option<RcValEnv>,
-    env: HashMap<String, RuntimeValue>,
+    env: HashMap<String, (RuntimeValue, ast::Range)>,
 }
 type RcValEnv = Rc<RefCell<ValEnv>>;
 
@@ -123,7 +117,7 @@ impl ValEnv {
 
     fn get(&self, key: &str) -> Option<RuntimeValue> {
         if let Some(value) = self.env.get(key) {
-            Some(value.clone())
+            Some(value.0.clone())
         } else if let Some(parent) = &self.parent {
             parent.borrow().get(key)
         } else {
@@ -131,12 +125,21 @@ impl ValEnv {
         }
     }
 
-    fn insert(&mut self, key: String, value: RuntimeValue) {
-        self.env.insert(key, value);
+    fn get_range(&self, key: &str) -> Option<ast::Range> {
+        if let Some(value) = self.env.get(key) {
+            Some(value.1)
+        } else if let Some(parent) = &self.parent {
+            parent.borrow().get_range(key)
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, key: String, value: RuntimeValue, range: ast::Range) {
+        self.env.insert(key, (value, range));
     }
 }
 
-#[derive(Clone)]
 struct EvalContext {
     env: RcValEnv,
     recursion_depth: usize,
@@ -156,6 +159,10 @@ impl EvalContext {
 pub struct Evaluator {
     global_env: RcValEnv,
     outputs: Vec<RuntimeValue>,
+    functions: HashMap<String, FunctionDefinition>,
+    explode_depth: usize,
+    recursion_depth: usize,
+    lowest_first: bool,
 }
 
 impl Evaluator {
@@ -163,6 +170,10 @@ impl Evaluator {
         Self {
             global_env: Rc::new(RefCell::new(ValEnv::new())),
             outputs: Vec::new(),
+            functions: HashMap::new(),
+            explode_depth: 2,
+            recursion_depth: 10,
+            lowest_first: false,
         }
     }
 
@@ -192,21 +203,10 @@ impl Evaluator {
                 eval_context
                     .env
                     .borrow_mut()
-                    .insert(name.value.clone(), value);
+                    .insert(name.value.clone(), value, name.range);
             }
             ast::Statement::FunctionDefinition(fd) => {
-                let env = Rc::new(RefCell::new(ValEnv::with_parent(Rc::clone(
-                    &eval_context.env,
-                ))));
-                let value = RuntimeValue::Function(Box::new(Function {
-                    // TODO make the parser parse the FD directly into an Rc
-                    definition: Rc::new(fd.clone()),
-                    env,
-                }));
-                eval_context
-                    .env
-                    .borrow_mut()
-                    .insert(fd.name.value.clone(), value);
+                self.functions.insert(fd.name.value.clone(), fd.clone());
             }
             ast::Statement::Output { value, named } => {
                 if !eval_context.at_top_level {
@@ -271,10 +271,11 @@ impl Evaluator {
                     }
                 };
                 for value in range.iter() {
-                    eval_context
-                        .env
-                        .borrow_mut()
-                        .insert(variable.value.clone(), RuntimeValue::Int(*value));
+                    eval_context.env.borrow_mut().insert(
+                        variable.value.clone(),
+                        RuntimeValue::Int(*value),
+                        variable.range,
+                    );
                     for statement in body {
                         let res = self.execute_statement(eval_context, statement)?;
                         if res.is_some() {
@@ -295,12 +296,12 @@ impl Evaluator {
         match &expression.value {
             Expression::UnaryOp { op, operand } => {
                 let value = self.evaluate(eval_context, operand)?;
-                apply_unary_op(op, &value, expression.range)
+                Ok(apply_unary_op(op.value, &value))
             }
             Expression::BinaryOp { op, left, right } => {
                 let left_value = self.evaluate(eval_context, left)?;
                 let right_value = self.evaluate(eval_context, right)?;
-                apply_binary_op(op, &left_value, &right_value, expression.range)
+                apply_binary_op(op, &left_value, left.range, &right_value, self.lowest_first)
             }
             Expression::List(list) => {
                 let elems = list
@@ -363,27 +364,158 @@ impl Evaluator {
     }
 }
 
-fn apply_unary_op(
-    op: &WithRange<UnaryOp>,
-    operand: &RuntimeValue,
-    range: ast::Range,
-) -> Result<RuntimeValue, RuntimeError> {
-    match &op.value {
-        UnaryOp::D => make_d(None, operand, range),
-        _ => todo!(),
+fn apply_unary_op(op: UnaryOp, operand: &RuntimeValue) -> RuntimeValue {
+    match op {
+        UnaryOp::D => make_d(None, operand),
+        UnaryOp::Negate => operand.map_outcomes(|o| -o),
+        UnaryOp::Invert => operand.map_outcomes(|o| if o == 0 { 1 } else { 0 }),
+        UnaryOp::Length => match operand {
+            RuntimeValue::Int(i) => (i.to_string().len() as i32).into(),
+            RuntimeValue::List(list) => (list.len() as i32).into(),
+            RuntimeValue::Pool(d) => ((*d).get_n() as i32).into(),
+        },
     }
 }
 
 fn apply_binary_op(
     op: &WithRange<BinaryOp>,
     left: &RuntimeValue,
+    left_range: ast::Range,
     right: &RuntimeValue,
-    range: ast::Range,
+    lowest_first: bool,
 ) -> Result<RuntimeValue, RuntimeError> {
     match &op.value {
-        BinaryOp::D => make_d(Some(left), right, range),
-        _ => todo!(),
+        BinaryOp::D => Ok(make_d(Some(left), right)),
+        BinaryOp::At => {
+            let left = match left {
+                RuntimeValue::Int(i) => Rc::new(vec![*i]),
+                RuntimeValue::List(lst) => Rc::clone(lst),
+                RuntimeValue::Pool(p) => {
+                    return Err(RuntimeError::InvalidArgumentToOperator {
+                        operator_range: op.range.into(),
+                        op: op.value,
+                        expected: "an int or a list",
+                        found_range: left_range.into(),
+                        found: left.runtime_type(),
+                    })
+                }
+            };
+            match right {
+                RuntimeValue::Int(i) => {
+                    let digits: Vec<i32> = i
+                        .to_string()
+                        .chars()
+                        .map(|c| c.to_digit(10).unwrap() as i32)
+                        .collect();
+                    Ok(select_positions(&left, &digits, lowest_first).into())
+                }
+                RuntimeValue::List(lst) => Ok(select_positions(&left, lst, false).into()),
+                RuntimeValue::Pool(p) => {
+                    Ok(select_in_dice(&left, (**p).clone(), lowest_first).into())
+                }
+            }
+        }
+        BinaryOp::Add => Ok(math_binary_op(left, right, |a, b| a + b)),
+        BinaryOp::Sub => Ok(math_binary_op(left, right, |a, b| a - b)),
+        BinaryOp::Mul => Ok(math_binary_op(left, right, |a, b| a * b)),
+        BinaryOp::Div => Ok(math_binary_op(left, right, |a, b| a / b)),
+        BinaryOp::Eq => Ok(math_binary_op(
+            left,
+            right,
+            |a, b| if a == b { 1 } else { 0 },
+        )),
+        BinaryOp::Ne => Ok(math_binary_op(
+            left,
+            right,
+            |a, b| if a != b { 1 } else { 0 },
+        )),
+        BinaryOp::Lt => Ok(math_binary_op(
+            left,
+            right,
+            |a, b| if a < b { 1 } else { 0 },
+        )),
+        BinaryOp::Le => Ok(math_binary_op(
+            left,
+            right,
+            |a, b| if a <= b { 1 } else { 0 },
+        )),
+        BinaryOp::Gt => Ok(math_binary_op(
+            left,
+            right,
+            |a, b| if a > b { 1 } else { 0 },
+        )),
+        BinaryOp::Ge => Ok(math_binary_op(
+            left,
+            right,
+            |a, b| if a >= b { 1 } else { 0 },
+        )),
+        BinaryOp::Or => Ok(math_binary_op(left, right, |a, b| {
+            if a != 0 || b != 0 {
+                1
+            } else {
+                0
+            }
+        })),
+        BinaryOp::And => Ok(math_binary_op(left, right, |a, b| {
+            if a != 0 && b != 0 {
+                1
+            } else {
+                0
+            }
+        })),
     }
+}
+
+fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
+    indices
+        .iter()
+        .map(|&i| {
+            if let Ok(mut i) = usize::try_from(i) {
+                if !lowest_first {
+                    i = vec.len() - i - 1;
+                }
+                vec.get(i).copied().unwrap_or(0)
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
+fn select_in_dice(indices: &[i32], mut pool: Pool, lowest_first: bool) -> Pool {
+    let size = pool.get_n() as usize;
+    let mut keep_list = vec![false; size];
+    for &i in indices {
+        if let Ok(mut i) = usize::try_from(i) {
+            if lowest_first {
+                i = size - i - 1;
+            }
+            keep_list[i] = true;
+        }
+    }
+    pool.set_keep_list(keep_list);
+    pool.sum()
+}
+
+fn math_binary_op(
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+    f: impl Fn(i32, i32) -> i32,
+) -> RuntimeValue {
+    let left = convert_arg(left);
+    let right = convert_arg(right);
+    let (left_pool, right_pool) = match (left, right) {
+        (DLeftSide::Int(a), DLeftSide::Int(b)) => return f(a, b).into(),
+        (left, right) => (left.to_pool().sum(), right.to_pool().sum()),
+    };
+    left_pool
+        .flat_map(|left_outcome| {
+            right_pool
+                .clone()
+                .map_outcomes(|right_outcome| f(left_outcome[0], right_outcome))
+                .into()
+        })
+        .into()
 }
 
 enum DLeftSide {
@@ -391,39 +523,50 @@ enum DLeftSide {
     Pool(Rc<Pool>),
 }
 
+impl DLeftSide {
+    fn to_pool(&self) -> Rc<Pool> {
+        match self {
+            DLeftSide::Int(i) => Rc::new(Pool::from_list(1, vec![*i])),
+            DLeftSide::Pool(p) => Rc::clone(p),
+        }
+    }
+}
+
 enum DRightSide {
     List(Vec<i32>),
     Pool(Rc<Pool>),
 }
 
+fn convert_arg(arg: &RuntimeValue) -> DLeftSide {
+    match arg {
+        RuntimeValue::Int(i) => DLeftSide::Int(*i),
+        RuntimeValue::List(list) => DLeftSide::Int(list.iter().sum()),
+        RuntimeValue::Pool(d) => DLeftSide::Pool(Rc::clone(d)),
+    }
+}
+
 /// Executes the unary or binary version of the _n_ `d` _m_ operator.
-fn make_d(
-    left: Option<&RuntimeValue>,
-    right: &RuntimeValue,
-    range: ast::Range,
-) -> Result<RuntimeValue, RuntimeError> {
+fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
     let repeat = match left {
         Some(RuntimeValue::Int(i)) => DLeftSide::Int(*i),
         Some(RuntimeValue::List(list)) => DLeftSide::Int(list.iter().sum()),
         Some(RuntimeValue::Pool(d)) => DLeftSide::Pool(Rc::clone(d)),
         None => DLeftSide::Int(1),
-        _ => panic!("make_d called with invalid left operand"),
     };
     let right = match right {
         RuntimeValue::Int(sides) => DRightSide::List((1..=*sides).collect()),
         RuntimeValue::List(list) => DRightSide::List(Rc::clone(list).to_vec()),
         RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
-        _ => panic!("make_d called with invalid right operand"),
     };
     match (repeat, right) {
-        (DLeftSide::Int(i), DRightSide::List(list)) => Ok(make_pool(i, list).into()),
+        (DLeftSide::Int(i), DRightSide::List(list)) => make_pool(i, list).into(),
         (DLeftSide::Int(i), DRightSide::Pool(p)) => {
             let mut new_pool = (*p).clone();
             if i < 0 {
                 new_pool = new_pool.map_outcomes(|o| -o);
             }
             new_pool.set_n(new_pool.get_n() * i.unsigned_abs());
-            Ok(new_pool.into())
+            new_pool.into()
         }
         (DLeftSide::Pool(left_p), right) => {
             let left_p = (*left_p).sum();
@@ -431,17 +574,15 @@ fn make_d(
                 DRightSide::List(list) => Pool::from_list(1, list),
                 DRightSide::Pool(p) => (*p).sum(),
             };
+            // At this point both |left_p| and |right| have a count of 1.
             // For each outcome in the left pool, sum the right pool with itself k times
-            Ok(left_p
+            left_p
                 .flat_map(|count| {
-                    debug_assert_eq!(count.len(), 1);
                     let mut dup_right = right.clone();
-                    debug_assert_eq!(dup_right.get_n(), 1);
                     dup_right.set_n(count[0] as u32);
-                    println!("dup_right: {:?}, sum: {:?}", dup_right, dup_right.sum());
                     dup_right.sum().into()
                 })
-                .into())
+                .into()
         }
     }
 }
@@ -465,32 +606,6 @@ impl From<ast::Range> for SourceSpan {
 #[derive(Debug, Error, Diagnostic)]
 #[error("Runtime error")]
 pub enum RuntimeError {
-    #[error("Empty input")]
-    EmptyInput {
-        #[label = "Empty input"]
-        range: SourceSpan,
-    },
-
-    #[error("Mismatched binary op arguments")]
-    MismatchedBinaryOpArgs {
-        op: BinaryOp,
-        left_size: usize,
-        right_size: usize,
-
-        #[label = "This argument has size {left_size}..."]
-        left_range: SourceSpan,
-
-        #[label = "...but this argument has size {right_size}"]
-        right_range: SourceSpan,
-    },
-
-    // #[error("Probability error")]
-    // ProbabilityError {
-    //     #[label = "Probability error: {underlying}"]
-    //     range: SourceSpan,
-
-    //     underlying: probability::ProbabilityError,
-    // },
     #[error("Output statement inside a function")]
     #[diagnostic(help("Output statements can only appear outside functions."))]
     OutputNotAtTopLevel {
@@ -537,6 +652,18 @@ pub enum RuntimeError {
     NotYetImplemented {
         #[label = "Not yet implemented"]
         range: SourceSpan,
+    },
+
+    #[error("Invalid argument to operator")]
+    InvalidArgumentToOperator {
+        #[label = "Operator {op} expects a {expected}."]
+        operator_range: SourceSpan,
+        op: BinaryOp,
+        expected: &'static str,
+
+        #[label = "This is a {found}."]
+        found_range: SourceSpan,
+        found: RuntimeType,
     },
 }
 

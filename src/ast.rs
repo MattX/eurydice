@@ -119,6 +119,38 @@ pub enum BinaryOp {
     And,
 }
 
+impl std::fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnaryOp::Negate => write!(f, "-"),
+            UnaryOp::Invert => write!(f, "!"),
+            UnaryOp::Length => write!(f, "#"),
+            UnaryOp::D => write!(f, "d"),
+        }
+    }
+}
+
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinaryOp::Add => write!(f, "+"),
+            BinaryOp::Sub => write!(f, "-"),
+            BinaryOp::Mul => write!(f, "*"),
+            BinaryOp::Div => write!(f, "/"),
+            BinaryOp::Eq => write!(f, "=="),
+            BinaryOp::Ne => write!(f, "!="),
+            BinaryOp::Lt => write!(f, "<"),
+            BinaryOp::Le => write!(f, "<="),
+            BinaryOp::Gt => write!(f, ">"),
+            BinaryOp::Ge => write!(f, ">="),
+            BinaryOp::D => write!(f, "d"),
+            BinaryOp::At => write!(f, "@"),
+            BinaryOp::Or => write!(f, "|"),
+            BinaryOp::And => write!(f, "&"),
+        }
+    }
+}
+
 pub fn apply_string_escapes(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();

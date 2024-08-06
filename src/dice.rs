@@ -142,14 +142,13 @@ impl Pool {
         }
     }
 
-    pub fn set_keep_list(mut self, keep_list: Vec<bool>) -> Self {
+    pub fn set_keep_list(&mut self, keep_list: Vec<bool>) {
         assert_eq!(
             keep_list.len(),
             self.n as usize,
             "keep list length must be the number of dice in the pool"
         );
         self.keep_list = keep_list;
-        self
     }
 
     pub fn apply<S, F>(&self, mapper: StateMapper<S, F>) -> HashMap<S, Natural>
@@ -262,6 +261,11 @@ impl Pool {
                 .product();
             let ways = weight * (&factorial).div_exact(permutations);
 
+            // Map the outcome. The weights returned by the outcome distribution should still sum to
+            // |weight|, but instead, the sum can be an arbitrary value.
+            // To solve this, we store each weight in |new_outcomes| as a fraction (divided by the total
+            // weight returned by f), and multiply everything by the LCM at the end to go back
+            // to naturals.
             let f_outcome = f(outcome);
             let f_outcome_sum = f_outcome.values().sum();
             outcome_sum_lcm = outcome_sum_lcm.lcm(&f_outcome_sum);
@@ -635,7 +639,8 @@ mod tests {
 
     #[test]
     fn test_sum_6d10_keep_3() {
-        let pool = Pool::ndn(6, 10).set_keep_list(vec![false, false, false, true, true, true]);
+        let mut pool = Pool::ndn(6, 10);
+        pool.set_keep_list(vec![false, false, false, true, true, true]);
         let result = pool.apply(SUM_MAPPER);
         assert_eq!(result.len(), 28);
         assert_eq!(result[&15], Natural::from(16617u64));
@@ -738,7 +743,10 @@ mod tests {
             (15, 27),
             (16, 81),
             (17, 54),
-        ].into_iter().map(|(i, w)| (i, Natural::from(w as u32))).collect::<HashMap<_, _>>();
+        ]
+        .into_iter()
+        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .collect::<HashMap<_, _>>();
         assert_eq!(map, expected);
     }
 

@@ -43,8 +43,6 @@ fn main() {
                 eval::RuntimeValue::Pool(d) => {
                     println!("dist {:?}", d);
                 }
-                eval::RuntimeValue::Primitive(_) => println!("#<primitive>"),
-                eval::RuntimeValue::Function { .. } => println!("#<function>"),
             }
         }
     }
