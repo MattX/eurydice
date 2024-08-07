@@ -25,7 +25,7 @@ pub StatementInner: Statement = {
         Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
     <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
     "output" <e:Expr> <n:OutputName?> => Statement::Output { value: e, named: n },
-    "result:" <e:Expr> => Statement::Return { value: e },
+    "result" ":" <e:Expr> => Statement::Return { value: e },
     "set" => todo!(),
     "loop" <id_start: @L> <id:VariableIdentifier> <id_end: @L> "over" <e:Expr> "{" <b:Block> "}" =>
         Statement::Loop { variable: WithRange::new(id_start, id_end, id), range_expression: Box::new(e), body: b },
@@ -157,7 +157,7 @@ pub FinalFunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
 }
 
 pub FunctionDefinition: FunctionDefinition = {
-    "function:" <items:FunctionDefinitionItem+> "{" <b:Block> "}" => make_function_definition(items, b),
+    "function" ":" <items:FunctionDefinitionItem+> "{" <b:Block> "}" => make_function_definition(items, b),
 };
 
 pub FunctionDefinitionItem: WithRange<FunctionDefinitionItem> = {

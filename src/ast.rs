@@ -169,7 +169,7 @@ pub fn apply_string_escapes(s: &str) -> String {
     result
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub enum StaticType {
     Int,
     List,

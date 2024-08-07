@@ -1,13 +1,24 @@
 //! A simple tree walking interpreter.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+    rc::Rc,
+};
 
+use malachite::{
+    num::basic::traits::{One, Zero},
+    Natural,
+};
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
-    ast::{self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, StaticType, UnaryOp, WithRange},
-    dice::Pool,
+    ast::{
+        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, StaticType, UnaryOp,
+        WithRange,
+    },
+    dice::{explode, Pool},
 };
 
 #[derive(Debug, Clone)]
@@ -15,6 +26,23 @@ pub enum RuntimeValue {
     Int(i32),
     List(Rc<Vec<i32>>),
     Pool(Rc<Pool>),
+}
+
+impl std::fmt::Display for RuntimeValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeValue::Int(i) => write!(f, "{}", i),
+            RuntimeValue::List(list) => write!(
+                f,
+                "{{{}}}",
+                list.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            RuntimeValue::Pool(d) => write!(f, "{}", d),
+        }
+    }
 }
 
 impl RuntimeValue {
@@ -44,6 +72,14 @@ impl RuntimeValue {
             RuntimeValue::Int(i) => f(*i).into(),
             RuntimeValue::List(list) => f(list.iter().sum()).into(),
             RuntimeValue::Pool(d) => (**d).clone().map_outcomes(f).into(),
+        }
+    }
+
+    fn to_pool(&self) -> Pool {
+        match self {
+            RuntimeValue::Int(i) => Pool::from_list(1, vec![*i]),
+            RuntimeValue::List(list) => Pool::from_list(1, vec![list.iter().sum()]),
+            RuntimeValue::Pool(p) => (**p).clone(),
         }
     }
 }
@@ -123,26 +159,10 @@ impl ValEnv {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Primitive {
-    Absolute,
-    Contains,
-    Count,
-    Explode,
-    Highest,
-    Lowest,
-    Middle,
-    HighestOf,
-    LowestOf,
-    Maximum,
-    Reverse,
-    Sort,
-}
-
 #[derive(Debug, Clone)]
 pub enum Function {
     Primitive(Primitive),
-    UserDefined(FunctionDefinition),
+    UserDefined(Rc<FunctionDefinition>),
 }
 
 impl Function {
@@ -168,7 +188,6 @@ impl Function {
 struct EvalContext {
     env: RcValEnv,
     recursion_depth: usize,
-    at_top_level: bool,
 }
 
 impl EvalContext {
@@ -176,7 +195,6 @@ impl EvalContext {
         Self {
             env,
             recursion_depth: 0,
-            at_top_level: true,
         }
     }
 }
@@ -199,22 +217,28 @@ impl Default for Evaluator {
 impl Evaluator {
     pub fn new() -> Self {
         let mut functions = HashMap::new();
-        functions.insert("absolute {}", Function::Primitive(Primitive::Absolute));
-        functions.insert("{} contains {}", Function::Primitive(Primitive::Contains));
-        functions.insert("count {} in {}", Function::Primitive(Primitive::Count));
-        functions.insert("explode {}", Function::Primitive(Primitive::Explode));
-        functions.insert("highest {} of {}", Function::Primitive(Primitive::Highest));
-        functions.insert("lowest {} of {}", Function::Primitive(Primitive::Lowest));
-        functions.insert("middle {} of {}", Function::Primitive(Primitive::Middle));
-        functions.insert("highest of {} and {}", Function::Primitive(Primitive::HighestOf));
-        functions.insert("lowest of {} and {}", Function::Primitive(Primitive::LowestOf));
-        functions.insert("maximum of {}", Function::Primitive(Primitive::Maximum));
-        functions.insert("reverse {}", Function::Primitive(Primitive::Reverse));
-        functions.insert("sort {}", Function::Primitive(Primitive::Sort));
+        functions.insert("absolute {}".to_string(), Function::Primitive(Primitive::Absolute));
+        functions.insert("{} contains {}".to_string(), Function::Primitive(Primitive::Contains));
+        functions.insert("count {} in {}".to_string(), Function::Primitive(Primitive::Count));
+        functions.insert("explode {}".to_string(), Function::Primitive(Primitive::Explode));
+        functions.insert("highest {} of {}".to_string(), Function::Primitive(Primitive::Highest));
+        functions.insert("lowest {} of {}".to_string(), Function::Primitive(Primitive::Lowest));
+        functions.insert("middle {} of {}".to_string(), Function::Primitive(Primitive::Middle));
+        functions.insert(
+            "highest of {} and {}".to_string(),
+            Function::Primitive(Primitive::HighestOf),
+        );
+        functions.insert(
+            "lowest of {} and {}".to_string(),
+            Function::Primitive(Primitive::LowestOf),
+        );
+        functions.insert("maximum of {}".to_string(), Function::Primitive(Primitive::Maximum));
+        functions.insert("reverse {}".to_string(), Function::Primitive(Primitive::Reverse));
+        functions.insert("sort {}".to_string(), Function::Primitive(Primitive::Sort));
         Self {
             global_env: Rc::new(RefCell::new(ValEnv::new())),
             outputs: Vec::new(),
-            functions: HashMap::new(),
+            functions: functions,
             explode_depth: 2,
             recursion_depth: 10,
             lowest_first: false,
@@ -250,10 +274,13 @@ impl Evaluator {
                     .insert(name.value.clone(), value, name.range);
             }
             ast::Statement::FunctionDefinition(fd) => {
-                self.functions.insert(fd.name.value.clone(), Function::UserDefined(fd.clone()));
+                self.functions.insert(
+                    fd.name.value.clone(),
+                    Function::UserDefined(Rc::new(fd.clone())),
+                );
             }
             ast::Statement::Output { value, named } => {
-                if !eval_context.at_top_level {
+                if eval_context.recursion_depth != 0 {
                     return Err(RuntimeError::OutputNotAtTopLevel {
                         range: statement.range.into(),
                     });
@@ -268,7 +295,7 @@ impl Evaluator {
                 ));
             }
             ast::Statement::Return { value } => {
-                if eval_context.at_top_level {
+                if self.recursion_depth == 0 {
                     return Err(RuntimeError::ReturnOutsideFunction {
                         range: statement.range.into(),
                     });
@@ -365,15 +392,32 @@ impl Evaluator {
                 Ok(elems.into())
             }
             Expression::FunctionCall { name, args } => {
-                let func = self.functions.get(&name.value).ok_or_else(|| {
-                    RuntimeError::UndefinedFunction {
+                let func = self
+                    .functions
+                    .get(&name.value)
+                    .ok_or_else(|| RuntimeError::UndefinedFunction {
                         range: expression.range.into(),
                         name: name.value.clone(),
-                    }
-                })?;
-                Err(RuntimeError::NotYetImplemented {
-                    range: expression.range.into(),
-                })
+                    })?
+                    .clone();
+                let ranges = args.iter().map(|arg| arg.range).collect::<Vec<_>>();
+                let args = args
+                    .iter()
+                    .map(|arg| self.evaluate(eval_context, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let args = args
+                    .into_iter()
+                    .zip(ranges.iter())
+                    .map(|(arg, range)| WithRange {
+                        value: arg,
+                        range: *range,
+                    })
+                    .collect::<Vec<_>>();
+                let func_with_range = WithRange {
+                    value: func,
+                    range: name.range,
+                };
+                self.evaluate_function_call(eval_context, &func_with_range, args)
             }
             Expression::Reference(name) => eval_context.env.borrow().get(name).ok_or_else(|| {
                 RuntimeError::UndefinedReference {
@@ -421,6 +465,134 @@ impl Evaluator {
             }
         }?;
         Ok(base.to_list(*repeats))
+    }
+
+    fn evaluate_function_call(
+        &mut self,
+        eval_context: &EvalContext,
+        function: &WithRange<Function>,
+        args: Vec<WithRange<RuntimeValue>>,
+    ) -> Result<RuntimeValue, RuntimeError> {
+        if eval_context.recursion_depth >= self.recursion_depth {
+            return Ok(vec![].into());
+        }
+
+        // First, convert the arguments to the expected types.
+        let expected_types = function.value.get_arg_types();
+        if expected_types.len() != args.len() {
+            panic!(
+                "wrong number of arguments; this should have been caught by function name matching"
+            );
+        }
+        let arg_ranges = args.iter().map(|arg| arg.range).collect::<Vec<_>>();
+        let args = args
+            .into_iter()
+            .zip(expected_types.iter())
+            .map(|(arg, &expected)| coerce_arg(arg.value, expected))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // For any argument where the provided argument is a pool, but the expected argument is an int or a list,
+        // create an iterator over all possible outcomes of the pool.
+        // |pool_iterators| contains triples of (iterator, index, expected_type == int).
+        // pool_iterators[i].index = k if the i-th element of pool_iterators corresponds to the k-th argument.
+        let mut pool_iterators = Vec::new();
+        for (i, (arg, expected_type)) in args.iter().zip(expected_types).enumerate() {
+            match (&arg, expected_type) {
+                (RuntimeValue::Pool(p), StaticType::Int | StaticType::List) => {
+                    // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum.
+                    pool_iterators.push((
+                        p.outcome_iterator(),
+                        i,
+                        expected_type == StaticType::Int,
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        let mut results = Vec::new();
+        let mut args = args.clone();
+        // This loop executes exactly once if there are no pool iterators.
+        loop {
+            let mut weight = Natural::ONE;
+            let mut finished = !pool_iterators.is_empty();
+
+            // Advance the pool iterators.
+            for (pool_iterator, arg_index, is_int) in pool_iterators.iter_mut() {
+                if let Some((outcome, outcome_weight)) = pool_iterator.next() {
+                    args[*arg_index] = if *is_int {
+                        outcome[0].into()
+                    } else {
+                        outcome.to_vec().into()
+                    };
+                    weight *= outcome_weight;
+                    finished = false;
+                    break;
+                } else {
+                    pool_iterator.reset();
+                    if let Some((outcome, outcome_weight)) = pool_iterator.next() {
+                        args[*arg_index] = if *is_int {
+                            outcome[0].into()
+                        } else {
+                            outcome.to_vec().into()
+                        };
+                        weight *= outcome_weight;
+                    } else {
+                        // This pool iterator didn't return a value after being reset, so it's empty.
+                        // The function doesn't get called at all, return an empty list.
+                        return Ok(vec![].into());
+                    }
+                }
+            }
+            // If we have pool iterators, but all of them reached the end and have to be reset, break.
+            if finished {
+                break;
+            }
+
+            let current_result = match &function.value {
+                Function::Primitive(primitive) => {
+                    primitive.execute(&args, &arg_ranges, self.explode_depth, function.range)?
+                }
+                Function::UserDefined(user_function) => {
+                    let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
+                    for (arg, formal) in args.iter().zip(user_function.args.iter()) {
+                        new_env.insert(formal.value.0.clone(), arg.clone(), formal.range);
+                    }
+                    let new_context = EvalContext {
+                        env: Rc::new(RefCell::new(new_env)),
+                        recursion_depth: eval_context.recursion_depth + 1,
+                    };
+                    let mut result = None;
+                    for statement in &user_function.body {
+                        result = self.execute_statement(&new_context, statement)?;
+                        if result.is_some() {
+                            break;
+                        }
+                    }
+                    result.unwrap_or(vec![].into())
+                }
+            };
+            results.push((current_result, weight));
+            // If there are no pool iterators, run the loop only once.
+            if pool_iterators.is_empty() {
+                break;
+            }
+        }
+
+        // If there were any pool iterators, collect the results into a dice
+        // Otherwise, there is exactly one result, which we should return as is
+        if pool_iterators.is_empty() {
+            debug_assert!(results.len() == 1);
+            Ok(results.pop().unwrap().0)
+        } else {
+            let mut total_results = BTreeMap::<i32, Natural>::new();
+            for (result, weight) in results {
+                for (outcome, count) in result.to_pool().sum().ordered_outcomes() {
+                    *total_results.entry(*outcome).or_insert(Natural::ZERO) += count * &weight;
+                }
+            }
+            Ok(total_results.into_iter().collect::<Pool>().into())
+        }
     }
 }
 
@@ -657,6 +829,128 @@ fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {
     Pool::from_list(n as u32, sides)
 }
 
+fn coerce_arg(arg: RuntimeValue, expected: StaticType) -> Result<RuntimeValue, RuntimeError> {
+    match (arg, expected) {
+        (arg @ RuntimeValue::Int(_), StaticType::Int) => Ok(arg),
+        (RuntimeValue::Int(i), StaticType::List) => Ok(vec![i].into()),
+        (RuntimeValue::Int(i), StaticType::Pool) => Ok(Pool::from_list(1, vec![i]).into()),
+        (RuntimeValue::List(lst), StaticType::Int) => Ok(lst.iter().sum::<i32>().into()),
+        (list @ RuntimeValue::List(_), StaticType::List) => Ok(list),
+        (RuntimeValue::List(lst), StaticType::Pool) => {
+            Ok(Pool::from_list(1, (*lst).clone()).into())
+        }
+        (RuntimeValue::Pool(p), StaticType::Int) => Ok(p.sum().into()),
+        (pool @ RuntimeValue::Pool(_), _) => Ok(pool),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Primitive {
+    Absolute,
+    Contains,
+    Count,
+    Explode,
+    Highest,
+    Lowest,
+    Middle,
+    HighestOf,
+    LowestOf,
+    Maximum,
+    Reverse,
+    Sort,
+}
+
+impl Primitive {
+    fn execute(
+        self,
+        args: &[RuntimeValue],
+        arg_ranges: &[ast::Range],
+        explode_depth: usize,
+        function_range: ast::Range,
+    ) -> Result<RuntimeValue, RuntimeError> {
+        match self {
+            Primitive::Absolute => {
+                // arg: int
+                let arg = &args[0];
+                Ok(arg.map_outcomes(|o| o.abs()))
+            }
+            Primitive::Contains => {
+                // args: list, int
+                if let (RuntimeValue::List(haystack), RuntimeValue::Int(needle)) =
+                    (&args[0], &args[1])
+                {
+                    Ok(if haystack.iter().any(|h| h == needle) {
+                        1.into()
+                    } else {
+                        0.into()
+                    })
+                } else {
+                    panic!("wrong argument types to [contains]");
+                }
+            }
+            Primitive::Count => {
+                // args: list, list
+                if let (RuntimeValue::List(lst1), RuntimeValue::List(lst2)) = (&args[0], &args[1]) {
+                    Ok((lst1.iter().filter(|i| lst2.contains(i)).count() as i32).into())
+                } else {
+                    panic!("wrong argument types to [count]");
+                }
+            }
+            Primitive::Explode => {
+                // args: pool
+                if let RuntimeValue::Pool(d) = &args[0] {
+                    let die: Vec<_> = (*d).clone().sum().into_iter().collect();
+                    let highest_value = die.last().unwrap().0;
+                    Ok(Pool::from_die(explode(die, &[highest_value], explode_depth)).into())
+                } else {
+                    panic!("wrong argument types to [explode]");
+                }
+            }
+            Primitive::Highest => {
+                // args: int, pool
+                if let (RuntimeValue::Int(i), RuntimeValue::Pool(d)) = (&args[0], &args[1]) {
+                    if *i < 0 {
+                        return Err(RuntimeError::NegativeArgumentToFunction {
+                            range: function_range.into(),
+                            name: "highest".to_string(),
+                            found_range: arg_ranges[0].into(),
+                            value: *i,
+                        });
+                    } else if *i == 0 {
+                        return Ok(Pool::from_list(1, vec![0]).into());
+                    }
+                    let mut d = (**d).clone();
+                    let mut keep_list = vec![false; d.get_n() as usize];
+                    keep_list[d.get_n() as usize - *i as usize..].fill(true);
+                    d.set_keep_list(keep_list);
+                    Ok(d.sum().into())
+                } else {
+                    panic!("wrong argument types to [highest]");
+                }
+            }
+            Primitive::Lowest => {
+                todo!()
+            }
+            Primitive::Middle => {
+                todo!()
+            }
+            Primitive::HighestOf => {
+                todo!()
+            }
+            Primitive::LowestOf => {
+                todo!()
+            }
+            Primitive::Maximum => {
+                todo!()
+            }
+            Primitive::Reverse => {
+                todo!()
+            }
+            Primitive::Sort => todo!(),
+        }
+    }
+}
+
 impl From<ast::Range> for SourceSpan {
     fn from(range: ast::Range) -> Self {
         SourceSpan::new(range.start.into(), range.end - range.start)
@@ -686,16 +980,16 @@ pub enum RuntimeError {
         found: StaticType,
     },
 
-    #[error("Reference to undefined to variable {name}")]
+    #[error("Reference to undefined to variable [{name}]")]
     UndefinedReference {
         #[label = "Variable not defined"]
         range: SourceSpan,
         name: String,
     },
 
-    #[error("Reference to undefined function {name}")]
+    #[error("Reference to undefined function [{name}]")]
     UndefinedFunction {
-        #[label = "No function named {name}"]
+        #[label = "No function named [{name}]"]
         range: SourceSpan,
         name: String,
     },
@@ -723,14 +1017,26 @@ pub enum RuntimeError {
 
     #[error("Invalid argument to operator")]
     InvalidArgumentToOperator {
-        #[label = "Operator {op} expects a {expected}."]
+        #[label = "Operator {op} expects {expected}."]
         operator_range: SourceSpan,
         op: BinaryOp,
         expected: &'static str,
 
+        // TODO - show value
         #[label = "This is a {found}."]
         found_range: SourceSpan,
         found: StaticType,
+    },
+
+    #[error("Invalid argument to function")]
+    NegativeArgumentToFunction {
+        #[label = "Function [{name}] expects a nonnegative integer."]
+        range: SourceSpan,
+        name: String,
+
+        #[label = "This evaluates to {value}."]
+        found_range: SourceSpan,
+        value: i32,
     },
 }
 

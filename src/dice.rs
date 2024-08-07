@@ -35,17 +35,32 @@ pub struct Pool {
 
 impl std::fmt::Display for Pool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO format nicely if this is a regular dn.
-        write!(
-            f,
-            "{}d[{}]",
-            self.n,
-            self.ordered_outcomes
-                .iter()
-                .map(|(outcome, weight)| format!("{}:{}", outcome, weight))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        if self.n != 0 {
+            write!(f, "{}", self.n)?;
+        }
+        if self
+            .ordered_outcomes
+            .iter()
+            .enumerate()
+            .all(|(i, (outcome, weight))| *outcome == i as i32 + 1 && *weight == Natural::ONE)
+        {
+            // This is a standard dn with no repeats.
+            write!(f, "d{}", self.ordered_outcomes.len())
+        } else {
+            write!(
+                f,
+                "d{{{}}}",
+                self.ordered_outcomes
+                    .iter()
+                    .map(|(outcome, weight)| if weight == &Natural::ONE {
+                        outcome.to_string()
+                    } else {
+                        format!("{}:{}", outcome, weight)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
     }
 }
 
@@ -91,6 +106,18 @@ impl Pool {
             n,
             ordered_outcomes,
             keep_list: vec![true; n as usize],
+        }
+    }
+
+    /// Creates a new pool (comprised of a single die) from a list of outcomes. Repeats
+    /// are not allowed.
+    pub fn from_die(die: Vec<(i32, Natural)>) -> Self {
+        let mut ordered_outcomes = die.clone();
+        ordered_outcomes.sort();
+        Self {
+            n: 1,
+            ordered_outcomes,
+            keep_list: vec![true],
         }
     }
 
@@ -391,7 +418,16 @@ pub struct PoolIterator<'a> {
 
 impl<'a> PoolIterator<'a> {
     fn new(pool: &'a Pool) -> Self {
-        Self { pool, positions: vec![0; pool.n as usize], done: false }
+        Self {
+            pool,
+            positions: vec![0; pool.n as usize],
+            done: false,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.positions = vec![0; self.pool.n as usize];
+        self.done = false;
     }
 }
 
@@ -560,8 +596,7 @@ pub fn make_max_dice_to_reach_mapper(
 
 lazy_static! {
     /// Cache for binomial coefficients. Rows are either missing or fully calculated.
-    static ref BINOM_CACHE: RwLock<Vec<Vec<Natural>>> = RwLock::new(vec![vec![1usize.into()]]);
-    static ref ONE: Natural = 1usize.into();
+    static ref BINOM_CACHE: RwLock<Vec<Vec<Natural>>> = RwLock::new(vec![vec![Natural::ONE]]);
 }
 
 /// Calculate binomial coefficient n choose k, with value caching.
@@ -571,10 +606,10 @@ lazy_static! {
 #[allow(clippy::needless_range_loop)]
 fn binom(n: usize, k: usize) -> Natural {
     if n == k {
-        return ONE.clone();
+        return Natural::ONE;
     }
     if k == 0 {
-        return ONE.clone();
+        return Natural::ONE;
     }
     let mut binom_cache = BINOM_CACHE.write().unwrap();
     let max_row = binom_cache.len();
@@ -583,7 +618,7 @@ fn binom(n: usize, k: usize) -> Natural {
         return binom_cache[n][k].clone();
     }
     for row_idx in max_row..=n {
-        let mut row: Vec<Natural> = vec![1usize.into(); row_idx + 1];
+        let mut row: Vec<Natural> = vec![Natural::ONE; row_idx + 1];
         for i in 1..row_idx {
             // The first and last elements are always 1, so we can skip them.
             row[i] = &binom_cache[row_idx - 1][i - 1] + &binom_cache[row_idx - 1][i];
@@ -1041,12 +1076,30 @@ mod tests {
     fn test_multiset_iterator() {
         let pool = Pool::from_list(2, vec![1, 2, 3]);
         let mut iter = pool.multiset_iterator();
-        assert_eq!(iter.next(), Some((vec![1, 1].as_slice().into(), 1usize.into())));
-        assert_eq!(iter.next(), Some((vec![1, 2].as_slice().into(), 2usize.into())));
-        assert_eq!(iter.next(), Some((vec![1, 3].as_slice().into(), 2usize.into())));
-        assert_eq!(iter.next(), Some((vec![2, 2].as_slice().into(), 1usize.into())));
-        assert_eq!(iter.next(), Some((vec![2, 3].as_slice().into(), 2usize.into())));
-        assert_eq!(iter.next(), Some((vec![3, 3].as_slice().into(), 1usize.into())));
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 1].as_slice().into(), 1usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 2].as_slice().into(), 2usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 3].as_slice().into(), 2usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![2, 2].as_slice().into(), 1usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![2, 3].as_slice().into(), 2usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![3, 3].as_slice().into(), 1usize.into()))
+        );
         assert_eq!(iter.next(), None);
     }
 
@@ -1054,12 +1107,30 @@ mod tests {
     fn test_multiset_iterator_weighted() {
         let pool = Pool::from_list(2, vec![1, 1, 2, 3, 3, 3]);
         let mut iter = pool.multiset_iterator();
-        assert_eq!(iter.next(), Some((vec![1, 1].as_slice().into(), 4usize.into())));
-        assert_eq!(iter.next(), Some((vec![1, 2].as_slice().into(), 4usize.into())));
-        assert_eq!(iter.next(), Some((vec![1, 3].as_slice().into(), 12usize.into())));
-        assert_eq!(iter.next(), Some((vec![2, 2].as_slice().into(), 1usize.into())));
-        assert_eq!(iter.next(), Some((vec![2, 3].as_slice().into(), 6usize.into())));
-        assert_eq!(iter.next(), Some((vec![3, 3].as_slice().into(), 9usize.into())));
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 1].as_slice().into(), 4usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 2].as_slice().into(), 4usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 3].as_slice().into(), 12usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![2, 2].as_slice().into(), 1usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![2, 3].as_slice().into(), 6usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![3, 3].as_slice().into(), 9usize.into()))
+        );
         assert_eq!(iter.next(), None);
     }
 
@@ -1067,15 +1138,42 @@ mod tests {
     fn test_pool_iterator() {
         let pool = Pool::from_list(2, vec![1, 2, 2, 3]);
         let mut iter = pool.outcome_iterator();
-        assert_eq!(iter.next(), Some((vec![1, 1].as_slice().into(), 1usize.into())));
-        assert_eq!(iter.next(), Some((vec![1, 2].as_slice().into(), 2usize.into())));
-        assert_eq!(iter.next(), Some((vec![1, 3].as_slice().into(), 1usize.into())));
-        assert_eq!(iter.next(), Some((vec![2, 1].as_slice().into(), 2usize.into())));
-        assert_eq!(iter.next(), Some((vec![2, 2].as_slice().into(), 4usize.into())));
-        assert_eq!(iter.next(), Some((vec![2, 3].as_slice().into(), 2usize.into())));
-        assert_eq!(iter.next(), Some((vec![3, 1].as_slice().into(), 1usize.into())));
-        assert_eq!(iter.next(), Some((vec![3, 2].as_slice().into(), 2usize.into())));
-        assert_eq!(iter.next(), Some((vec![3, 3].as_slice().into(), 1usize.into())));
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 1].as_slice().into(), 1usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 2].as_slice().into(), 2usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![1, 3].as_slice().into(), 1usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![2, 1].as_slice().into(), 2usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![2, 2].as_slice().into(), 4usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![2, 3].as_slice().into(), 2usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![3, 1].as_slice().into(), 1usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![3, 2].as_slice().into(), 2usize.into()))
+        );
+        assert_eq!(
+            iter.next(),
+            Some((vec![3, 3].as_slice().into(), 1usize.into()))
+        );
         assert_eq!(iter.next(), None);
     }
 }
