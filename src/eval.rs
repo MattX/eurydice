@@ -702,14 +702,15 @@ fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
     indices
         .iter()
         .map(|&i| {
-            if let Ok(mut i) = usize::try_from(i) {
-                if !lowest_first {
-                    i = vec.len() - i - 1;
-                }
-                vec.get(i).copied().unwrap_or(0)
-            } else {
-                0
+            if i < 0 || i >= vec.len() as i32 {
+                return 0;
             }
+            let i = if !lowest_first {
+                vec.len() - i as usize - 1
+            } else {
+                i as usize
+            };
+            vec.get(i).copied().unwrap_or(0)
         })
         .sum()
 }
@@ -929,22 +930,34 @@ impl Primitive {
                 }
             }
             Primitive::Lowest => {
-                todo!()
+                Err(RuntimeError::NotYetImplemented {
+                    range: function_range.into(),
+                })
             }
             Primitive::Middle => {
-                todo!()
+                Err(RuntimeError::NotYetImplemented {
+                    range: function_range.into(),
+                })
             }
             Primitive::HighestOf => {
-                todo!()
+                Err(RuntimeError::NotYetImplemented {
+                    range: function_range.into(),
+                })
             }
             Primitive::LowestOf => {
-                todo!()
+                Err(RuntimeError::NotYetImplemented {
+                    range: function_range.into(),
+                })
             }
             Primitive::Maximum => {
-                todo!()
+                Err(RuntimeError::NotYetImplemented {
+                    range: function_range.into(),
+                })
             }
             Primitive::Reverse => {
-                todo!()
+                Err(RuntimeError::NotYetImplemented {
+                    range: function_range.into(),
+                })
             }
             Primitive::Sort => todo!(),
         }

@@ -1,4 +1,5 @@
-use malachite::{num::basic::traits::Zero, Natural, Rational};
+use malachite::num::conversion::traits::RoundingFrom;
+use malachite::{num::basic::traits::Zero, rounding_modes::RoundingMode, Natural, Rational};
 use miette::{Diagnostic, GraphicalReportHandler};
 use std::fmt::Write;
 
@@ -18,9 +19,11 @@ pub fn print_distribution(pool: &Pool) {
     for count in counts {
         probs.push(format!(
             "{:.02}",
-            Rational::from_naturals(count.clone(), total.clone())
-                .approx_log()
-                .exp()
+            f64::rounding_from(
+                Rational::from_naturals(count.clone(), total.clone()),
+                RoundingMode::Nearest
+            )
+            .0
         ));
     }
     println!("Pool of {} dice:", pool.get_n());
@@ -61,29 +64,31 @@ where
     eprintln!("{}", string);
 }
 
-fn to_probabilities(ordered_outcomes: &[(i32, Natural)]) -> Vec<(i32, f64)> {
+pub fn to_probabilities(ordered_outcomes: &[(i32, Natural)]) -> Vec<(i32, f64)> {
     let total: Natural = ordered_outcomes.iter().map(|(_, count)| count).sum();
     ordered_outcomes
         .iter()
         .map(|(outcome, count)| {
             (
                 *outcome,
-                Rational::from_naturals(count.clone(), total.clone())
-                    .approx_log()
-                    .exp(),
+                f64::rounding_from(
+                    Rational::from_naturals(count.clone(), total.clone()),
+                    RoundingMode::Nearest,
+                )
+                .0,
             )
         })
         .collect()
 }
 
-fn mean(probabilities: &[(i32, f64)]) -> f64 {
+pub fn mean(probabilities: &[(i32, f64)]) -> f64 {
     probabilities
         .iter()
         .map(|(outcome, prob)| *outcome as f64 * *prob)
         .sum()
 }
 
-fn stddev(probabilities: &[(i32, f64)], mean: f64) -> f64 {
+pub fn stddev(probabilities: &[(i32, f64)], mean: f64) -> f64 {
     let variance: f64 = probabilities
         .iter()
         .map(|(outcome, prob)| (*outcome as f64 - mean).powi(2) * *prob)
@@ -91,7 +96,7 @@ fn stddev(probabilities: &[(i32, f64)], mean: f64) -> f64 {
     variance.sqrt()
 }
 
-fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
+pub fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
     let min = probabilities.iter().map(|(outcome, _)| *outcome).min();
     let max = probabilities.iter().map(|(outcome, _)| *outcome).max();
     (min.unwrap(), max.unwrap())
