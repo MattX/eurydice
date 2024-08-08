@@ -279,7 +279,7 @@ impl Evaluator {
         Self {
             global_env: Rc::new(RefCell::new(ValEnv::new())),
             outputs: Vec::new(),
-            functions: functions,
+            functions,
             explode_depth: 2,
             recursion_depth: 10,
             lowest_first: false,
@@ -706,7 +706,7 @@ fn apply_binary_op(
             }
         }
         // TODO should report an error if b < 0
-        BinaryOp::Pow => Ok(math_binary_op(left, right, |a, b| a.pow(b.abs() as u32))),
+        BinaryOp::Pow => Ok(math_binary_op(left, right, |a, b| a.pow(b.unsigned_abs()))),
         BinaryOp::Add => Ok(math_binary_op(left, right, |a, b| a + b)),
         BinaryOp::Sub => Ok(math_binary_op(left, right, |a, b| a - b)),
         BinaryOp::Mul => Ok(math_binary_op(left, right, |a, b| a * b)),
@@ -984,51 +984,112 @@ impl Primitive {
                     panic!("wrong argument types to [explode]");
                 }
             }
-            Primitive::Highest => {
+            Primitive::Highest | Primitive::Middle | Primitive::Lowest => {
                 // args: int, pool
                 if let (RuntimeValue::Int(i), RuntimeValue::Pool(d)) = (&args[0], &args[1]) {
-                    if *i < 0 {
-                        return Err(RuntimeError::NegativeArgumentToFunction {
-                            range: function_range.into(),
-                            name: "highest".to_string(),
-                            found_range: arg_ranges[0].into(),
-                            value: *i,
-                        });
-                    } else if *i == 0 {
-                        return Ok(Pool::from_list(1, vec![0]).into());
-                    }
+                    let keep_list = keep_list_for_primitive(
+                        self,
+                        *i,
+                        arg_ranges[0],
+                        d.get_n() as usize,
+                        function_range,
+                    )?;
                     let mut d = (**d).clone();
-                    let mut keep_list = vec![false; d.get_n() as usize];
-                    keep_list[d.get_n() as usize - *i as usize..].fill(true);
                     d.set_keep_list(keep_list);
                     Ok(d.sum().into())
                 } else {
-                    panic!("wrong argument types to [highest]");
+                    panic!("wrong argument types to [highest/lowest/middle]");
                 }
             }
-            Primitive::Lowest => Err(RuntimeError::NotYetImplemented {
-                range: function_range.into(),
-            }),
-            Primitive::Middle => Err(RuntimeError::NotYetImplemented {
-                range: function_range.into(),
-            }),
-            Primitive::HighestOf => Err(RuntimeError::NotYetImplemented {
-                range: function_range.into(),
-            }),
-            Primitive::LowestOf => Err(RuntimeError::NotYetImplemented {
-                range: function_range.into(),
-            }),
-            Primitive::Maximum => Err(RuntimeError::NotYetImplemented {
-                range: function_range.into(),
-            }),
-            Primitive::Reverse => Err(RuntimeError::NotYetImplemented {
-                range: function_range.into(),
-            }),
-            Primitive::Sort => Err(RuntimeError::NotYetImplemented {
-                range: function_range.into(),
-            }),
+            Primitive::HighestOf => {
+                // args: int, int
+                if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
+                    Ok((*(i.max(j))).into())
+                } else {
+                    panic!("wrong argument types to [highest of]");
+                }
+            }
+            Primitive::LowestOf => {
+                // args: int, int
+                if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
+                    Ok((*(i.min(j))).into())
+                } else {
+                    panic!("wrong argument types to [lowest of]");
+                }
+            }
+            Primitive::Maximum => {
+                // args: pool
+                if let RuntimeValue::Pool(d) = &args[0] {
+                    Ok(d.ordered_outcomes()
+                        .last()
+                        .map(|(o, _)| *o)
+                        .unwrap_or(0)
+                        .into())
+                } else {
+                    panic!("wrong argument types to [maximum]");
+                }
+            }
+            Primitive::Reverse => {
+                // args: sequence
+                if let RuntimeValue::List(lst) = &args[0] {
+                    Ok(lst.iter().rev().copied().collect::<Vec<_>>().into())
+                } else {
+                    panic!("wrong argument types to [reverse]");
+                }
+            }
+            Primitive::Sort => {
+                // args: sequence
+                if let RuntimeValue::List(lst) = &args[0] {
+                    let mut lst = (**lst).clone();
+                    lst.sort();
+                    Ok(lst.into())
+                } else {
+                    panic!("wrong argument types to [sort]");
+                }
+            }
         }
     }
+}
+
+fn keep_list_for_primitive(
+    primitive: Primitive,
+    keep: i32,
+    keep_range: ast::Range,
+    outcomes_size: usize,
+    function_range: ast::Range,
+) -> Result<Vec<bool>, RuntimeError> {
+    if keep < 0 {
+        return Err(RuntimeError::NegativeArgumentToFunction {
+            range: function_range.into(),
+            name: match primitive {
+                Primitive::Highest => "highest".to_string(),
+                Primitive::Lowest => "lowest".to_string(),
+                Primitive::Middle => "middle".to_string(),
+                _ => unreachable!(),
+            },
+            found_range: keep_range.into(),
+            value: keep,
+        });
+    }
+    let mut keep_list = vec![false; outcomes_size];
+    if keep == 0 {
+        return Ok(keep_list);
+    }
+    match primitive {
+        Primitive::Highest => {
+            keep_list[outcomes_size - keep as usize..].fill(true);
+        }
+        Primitive::Lowest => {
+            keep_list[..keep as usize].fill(true);
+        }
+        Primitive::Middle => {
+            // This is rounding down
+            let start = (outcomes_size - keep as usize) / 2;
+            keep_list[start..start + keep as usize].fill(true);
+        }
+        _ => unreachable!(),
+    }
+    Ok(keep_list)
 }
 
 impl From<ast::Range> for SourceSpan {
@@ -1047,7 +1108,7 @@ fn interpolate_variable_names(
         if chr == '[' {
             let mut valid_end = false;
             let mut name = String::new();
-            while let Some(chr) = char_iter.next() {
+            for chr in char_iter.by_ref() {
                 if chr == ']' {
                     valid_end = true;
                     break;

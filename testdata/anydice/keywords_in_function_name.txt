@@ -4,9 +4,18 @@ result: 1
 
 output [if set else to loop over function result output]
 
+function: A {
+result: A
+}
+
+output [1]
+
 \\\ Result \\\
 
 "output 1",1,0,1,1
 #,%
 1,100
 
+"output 2",1,0,1,1
+#,%
+1,100

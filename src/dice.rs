@@ -35,7 +35,7 @@ pub struct Pool {
 
 impl std::fmt::Display for Pool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.n != 0 {
+        if self.n != 1 {
             write!(f, "{}", self.n)?;
         }
         if self
@@ -183,12 +183,8 @@ impl Pool {
         S: Clone + Hash + Eq,
         F: Fn(&S, i32, u32) -> S,
     {
-        if self.ordered_outcomes.len() == 0 {
-            return [(
-                mapper.initial_state.clone(),
-                Natural::ONE,
-            )]
-            .into();
+        if self.ordered_outcomes.is_empty() {
+            return [(mapper.initial_state.clone(), Natural::ONE)].into();
         }
         let mut cache = HashMap::new();
         self.apply_inner(SubPool::initial(self), &mut cache, &mapper)
@@ -551,7 +547,11 @@ pub const PRODUCT_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMap
 };
 
 fn max_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
-    if count > 0 { (*state).max(outcome) } else { *state }
+    if count > 0 {
+        (*state).max(outcome)
+    } else {
+        *state
+    }
 }
 
 /// Mapper that takes the maximum of the outcomes.
@@ -561,7 +561,11 @@ pub const MAX_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper 
 };
 
 fn min_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
-    if count > 0 { (*state).min(outcome) } else { *state }
+    if count > 0 {
+        (*state).min(outcome)
+    } else {
+        *state
+    }
 }
 
 /// Mapper that takes the minimum of the outcomes.

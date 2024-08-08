@@ -17,7 +17,7 @@ output [return int d6]
 output [return seq d6]
 output [return dice d6]
 
-\\\ Results \\\
+\\\ Result \\\
 
 "output 1",3.5000000000069997,1.707825127661641,1,6
 #,%
