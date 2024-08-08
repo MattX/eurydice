@@ -648,6 +648,7 @@ fn apply_binary_op(
                 }
             }
         }
+        BinaryOp::Pow => Ok(math_binary_op(left, right, |a, b| a.pow(b as u32))),
         BinaryOp::Add => Ok(math_binary_op(left, right, |a, b| a + b)),
         BinaryOp::Sub => Ok(math_binary_op(left, right, |a, b| a - b)),
         BinaryOp::Mul => Ok(math_binary_op(left, right, |a, b| a * b)),

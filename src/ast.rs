@@ -97,6 +97,7 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum BinaryOp {
+    Pow,
     Add,
     Sub,
     Mul,
@@ -141,6 +142,7 @@ impl std::fmt::Display for BinaryOp {
             BinaryOp::At => write!(f, "@"),
             BinaryOp::Or => write!(f, "|"),
             BinaryOp::And => write!(f, "&"),
+            BinaryOp::Pow => write!(f, "^"),
         }
     }
 }
@@ -348,5 +350,12 @@ mod tests {
             .parse(text)
             .unwrap();
         assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value . #(\"DIE\" Pool))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
+    }
+
+    #[test]
+    fn test_parse_binary_op_precedence() {
+        let text = "((value\n  BinaryOp\n  (op (value . Add))\n  (left (value Int . 1))\n  (right\n   (value\n    BinaryOp\n    (op (value . Mul))\n    (left (value Int . 2))\n    (right (value Int . 3))))))";
+        let ast = grammar::ExprParser::new().parse(text).unwrap();
+        assert_eq!(print_expression(&ast), "");
     }
 }
