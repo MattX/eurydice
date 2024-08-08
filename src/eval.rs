@@ -6,9 +6,10 @@ use std::{
     rc::Rc,
 };
 
+use malachite::num::arithmetic::traits::Lcm;
 use malachite::{
     num::basic::traits::{One, Zero},
-    Natural,
+    Natural, Rational,
 };
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -419,6 +420,10 @@ impl Evaluator {
                     SetParam::MaximumFunctionDepth(d) => self.recursion_depth = *d,
                 }
             }
+            Statement::Print { expr } => {
+                let value = self.evaluate(eval_context, expr)?;
+                println!("{:?}: {}", expr.value, value);
+            }
         }
         Ok(None)
     }
@@ -609,7 +614,9 @@ impl Evaluator {
             weight = Natural::ONE;
             // Advance the pool iterators.
             let pool_iterator_count = pool_iterators.len();
-            for (iterator_index, (pool_iterator, arg_index, is_int)) in pool_iterators.iter_mut().enumerate() {
+            for (iterator_index, (pool_iterator, arg_index, is_int)) in
+                pool_iterators.iter_mut().enumerate()
+            {
                 if let Some((outcome, outcome_weight)) = pool_iterator.next() {
                     args[*arg_index] = if *is_int {
                         outcome[0].into()
@@ -642,7 +649,8 @@ impl Evaluator {
             debug_assert!(results.len() == 1);
             Ok(results.pop().unwrap().0)
         } else {
-            let mut total_results = BTreeMap::<i32, Natural>::new();
+            let mut total_results = BTreeMap::<i32, Rational>::new();
+            let mut lcm = Natural::ONE;
             for (result, weight) in results {
                 if let RuntimeValue::Pool(ref p) = result {
                     // The empty die is ignored in this context, but the empty list is not.
@@ -650,11 +658,28 @@ impl Evaluator {
                         continue;
                     }
                 }
-                for (outcome, count) in result.to_pool().sum().ordered_outcomes() {
-                    *total_results.entry(*outcome).or_insert(Natural::ZERO) += count * &weight;
+                let summed = result.to_pool().sum();
+                let total_count = summed
+                    .ordered_outcomes()
+                    .iter()
+                    .map(|(_, count)| count)
+                    .sum();
+                lcm = lcm.lcm(&total_count);
+                for (outcome, count) in summed.ordered_outcomes() {
+                    *total_results.entry(*outcome).or_insert(Rational::ZERO) +=
+                        Rational::from_naturals(count * &weight, total_count.clone());
                 }
             }
-            Ok(total_results.into_iter().collect::<Pool>().into())
+            Ok(total_results
+                .into_iter()
+                .map(|(outcome, weight)| {
+                    let (numerator, denominator) =
+                        (weight * Rational::from(&lcm)).into_numerator_and_denominator();
+                    debug_assert_eq!(denominator, Natural::ONE);
+                    (outcome, numerator)
+                })
+                .collect::<Pool>()
+                .into())
         }
     }
 }

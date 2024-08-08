@@ -10,7 +10,7 @@ function: return seq A:n {
 
 \ Function that returns dice \
 function: return dice A:n {
-   result: d A
+   result: dA
 }
 
 output [return int d6]
@@ -45,4 +45,3 @@ output [return dice d6]
 4,10.2777777778
 5,6.11111111111
 6,2.77777777778
-

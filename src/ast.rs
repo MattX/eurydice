@@ -47,6 +47,9 @@ pub enum Statement {
         body: Vec<WithRange<Statement>>,
     },
     Set(SetParam),
+    Print {
+        expr: WithRange<Expression>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -34,7 +34,7 @@ fn test_anydice_programs() {
 
             if parts.len() != 2 {
                 paths_with_errors.insert(path_string);
-                println!("Invalid test file format: {}", path.display());
+                println!("Error: {} sections (2 expected) found in {}", parts.len(), path.display());
                 continue;
             }
 
