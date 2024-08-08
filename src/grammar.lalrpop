@@ -34,7 +34,11 @@ pub StatementInner: Statement = {
 
 IfStatement: Statement = {
     "if" <e:Expr> "{" <b:Block> "}" => Statement::If { condition: Box::new(e), then_block: b, else_block: None },
-    "if" <e:Expr> "{" <thn:Block> "}" "else" "{" <els:Block> "}" => Statement::If { condition: Box::new(e), then_block: thn, else_block: Some(els) },
+    "if" <e:Expr> "{" <thn:Block> "}" "else" "{" <els:Block> "}" =>
+        Statement::If { condition: Box::new(e), then_block: thn, else_block: Some(els) },
+    "if" <e:Expr> "{" <thn:Block> "}" "else" <start: @L> <other:IfStatement> <end: @R> =>
+        Statement::If { condition: Box::new(e), then_block: thn,
+            else_block: Some(vec![WithRange::new(start, end, other)]) },
 };
 
 pub Block: Vec<WithRange<Statement>> = {

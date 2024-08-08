@@ -308,13 +308,14 @@ impl Evaluator {
                 then_block,
                 else_block,
             } => {
-                let condition = self.evaluate(eval_context, condition)?;
-                let cond_value = match condition {
+                let condition_value = self.evaluate(eval_context, condition)?;
+                let cond_value = match condition_value {
                     RuntimeValue::Int(i) => i,
                     _ => {
                         return Err(RuntimeError::InvalidCondition {
-                            range: statement.range.into(),
-                            found: condition.runtime_type(),
+                            range: condition.range.into(),
+                            found: condition_value.runtime_type(),
+                            value: condition_value,
                         })
                     }
                 };
@@ -891,8 +892,12 @@ impl Primitive {
             }
             Primitive::Count => {
                 // args: list, list
-                if let (RuntimeValue::List(lst1), RuntimeValue::List(lst2)) = (&args[0], &args[1]) {
-                    Ok((lst1.iter().filter(|i| lst2.contains(i)).count() as i32).into())
+                if let (RuntimeValue::List(needle), RuntimeValue::List(haystack)) = (&args[0], &args[1]) {
+                    let mut needle_map = HashMap::new();
+                    for n in needle.iter() {
+                        *needle_map.entry(n).or_insert(0) += 1;
+                    }
+                    Ok(haystack.iter().map(|item| needle_map.get(item).copied().unwrap_or(0)).sum::<i32>().into())
                 } else {
                     panic!("wrong argument types to [count]");
                 }
@@ -1009,9 +1014,10 @@ pub enum RuntimeError {
 
     #[error("Conditions to `if` statements must be numbers.")]
     InvalidCondition {
-        #[label = "This is a {found}."]
+        #[label = "This is a {found} with value {value}."]
         range: SourceSpan,
         found: StaticType,
+        value: RuntimeValue,
     },
 
     #[error("Both sides of a range constructor must evaluate to numbers.")]

@@ -1,4 +1,4 @@
-use approx::{relative_eq, relative_ne};
+use approx::relative_ne;
 use csv::ReaderBuilder;
 use everydice::{
     dice::Pool,
@@ -7,7 +7,6 @@ use everydice::{
         export_anydice_format, mean, min_and_max, print_diagnostic, stddev, to_probabilities,
     },
 };
-use lexpr::parse::error;
 use miette::{Diagnostic, SourceSpan};
 use pretty_assertions::StrComparison;
 use std::{collections::HashSet, fs, path::Path};
@@ -56,7 +55,6 @@ fn test_anydice_programs() {
 
             let mut evaluator = eval::Evaluator::new();
             let parser = grammar::BodyParser::new();
-            let mut actual_result = String::new();
 
             let statements = match parser.parse(program) {
                 Ok(expr) => expr,
@@ -109,11 +107,15 @@ fn test_anydice_programs() {
         }
     }
     println!("Paths without errors:");
-    for path in &ok_paths {
+    let mut sorted_ok_paths = ok_paths.iter().collect::<Vec<_>>();
+    sorted_ok_paths.sort();
+    for path in &sorted_ok_paths {
         println!("✅ {}", path);
     }
     println!("Paths with errors:");
-    for path in &paths_with_errors {
+    let mut sorted_paths_with_errors = paths_with_errors.iter().collect::<Vec<_>>();
+    sorted_paths_with_errors.sort();
+    for path in &sorted_paths_with_errors {
         println!("❌ {}", path);
     }
     assert_eq!(paths_with_errors.len(), 0, "Some test files had errors");
@@ -184,7 +186,7 @@ fn parse_results(contents: &str) -> Result<ExpectedResult, Box<dyn std::error::E
     })
 }
 
-pub fn create_expected_result(name: &str, pool: &Pool) -> ExpectedResult {
+fn create_expected_result(name: &str, pool: &Pool) -> ExpectedResult {
     let probabilities = to_probabilities(pool.sum().ordered_outcomes());
     let mean = mean(&probabilities);
     let stddev = stddev(&probabilities, mean);
