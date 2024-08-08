@@ -296,7 +296,7 @@ impl Evaluator {
         Ok(())
     }
 
-    pub fn get_outputs(&mut self) -> Vec<(RuntimeValue, String)> {
+    pub fn take_outputs(&mut self) -> Vec<(RuntimeValue, String)> {
         std::mem::take(&mut self.outputs)
     }
 

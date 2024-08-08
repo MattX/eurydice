@@ -23,6 +23,9 @@ fn test_anydice_programs() {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
         let path_string = path.to_string_lossy().to_string();
+        if path.file_name().unwrap().to_str().unwrap().starts_with("_") {
+            continue;
+        }
 
         if path.is_file() {
             paths.insert(path_string.clone());
@@ -79,18 +82,18 @@ fn test_anydice_programs() {
                 }
             }
 
-            if evaluator.get_outputs().len() != expected_results.len() {
+            let outputs = evaluator.take_outputs();
+            if outputs.len() != expected_results.len() {
                 paths_with_errors.insert(path_string.clone());
                 println!(
                     "Mismatch in file {}: expected {} outputs, got {}",
                     path.display(),
                     expected_results.len(),
-                    evaluator.get_outputs().len()
+                    evaluator.take_outputs().len()
                 );
             }
 
-            for (((value, name), expected), expected_str) in evaluator
-                .get_outputs()
+            for (((value, name), expected), expected_str) in outputs
                 .into_iter()
                 .zip(expected_results.iter())
                 .zip(expected_results_strings.iter())

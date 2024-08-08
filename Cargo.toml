@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "everydice"
 path = "src/main.rs"
 
+[profile.profiling]
+inherits = "release"
+debug = true
+
 [dependencies]
 # Used to output distributions vaguely fancily.
 crossterm = "0.28.1"

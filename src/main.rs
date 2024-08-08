@@ -30,7 +30,7 @@ fn main() {
                 }
             }
         }
-        for (value, name) in evaluator.get_outputs() {
+        for (value, name) in evaluator.take_outputs() {
             let d = match value {
                 eval::RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
                 eval::RuntimeValue::List(is) => Pool::from_list(1, is.to_vec()),
