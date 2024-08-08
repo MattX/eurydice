@@ -79,6 +79,16 @@ fn test_anydice_programs() {
                 }
             }
 
+            if evaluator.get_outputs().len() != expected_results.len() {
+                paths_with_errors.insert(path_string.clone());
+                println!(
+                    "Mismatch in file {}: expected {} outputs, got {}",
+                    path.display(),
+                    expected_results.len(),
+                    evaluator.get_outputs().len()
+                );
+            }
+
             for (((value, name), expected), expected_str) in evaluator
                 .get_outputs()
                 .into_iter()

@@ -7,14 +7,16 @@ use std::{
 };
 
 use malachite::{
-    num::basic::traits::{One, Zero}, Natural
+    num::basic::traits::{One, Zero},
+    Natural,
 };
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
     ast::{
-        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, PositionOrder, SetParam, StaticType, UnaryOp, WithRange
+        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, PositionOrder, SetParam,
+        Statement, StaticType, UnaryOp, WithRange,
     },
     dice::{explode, Pool},
 };
@@ -215,13 +217,34 @@ impl Default for Evaluator {
 impl Evaluator {
     pub fn new() -> Self {
         let mut functions = HashMap::new();
-        functions.insert("absolute {}".to_string(), Function::Primitive(Primitive::Absolute));
-        functions.insert("{} contains {}".to_string(), Function::Primitive(Primitive::Contains));
-        functions.insert("count {} in {}".to_string(), Function::Primitive(Primitive::Count));
-        functions.insert("explode {}".to_string(), Function::Primitive(Primitive::Explode));
-        functions.insert("highest {} of {}".to_string(), Function::Primitive(Primitive::Highest));
-        functions.insert("lowest {} of {}".to_string(), Function::Primitive(Primitive::Lowest));
-        functions.insert("middle {} of {}".to_string(), Function::Primitive(Primitive::Middle));
+        functions.insert(
+            "absolute {}".to_string(),
+            Function::Primitive(Primitive::Absolute),
+        );
+        functions.insert(
+            "{} contains {}".to_string(),
+            Function::Primitive(Primitive::Contains),
+        );
+        functions.insert(
+            "count {} in {}".to_string(),
+            Function::Primitive(Primitive::Count),
+        );
+        functions.insert(
+            "explode {}".to_string(),
+            Function::Primitive(Primitive::Explode),
+        );
+        functions.insert(
+            "highest {} of {}".to_string(),
+            Function::Primitive(Primitive::Highest),
+        );
+        functions.insert(
+            "lowest {} of {}".to_string(),
+            Function::Primitive(Primitive::Lowest),
+        );
+        functions.insert(
+            "middle {} of {}".to_string(),
+            Function::Primitive(Primitive::Middle),
+        );
         functions.insert(
             "highest of {} and {}".to_string(),
             Function::Primitive(Primitive::HighestOf),
@@ -230,8 +253,14 @@ impl Evaluator {
             "lowest of {} and {}".to_string(),
             Function::Primitive(Primitive::LowestOf),
         );
-        functions.insert("maximum of {}".to_string(), Function::Primitive(Primitive::Maximum));
-        functions.insert("reverse {}".to_string(), Function::Primitive(Primitive::Reverse));
+        functions.insert(
+            "maximum of {}".to_string(),
+            Function::Primitive(Primitive::Maximum),
+        );
+        functions.insert(
+            "reverse {}".to_string(),
+            Function::Primitive(Primitive::Reverse),
+        );
         functions.insert("sort {}".to_string(), Function::Primitive(Primitive::Sort));
         Self {
             global_env: Rc::new(RefCell::new(ValEnv::new())),
@@ -243,7 +272,7 @@ impl Evaluator {
         }
     }
 
-    pub fn execute(&mut self, statement: &WithRange<ast::Statement>) -> Result<(), RuntimeError> {
+    pub fn execute(&mut self, statement: &WithRange<Statement>) -> Result<(), RuntimeError> {
         let eval_context = EvalContext::new(Rc::clone(&self.global_env));
         let result = self.execute_statement(&eval_context, statement)?;
         debug_assert!(
@@ -261,38 +290,40 @@ impl Evaluator {
     fn execute_statement(
         &mut self,
         eval_context: &EvalContext,
-        statement: &WithRange<ast::Statement>,
+        statement: &WithRange<Statement>,
     ) -> Result<Option<RuntimeValue>, RuntimeError> {
         match &statement.value {
-            ast::Statement::Assignment { name, value } => {
+            Statement::Assignment { name, value } => {
                 let value = self.evaluate(eval_context, value)?;
                 eval_context
                     .env
                     .borrow_mut()
                     .insert(name.value.clone(), value, name.range);
             }
-            ast::Statement::FunctionDefinition(fd) => {
+            Statement::FunctionDefinition(fd) => {
                 self.functions.insert(
                     fd.name.value.clone(),
                     Function::UserDefined(Rc::new(fd.clone())),
                 );
             }
-            ast::Statement::Output { value, named } => {
+            Statement::Output { value, named } => {
                 if eval_context.recursion_depth != 0 {
                     return Err(RuntimeError::OutputNotAtTopLevel {
                         range: statement.range.into(),
                     });
                 }
                 let value = self.evaluate(eval_context, value)?;
-                self.outputs.push((
-                    value,
-                    named
-                        .as_ref()
-                        .map(|v| v.value.clone())
-                        .unwrap_or_else(|| format!("output {}", self.outputs.len() + 1)),
-                ));
+                if let Some(name) = named {
+                    self.outputs.push((
+                        value.clone(),
+                        interpolate_variable_names(name, &eval_context.env)?,
+                    ));
+                } else {
+                    self.outputs
+                        .push((value, format!("output {}", self.outputs.len() + 1)));
+                }
             }
-            ast::Statement::Return { value } => {
+            Statement::Return { value } => {
                 if self.recursion_depth == 0 {
                     return Err(RuntimeError::ReturnOutsideFunction {
                         range: statement.range.into(),
@@ -301,7 +332,7 @@ impl Evaluator {
                 let value = self.evaluate(eval_context, value)?;
                 return Ok(Some(value));
             }
-            ast::Statement::If {
+            Statement::If {
                 condition,
                 then_block,
                 else_block,
@@ -331,7 +362,7 @@ impl Evaluator {
                     }
                 }
             }
-            ast::Statement::Loop {
+            Statement::Loop {
                 variable,
                 range_expression,
                 body,
@@ -360,7 +391,7 @@ impl Evaluator {
                     }
                 }
             }
-            ast::Statement::Set(s) => {
+            Statement::Set(s) => {
                 if eval_context.recursion_depth != 0 {
                     return Err(RuntimeError::SetNotAtTopLevel {
                         range: statement.range.into(),
@@ -654,7 +685,7 @@ fn apply_binary_op(
                         .collect();
                     Ok(select_positions(&left, &digits, lowest_first).into())
                 }
-                RuntimeValue::List(lst) => Ok(select_positions(&left, lst, true).into()),
+                RuntimeValue::List(lst) => Ok(select_positions(&left, lst, false).into()),
                 RuntimeValue::Pool(p) => {
                     Ok(select_in_dice(&left, (**p).clone(), lowest_first).into())
                 }
@@ -720,7 +751,7 @@ fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
             if i < 1 || i > vec.len() as i32 {
                 return 0;
             }
-            let i = if !lowest_first {
+            let i = if lowest_first {
                 vec.len() - i as usize
             } else {
                 i as usize - 1
@@ -909,12 +940,18 @@ impl Primitive {
             }
             Primitive::Count => {
                 // args: list, list
-                if let (RuntimeValue::List(needle), RuntimeValue::List(haystack)) = (&args[0], &args[1]) {
+                if let (RuntimeValue::List(needle), RuntimeValue::List(haystack)) =
+                    (&args[0], &args[1])
+                {
                     let mut needle_map = HashMap::new();
                     for n in needle.iter() {
                         *needle_map.entry(n).or_insert(0) += 1;
                     }
-                    Ok(haystack.iter().map(|item| needle_map.get(item).copied().unwrap_or(0)).sum::<i32>().into())
+                    Ok(haystack
+                        .iter()
+                        .map(|item| needle_map.get(item).copied().unwrap_or(0))
+                        .sum::<i32>()
+                        .into())
                 } else {
                     panic!("wrong argument types to [count]");
                 }
@@ -951,41 +988,27 @@ impl Primitive {
                     panic!("wrong argument types to [highest]");
                 }
             }
-            Primitive::Lowest => {
-                Err(RuntimeError::NotYetImplemented {
-                    range: function_range.into(),
-                })
-            }
-            Primitive::Middle => {
-                Err(RuntimeError::NotYetImplemented {
-                    range: function_range.into(),
-                })
-            }
-            Primitive::HighestOf => {
-                Err(RuntimeError::NotYetImplemented {
-                    range: function_range.into(),
-                })
-            }
-            Primitive::LowestOf => {
-                Err(RuntimeError::NotYetImplemented {
-                    range: function_range.into(),
-                })
-            }
-            Primitive::Maximum => {
-                Err(RuntimeError::NotYetImplemented {
-                    range: function_range.into(),
-                })
-            }
-            Primitive::Reverse => {
-                Err(RuntimeError::NotYetImplemented {
-                    range: function_range.into(),
-                })
-            }
-            Primitive::Sort => {
-                Err(RuntimeError::NotYetImplemented {
-                    range: function_range.into(),
-                })
-            },
+            Primitive::Lowest => Err(RuntimeError::NotYetImplemented {
+                range: function_range.into(),
+            }),
+            Primitive::Middle => Err(RuntimeError::NotYetImplemented {
+                range: function_range.into(),
+            }),
+            Primitive::HighestOf => Err(RuntimeError::NotYetImplemented {
+                range: function_range.into(),
+            }),
+            Primitive::LowestOf => Err(RuntimeError::NotYetImplemented {
+                range: function_range.into(),
+            }),
+            Primitive::Maximum => Err(RuntimeError::NotYetImplemented {
+                range: function_range.into(),
+            }),
+            Primitive::Reverse => Err(RuntimeError::NotYetImplemented {
+                range: function_range.into(),
+            }),
+            Primitive::Sort => Err(RuntimeError::NotYetImplemented {
+                range: function_range.into(),
+            }),
         }
     }
 }
@@ -994,6 +1017,41 @@ impl From<ast::Range> for SourceSpan {
     fn from(range: ast::Range) -> Self {
         SourceSpan::new(range.start.into(), range.end - range.start)
     }
+}
+
+fn interpolate_variable_names(
+    template: &WithRange<String>,
+    vars: &RcValEnv,
+) -> Result<String, RuntimeError> {
+    let mut result = String::new();
+    let mut char_iter = template.value.chars();
+    while let Some(chr) = char_iter.next() {
+        if chr == '[' {
+            let mut valid_end = false;
+            let mut name = String::new();
+            while let Some(chr) = char_iter.next() {
+                if chr == ']' {
+                    valid_end = true;
+                    break;
+                }
+                name.push(chr);
+            }
+            if !valid_end {
+                result.push('[');
+                result.push_str(&name);
+            } else if let Some(value) = vars.borrow().get(&name) {
+                result.push_str(&value.to_string());
+            } else {
+                return Err(RuntimeError::UndefinedReference {
+                    range: template.range.into(),
+                    name,
+                });
+            }
+        } else {
+            result.push(chr);
+        }
+    }
+    Ok(result)
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -1089,3 +1147,40 @@ pub enum RuntimeError {
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum PrimitiveError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_interpolate_variable_names() {
+        fn ranged(s: &str) -> WithRange<String> {
+            WithRange {
+                value: s.to_string(),
+                range: ast::Range {
+                    start: 0,
+                    end: s.len(),
+                },
+            }
+        }
+
+        let env = Rc::new(RefCell::new(ValEnv::new()));
+        env.borrow_mut()
+            .insert("a".to_string(), 1.into(), ast::Range { start: 0, end: 0 });
+        env.borrow_mut()
+            .insert("b".to_string(), 2.into(), ast::Range { start: 0, end: 0 });
+        env.borrow_mut()
+            .insert("c".to_string(), 3.into(), ast::Range { start: 0, end: 0 });
+        assert_eq!(
+            interpolate_variable_names(&ranged("a + b = [a] + [b]"), &env).unwrap(),
+            "a + b = 1 + 2"
+        );
+        assert!(
+            interpolate_variable_names(&ranged("a + b = [a] + [b] + [invalid]"), &env,).is_err()
+        );
+        assert_eq!(
+            interpolate_variable_names(&ranged("a + b = [a] + [b] + [c"), &env,).unwrap(),
+            "a + b = 1 + 2 + [c"
+        );
+    }
+}
