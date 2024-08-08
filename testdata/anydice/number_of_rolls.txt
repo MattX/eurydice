@@ -2,22 +2,38 @@ function: number of rolls in S:s to reach L:n {
     C: 0
     T: 0
     loop IDX over {1..#S} {
-        if (T + (IDX@S)) < L {
+        if T < L {
             T: T+(IDX@S)
             C: C+1
         }
     }
+    if T < L {
+        C: -1
+    }
     result: C
 }
 
-output [number of rolls in 4d6 to reach 10]
+output [number of rolls in d6 to reach 3]
+output [number of rolls in 2d6 to reach 5]
+output [number of rolls in 4d10 to reach 10]
 
 \\\ Result \\\
 
-"output 1",2.3958333333337,0.7317414856708658,1,4
+"output 1",0.333333333334,0.9428090415818275,-1,1
 #,%
-1,5.09259259259
-2,59.9537037037
-3,25.2314814815
-4,9.72222222222
+-1,33.3333333333
+1,66.6666666667
 
+"output 2",0.9444444444450001,0.9702360664770544,-1,2
+#,%
+-1,16.6666666667
+1,55.5555555556
+2,27.7777777778
+
+"output 3",1.6818,0.6637384725929333,-1,4
+#,%
+-1,1.26
+1,34.39
+2,59.05
+3,4.25
+4,1.05

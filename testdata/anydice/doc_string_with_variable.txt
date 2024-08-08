@@ -1,3 +1,6 @@
+\ This test file is slighly modified from AnyDice's actual output:
+  list and dice listings are exact in EuryDice. \
+
 X: 4
 output X named "this is a [X]"
 X: d4
@@ -32,14 +35,14 @@ output X named "this is a [X]"
 7,12.5
 8,6.25
 
-"this is a {?}",2.5,1.118033988749895,1,4
+"this is a {1, 2, 3, 4}",2.5,1.118033988749895,1,4
 #,%
 1,25
 2,25
 3,25
 4,25
 
-"this is a d{?}",3.999999999995999,1.6329931618546354,2,6
+"this is a d{2, 4, 6}",3.999999999995999,1.6329931618546354,2,6
 #,%
 2,33.3333333333
 4,33.3333333333

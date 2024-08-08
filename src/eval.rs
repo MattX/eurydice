@@ -422,7 +422,7 @@ impl Evaluator {
             }
             Statement::Print { expr } => {
                 let value = self.evaluate(eval_context, expr)?;
-                println!("{:?}: {}", expr.value, value);
+                println!("{}", value);
             }
         }
         Ok(None)
@@ -621,7 +621,7 @@ impl Evaluator {
                     args[*arg_index] = if *is_int {
                         outcome[0].into()
                     } else {
-                        outcome.to_vec().into()
+                        reverse_if(!self.lowest_first, outcome.to_vec()).into()
                     };
                     weight *= outcome_weight;
                     break;
@@ -636,7 +636,7 @@ impl Evaluator {
                     args[*arg_index] = if *is_int {
                         outcome[0].into()
                     } else {
-                        outcome.to_vec().into()
+                        reverse_if(!self.lowest_first, outcome.to_vec()).into()
                     };
                     weight *= outcome_weight;
                 }
@@ -649,6 +649,7 @@ impl Evaluator {
             debug_assert!(results.len() == 1);
             Ok(results.pop().unwrap().0)
         } else {
+            // TODO this is similar to the logic in flat_map in Pool, find a way to use that?
             let mut total_results = BTreeMap::<i32, Rational>::new();
             let mut lcm = Natural::ONE;
             for (result, weight) in results {
@@ -1189,6 +1190,14 @@ fn fill_args(
         }
     }
     Some(weight)
+}
+
+fn reverse_if(should_reverse: bool, v: Vec<i32>) -> Vec<i32> {
+    if should_reverse {
+        v.into_iter().rev().collect()
+    } else {
+        v
+    }
 }
 
 #[derive(Debug, Error, Diagnostic)]
