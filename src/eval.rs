@@ -18,7 +18,7 @@ use crate::{
         self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, PositionOrder, SetParam,
         Statement, StaticType, UnaryOp, WithRange,
     },
-    dice::{explode, Pool, PoolIterator},
+    dice::{explode, Pool, PoolIterator, PoolMultisetIterator},
 };
 
 #[derive(Debug, Clone)]
@@ -561,7 +561,7 @@ impl Evaluator {
                 // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum,
                 // with outcomes of length 1.
                 pool_iterators.push((
-                    p.outcome_iterator(),
+                    p.multiset_iterator(),
                     i,
                     *expected_type == Some(StaticType::Int),
                 ));
@@ -575,42 +575,7 @@ impl Evaluator {
             None => return Ok(vec![].into()),
         };
         // This loop executes exactly once if there are no pool iterators.
-        loop {
-            let mut finished = !pool_iterators.is_empty();
-
-            // Advance the pool iterators.
-            for (pool_iterator, arg_index, is_int) in pool_iterators.iter_mut() {
-                if let Some((outcome, outcome_weight)) = pool_iterator.next() {
-                    args[*arg_index] = if *is_int {
-                        outcome[0].into()
-                    } else {
-                        outcome.to_vec().into()
-                    };
-                    weight *= outcome_weight;
-                    finished = false;
-                    break;
-                } else {
-                    pool_iterator.reset();
-                    if let Some((outcome, outcome_weight)) = pool_iterator.next() {
-                        args[*arg_index] = if *is_int {
-                            outcome[0].into()
-                        } else {
-                            outcome.to_vec().into()
-                        };
-                        weight *= outcome_weight;
-                    } else {
-                        // This can only happen if one of the iterators is empty, in which
-                        // case we should have returned from the function after calling
-                        // |fill_args| above.
-                        unreachable!();
-                    }
-                }
-            }
-            // If we have pool iterators, but all of them have reached the end and had to be reset, we're done.
-            if finished {
-                break;
-            }
-
+        'outer: loop {
             let current_result = match &function.value {
                 Function::Primitive(primitive) => {
                     primitive.execute(&args, &arg_ranges, self.explode_depth, function.range)?
@@ -642,6 +607,33 @@ impl Evaluator {
             }
 
             weight = Natural::ONE;
+            // Advance the pool iterators.
+            let pool_iterator_count = pool_iterators.len();
+            for (iterator_index, (pool_iterator, arg_index, is_int)) in pool_iterators.iter_mut().enumerate() {
+                if let Some((outcome, outcome_weight)) = pool_iterator.next() {
+                    args[*arg_index] = if *is_int {
+                        outcome[0].into()
+                    } else {
+                        outcome.to_vec().into()
+                    };
+                    weight *= outcome_weight;
+                    break;
+                } else if iterator_index == pool_iterator_count - 1 {
+                    // We've exhausted all iterators.
+                    break 'outer;
+                } else {
+                    pool_iterator.reset();
+                    // Safe to unwrap here because none of the iterators are empty after
+                    // reset -- otherwise we would not have entered the loop after |fill_args|.
+                    let (outcome, outcome_weight) = pool_iterator.next().unwrap();
+                    args[*arg_index] = if *is_int {
+                        outcome[0].into()
+                    } else {
+                        outcome.to_vec().into()
+                    };
+                    weight *= outcome_weight;
+                }
+            }
         }
 
         // If there were any pool iterators, collect the results into a dice
@@ -1027,7 +1019,10 @@ impl Primitive {
             Primitive::Maximum => {
                 // args: pool
                 if let RuntimeValue::Pool(d) = &args[0] {
-                    Ok(d.ordered_outcomes()
+                    Ok((**d)
+                        .clone()
+                        .sum()
+                        .ordered_outcomes()
                         .last()
                         .map(|(o, _)| *o)
                         .unwrap_or(0)
@@ -1147,7 +1142,7 @@ fn interpolate_variable_names(
 /// |args| is left in an unspecified state.
 fn fill_args(
     args: &mut [RuntimeValue],
-    pool_iterators: &mut [(PoolIterator, usize, bool)],
+    pool_iterators: &mut [(PoolMultisetIterator, usize, bool)],
 ) -> Option<Natural> {
     let mut weight = Natural::ONE;
     for (pool_iterator, arg_index, is_int) in pool_iterators {

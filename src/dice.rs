@@ -342,6 +342,11 @@ impl<'a> PoolMultisetIterator<'a> {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.positions = vec![0; self.pool.n as usize];
+        self.done = false;
+    }
+
     fn advance_position(&mut self) {
         let pool_size = self.pool.n as isize;
         let mut position_index = pool_size - 1;
