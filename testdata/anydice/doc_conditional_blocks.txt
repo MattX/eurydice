@@ -1,0 +1,13 @@
+X: 1
+if X = 1 {
+ output 1
+}
+else {
+ output 1d6
+}
+
+\\\ Result \\\
+
+"output 1",1,0,1,1
+#,%
+1,100

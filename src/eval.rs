@@ -964,7 +964,11 @@ impl Primitive {
                     range: function_range.into(),
                 })
             }
-            Primitive::Sort => todo!(),
+            Primitive::Sort => {
+                Err(RuntimeError::NotYetImplemented {
+                    range: function_range.into(),
+                })
+            },
         }
     }
 }

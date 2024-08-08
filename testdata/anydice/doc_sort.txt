@@ -1,0 +1,8 @@
+output 1 @ [sort {1, 2, 4, 6, 5, 3}] named "It's a six!"
+
+\\\ Result \\\
+
+"It's a six!",6,0,6,6
+#,%
+6,100
+

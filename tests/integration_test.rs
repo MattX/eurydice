@@ -18,13 +18,14 @@ fn test_anydice_programs() {
         .join("testdata")
         .join("anydice");
     let mut paths_with_errors = HashSet::new();
-    let mut ok_paths = HashSet::new();
+    let mut paths = HashSet::new();
     for entry in fs::read_dir(test_dir).expect("Failed to read test directory") {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
         let path_string = path.to_string_lossy().to_string();
 
         if path.is_file() {
+            paths.insert(path_string.clone());
             let content = fs::read_to_string(&path).expect("Failed to read file");
             let parts: Vec<&str> = content.split("\\\\\\ Result \\\\\\").collect();
 
@@ -78,7 +79,6 @@ fn test_anydice_programs() {
                 }
             }
 
-            let mut all_results_ok = true;
             for (((value, name), expected), expected_str) in evaluator
                 .get_outputs()
                 .into_iter()
@@ -98,16 +98,12 @@ fn test_anydice_programs() {
                         "{}",
                         StrComparison::new(&export_anydice_format(&name, &d), expected_str)
                     );
-                    all_results_ok = false;
                 }
-            }
-            if all_results_ok {
-                ok_paths.insert(path_string);
             }
         }
     }
     println!("Paths without errors:");
-    let mut sorted_ok_paths = ok_paths.iter().collect::<Vec<_>>();
+    let mut sorted_ok_paths = paths.difference(&paths_with_errors).collect::<Vec<_>>();
     sorted_ok_paths.sort();
     for path in &sorted_ok_paths {
         println!("✅ {}", path);

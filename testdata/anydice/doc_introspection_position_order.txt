@@ -1,0 +1,38 @@
+set "position order" to "lowest first"
+
+output 1@3d6 named "lowest die"
+output 1@246 named "least significant digit"
+
+set "position order" to "highest first" \ the default behavior \
+
+output 1@3d6 named "highest die"
+output 1@246 named "most significant digit"
+
+\\\ Result \\\
+
+"lowest die",2.04166666666478,1.1438745884377197,1,6
+#,%
+1,42.1296296296
+2,28.2407407407
+3,17.1296296296
+4,8.7962962963
+5,3.24074074074
+6,0.462962962963
+
+"least significant digit",6,0,6,6
+#,%
+6,100
+
+"highest die",4.958333333328429,1.1438745884377197,1,6
+#,%
+1,0.462962962963
+2,3.24074074074
+3,8.7962962963
+4,17.1296296296
+5,28.2407407407
+6,42.1296296296
+
+"most significant digit",2,0,2,2
+#,%
+2,100
+

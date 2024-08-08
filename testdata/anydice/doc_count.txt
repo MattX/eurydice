@@ -27,3 +27,4 @@ output [count {4..6, 6} in d6] named "rolling above 3 on a d6, counting 6s doubl
 0,50
 1,33.3333333333
 2,16.6666666667
+

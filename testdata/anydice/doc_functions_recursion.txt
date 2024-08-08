@@ -1,0 +1,17 @@
+function: depth { result: 1 + [depth] }
+
+output [depth] named "default maximum function depth"
+
+set "maximum function depth" to 5
+output [depth] named "custom maximum function depth"
+
+\\\ Result \\\
+
+"default maximum function depth",10,0,10,10
+#,%
+10,100
+
+"custom maximum function depth",5,0,5,5
+#,%
+5,100
+

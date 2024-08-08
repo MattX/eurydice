@@ -183,6 +183,13 @@ impl Pool {
         S: Clone + Hash + Eq,
         F: Fn(&S, i32, u32) -> S,
     {
+        if self.ordered_outcomes.len() == 0 {
+            return [(
+                mapper.initial_state.clone(),
+                Natural::ONE,
+            )]
+            .into();
+        }
         let mut cache = HashMap::new();
         self.apply_inner(SubPool::initial(self), &mut cache, &mapper)
     }
