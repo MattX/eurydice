@@ -742,34 +742,40 @@ fn apply_binary_op(
         BinaryOp::Sub => Ok(math_binary_op(left, right, |a, b| a - b)),
         BinaryOp::Mul => Ok(math_binary_op(left, right, |a, b| a * b)),
         BinaryOp::Div => Ok(math_binary_op(left, right, |a, b| a / b)),
-        BinaryOp::Eq => Ok(math_binary_op(
+        BinaryOp::Eq => Ok(comp_binary_op(
             left,
             right,
             |a, b| if a == b { 1 } else { 0 },
+            |a, b| if a == b { 1 } else { 0 },
         )),
-        BinaryOp::Ne => Ok(math_binary_op(
+        BinaryOp::Ne => Ok(comp_binary_op(
             left,
             right,
             |a, b| if a != b { 1 } else { 0 },
+            |a, b| if a != b { 1 } else { 0 },
         )),
-        BinaryOp::Lt => Ok(math_binary_op(
+        BinaryOp::Lt => Ok(comp_binary_op(
             left,
             right,
             |a, b| if a < b { 1 } else { 0 },
+            |a, b| if a < b { 1 } else { 0 },
         )),
-        BinaryOp::Le => Ok(math_binary_op(
+        BinaryOp::Le => Ok(comp_binary_op(
             left,
             right,
             |a, b| if a <= b { 1 } else { 0 },
+            |a, b| if a <= b { 1 } else { 0 },
         )),
-        BinaryOp::Gt => Ok(math_binary_op(
+        BinaryOp::Gt => Ok(comp_binary_op(
             left,
             right,
             |a, b| if a > b { 1 } else { 0 },
+            |a, b| if a > b { 1 } else { 0 },
         )),
-        BinaryOp::Ge => Ok(math_binary_op(
+        BinaryOp::Ge => Ok(comp_binary_op(
             left,
             right,
+            |a, b| if a >= b { 1 } else { 0 },
             |a, b| if a >= b { 1 } else { 0 },
         )),
         BinaryOp::Or => Ok(math_binary_op(left, right, |a, b| {
@@ -829,8 +835,8 @@ fn math_binary_op(
     right: &RuntimeValue,
     f: impl Fn(i32, i32) -> i32,
 ) -> RuntimeValue {
-    let left = convert_arg(left);
-    let right = convert_arg(right);
+    let left = flatten_list(left);
+    let right = flatten_list(right);
     let (left_pool, right_pool) = match (left, right) {
         (DLeftSide::Int(a), DLeftSide::Int(b)) => return f(a, b).into(),
         (left, right) => (left.to_pool().sum(), right.to_pool().sum()),
@@ -843,6 +849,42 @@ fn math_binary_op(
                 .into()
         })
         .into()
+}
+
+/// Binary ops behave differently depending on the types of their arguments.
+/// (int, int) is the straightforward case
+/// (list, list) is in lexicographic order
+/// (list, int) or (int, list) are elementwise then summed (counted)
+/// (pool, pool) sums both sides, then applies the binary op elementwise
+fn comp_binary_op(
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+    int_comp: impl Fn(i32, i32) -> i32,
+    list_comp: impl Fn(&[i32], &[i32]) -> i32,
+) -> RuntimeValue {
+    match (left, right) {
+        (RuntimeValue::Int(a), RuntimeValue::Int(b)) => int_comp(*a, *b).into(),
+        (RuntimeValue::List(a), RuntimeValue::List(b)) => list_comp(a, b).into(),
+        (RuntimeValue::List(a), RuntimeValue::Int(b)) => {
+            a.iter().map(|&a| int_comp(a, *b)).sum::<i32>().into()
+        }
+        (RuntimeValue::Int(a), RuntimeValue::List(b)) => {
+            b.iter().map(|&b| int_comp(*a, b)).sum::<i32>().into()
+        }
+        _ => {
+            // At least one is a pool
+            let left_pool = left.to_pool().sum();
+            let right_pool = right.to_pool().sum();
+            left_pool
+                .flat_map(|left_outcome| {
+                    right_pool
+                        .clone()
+                        .map_outcomes(|right_outcome| int_comp(left_outcome[0], right_outcome))
+                        .into()
+                })
+                .into()
+        }
+    }
 }
 
 enum DLeftSide {
@@ -864,7 +906,7 @@ enum DRightSide {
     Pool(Rc<Pool>),
 }
 
-fn convert_arg(arg: &RuntimeValue) -> DLeftSide {
+fn flatten_list(arg: &RuntimeValue) -> DLeftSide {
     match arg {
         RuntimeValue::Int(i) => DLeftSide::Int(*i),
         RuntimeValue::List(list) => DLeftSide::Int(list.iter().sum()),
