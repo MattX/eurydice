@@ -113,7 +113,7 @@ impl Pool {
     /// are not allowed.
     pub fn from_die(die: Vec<(i32, Natural)>) -> Self {
         let mut ordered_outcomes = die.clone();
-        ordered_outcomes.sort();
+        ordered_outcomes.sort_unstable();
         Self {
             n: 1,
             ordered_outcomes,
@@ -161,7 +161,7 @@ impl Pool {
 
     fn from_weights(outcomes: impl Iterator<Item = (i32, Natural)>) -> Self {
         let mut ordered_outcomes = outcomes.collect::<Vec<_>>();
-        ordered_outcomes.sort();
+        ordered_outcomes.sort_unstable();
         Self {
             n: 1,
             ordered_outcomes,
@@ -478,7 +478,7 @@ impl<'a> Iterator for PoolIterator<'a> {
 impl FromIterator<(i32, Natural)> for Pool {
     fn from_iter<I: IntoIterator<Item = (i32, Natural)>>(iter: I) -> Self {
         let mut ordered_outcomes = iter.into_iter().collect::<Vec<_>>();
-        ordered_outcomes.sort();
+        ordered_outcomes.sort_unstable();
         Self {
             n: 1,
             ordered_outcomes,

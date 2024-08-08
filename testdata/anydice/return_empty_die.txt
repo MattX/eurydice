@@ -5,6 +5,13 @@ function: sometimes empty A:n {
 
 output [sometimes empty d10]
 
+function: sometimes empty list A:n {
+  if A < 5 { result: {} }
+  result: {A}
+}
+
+output [sometimes empty list d10]
+
 \\\ Result \\\
 
 "output 1",7.500000000015,1.7078251276616407,5,10
@@ -15,3 +22,13 @@ output [sometimes empty d10]
 8,16.6666666667
 9,16.6666666667
 10,16.6666666667
+
+"output 2",4.5,3.905124837953327,0,10
+#,%
+0,40
+5,10
+6,10
+7,10
+8,10
+9,10
+10,10

@@ -18,7 +18,7 @@ use crate::{
         self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, PositionOrder, SetParam,
         Statement, StaticType, UnaryOp, WithRange,
     },
-    dice::{explode, Pool, PoolIterator, PoolMultisetIterator},
+    dice::{explode, Pool, PoolMultisetIterator},
 };
 
 #[derive(Debug, Clone)]
@@ -644,6 +644,12 @@ impl Evaluator {
         } else {
             let mut total_results = BTreeMap::<i32, Natural>::new();
             for (result, weight) in results {
+                if let RuntimeValue::Pool(ref p) = result {
+                    // The empty die is ignored in this context, but the empty list is not.
+                    if p.ordered_outcomes().is_empty() {
+                        continue;
+                    }
+                }
                 for (outcome, count) in result.to_pool().sum().ordered_outcomes() {
                     *total_results.entry(*outcome).or_insert(Natural::ZERO) += count * &weight;
                 }
@@ -1043,7 +1049,7 @@ impl Primitive {
                 // args: sequence
                 if let RuntimeValue::List(lst) = &args[0] {
                     let mut lst = (**lst).clone();
-                    lst.sort();
+                    lst.sort_unstable_by_key(|o| -o);
                     Ok(lst.into())
                 } else {
                     panic!("wrong argument types to [sort]");
@@ -1086,7 +1092,7 @@ fn keep_list_for_primitive(
         }
         Primitive::Middle => {
             // This is rounding down
-            let start = (outcomes_size - keep as usize) / 2;
+            let start = (outcomes_size - keep as usize).div_ceil(2);
             keep_list[start..start + keep as usize].fill(true);
         }
         _ => unreachable!(),
