@@ -52,7 +52,7 @@ pub enum Statement {
 #[derive(Debug, Clone, Serialize)]
 pub struct FunctionDefinition {
     pub name: WithRange<String>,
-    pub args: Vec<WithRange<(String, StaticType)>>,
+    pub args: Vec<WithRange<ArgWithType>>,
     pub body: Vec<WithRange<Statement>>,
 }
 
@@ -205,7 +205,13 @@ pub enum PositionOrder {
 #[derive(Debug, Clone)]
 pub enum FunctionDefinitionItem {
     Word(String),
-    ArgWithType(String, StaticType),
+    ArgWithType(ArgWithType),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArgWithType {
+    pub name: String,
+    pub ty: Option<StaticType>,
 }
 
 pub fn make_function_definition(
@@ -227,9 +233,9 @@ pub fn make_function_definition(
             FunctionDefinitionItem::Word(word) => {
                 name.push(word);
             }
-            FunctionDefinitionItem::ArgWithType(arg, ty) => {
+            FunctionDefinitionItem::ArgWithType(a) => {
                 name.push("{}".to_string());
-                args.push(WithRange::new(item.range.start, item.range.end, (arg, ty)));
+                args.push(WithRange::new(item.range.start, item.range.end, a));
             }
         }
     }
@@ -363,7 +369,16 @@ mod tests {
         let ast = grammar::FunctionDefinitionParser::new()
             .parse(text)
             .unwrap();
-        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value . #(\"DIE\" Pool))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
+        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value (name . \"DIE\") (ty Pool))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
+    }
+
+    #[test]
+    fn test_parse_function_definition_no_type() {
+        let text = "function: explode DIE { result: DIE }";
+        let ast = grammar::FunctionDefinitionParser::new()
+            .parse(text)
+            .unwrap();
+        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value (name . \"DIE\") (ty))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
     }
 
     #[test]

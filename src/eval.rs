@@ -166,21 +166,35 @@ pub enum Function {
 }
 
 impl Function {
-    fn get_arg_types(&self) -> Vec<StaticType> {
+    fn get_arg_types(&self) -> Vec<Option<StaticType>> {
         match self {
-            Function::Primitive(Primitive::Absolute) => vec![StaticType::Int],
-            Function::Primitive(Primitive::Contains) => vec![StaticType::List, StaticType::Int],
-            Function::Primitive(Primitive::Count) => vec![StaticType::List, StaticType::List],
-            Function::Primitive(Primitive::Explode) => vec![StaticType::Pool],
-            Function::Primitive(Primitive::Highest) => vec![StaticType::Int, StaticType::Pool],
-            Function::Primitive(Primitive::Lowest) => vec![StaticType::Int, StaticType::Pool],
-            Function::Primitive(Primitive::Middle) => vec![StaticType::Int, StaticType::Pool],
-            Function::Primitive(Primitive::HighestOf) => vec![StaticType::Int, StaticType::Int],
-            Function::Primitive(Primitive::LowestOf) => vec![StaticType::Int, StaticType::Int],
-            Function::Primitive(Primitive::Maximum) => vec![StaticType::Pool],
-            Function::Primitive(Primitive::Reverse) => vec![StaticType::List],
-            Function::Primitive(Primitive::Sort) => vec![StaticType::List],
-            Function::UserDefined(fd) => fd.args.iter().map(|arg| arg.value.1).collect(),
+            Function::Primitive(Primitive::Absolute) => vec![Some(StaticType::Int)],
+            Function::Primitive(Primitive::Contains) => {
+                vec![Some(StaticType::List), Some(StaticType::Int)]
+            }
+            Function::Primitive(Primitive::Count) => {
+                vec![Some(StaticType::List), Some(StaticType::List)]
+            }
+            Function::Primitive(Primitive::Explode) => vec![Some(StaticType::Pool)],
+            Function::Primitive(Primitive::Highest) => {
+                vec![Some(StaticType::Int), Some(StaticType::Pool)]
+            }
+            Function::Primitive(Primitive::Lowest) => {
+                vec![Some(StaticType::Int), Some(StaticType::Pool)]
+            }
+            Function::Primitive(Primitive::Middle) => {
+                vec![Some(StaticType::Int), Some(StaticType::Pool)]
+            }
+            Function::Primitive(Primitive::HighestOf) => {
+                vec![Some(StaticType::Int), Some(StaticType::Int)]
+            }
+            Function::Primitive(Primitive::LowestOf) => {
+                vec![Some(StaticType::Int), Some(StaticType::Int)]
+            }
+            Function::Primitive(Primitive::Maximum) => vec![Some(StaticType::Pool)],
+            Function::Primitive(Primitive::Reverse) => vec![Some(StaticType::List)],
+            Function::Primitive(Primitive::Sort) => vec![Some(StaticType::List)],
+            Function::UserDefined(fd) => fd.args.iter().map(|arg| arg.value.ty).collect(),
         }
     }
 }
@@ -542,12 +556,12 @@ impl Evaluator {
         let mut pool_iterators = Vec::new();
         for (i, (arg, expected_type)) in args.iter().zip(expected_types).enumerate() {
             match (&arg, expected_type) {
-                (RuntimeValue::Pool(p), StaticType::Int | StaticType::List) => {
+                (RuntimeValue::Pool(p), Some(StaticType::Int) | Some(StaticType::List)) => {
                     // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum.
                     pool_iterators.push((
                         p.outcome_iterator(),
                         i,
-                        expected_type == StaticType::Int,
+                        expected_type == Some(StaticType::Int),
                     ));
                 }
                 _ => {}
@@ -600,7 +614,7 @@ impl Evaluator {
                 Function::UserDefined(user_function) => {
                     let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
                     for (arg, formal) in args.iter().zip(user_function.args.iter()) {
-                        new_env.insert(formal.value.0.clone(), arg.clone(), formal.range);
+                        new_env.insert(formal.value.name.clone(), arg.clone(), formal.range);
                     }
                     let new_context = EvalContext {
                         env: Rc::new(RefCell::new(new_env)),
@@ -879,17 +893,21 @@ fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {
     Pool::from_list(n as u32, sides)
 }
 
-fn coerce_arg(arg: RuntimeValue, expected: StaticType) -> Result<RuntimeValue, RuntimeError> {
+fn coerce_arg(
+    arg: RuntimeValue,
+    expected: Option<StaticType>,
+) -> Result<RuntimeValue, RuntimeError> {
     match (arg, expected) {
-        (arg @ RuntimeValue::Int(_), StaticType::Int) => Ok(arg),
-        (RuntimeValue::Int(i), StaticType::List) => Ok(vec![i].into()),
-        (RuntimeValue::Int(i), StaticType::Pool) => Ok(Pool::from_list(1, vec![i]).into()),
-        (RuntimeValue::List(lst), StaticType::Int) => Ok(lst.iter().sum::<i32>().into()),
-        (list @ RuntimeValue::List(_), StaticType::List) => Ok(list),
-        (RuntimeValue::List(lst), StaticType::Pool) => {
+        (arg, None) => Ok(arg),
+        (arg @ RuntimeValue::Int(_), Some(StaticType::Int)) => Ok(arg),
+        (RuntimeValue::Int(i), Some(StaticType::List)) => Ok(vec![i].into()),
+        (RuntimeValue::Int(i), Some(StaticType::Pool)) => Ok(Pool::from_list(1, vec![i]).into()),
+        (RuntimeValue::List(lst), Some(StaticType::Int)) => Ok(lst.iter().sum::<i32>().into()),
+        (list @ RuntimeValue::List(_), Some(StaticType::List)) => Ok(list),
+        (RuntimeValue::List(lst), Some(StaticType::Pool)) => {
             Ok(Pool::from_list(1, (*lst).clone()).into())
         }
-        (RuntimeValue::Pool(p), StaticType::Int) => Ok(p.sum().into()),
+        (RuntimeValue::Pool(p), Some(StaticType::Int)) => Ok(p.sum().into()),
         (pool @ RuntimeValue::Pool(_), _) => Ok(pool),
     }
 }

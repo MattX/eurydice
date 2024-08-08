@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use crate::ast::{WithRange, Expression, UnaryOp, BinaryOp, Statement, ListLiteralItem, ListLiteral,
                  FunctionCallItem, FunctionDefinitionItem, FunctionDefinition, StaticType, SetParam,
-                 PositionOrder,
+                 PositionOrder, ArgWithType,
                  apply_string_escapes,
                  make_function_definition, make_function_call};
 
@@ -185,7 +185,8 @@ pub FunctionDefinitionItem: WithRange<FunctionDefinitionItem> = {
 };
 
 pub SingleArg: FunctionDefinitionItem = {
-    <id:VariableIdentifier> ":" <t:StaticType> => FunctionDefinitionItem::ArgWithType(id, t),
+    <id:VariableIdentifier> ":" <t:StaticType> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: Some(t) }),
+    <id:VariableIdentifier> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: None }),
 };
 
 pub StaticType: StaticType = {
