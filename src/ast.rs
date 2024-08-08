@@ -49,7 +49,7 @@ pub enum Statement {
     Set(SetParam),
     Print {
         expr: WithRange<Expression>,
-    }
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

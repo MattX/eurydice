@@ -1,0 +1,17 @@
+function: maximum of DIE:d {
+ result: 1@[reverse {DIE}]
+}
+
+output [maximum of d6]
+output [maximum of 3d6]
+
+\\\ Result \\\
+
+"output 1",6,0,6,6
+#,%
+6,100
+
+"output 2",18,0,18,18
+#,%
+18,100
+

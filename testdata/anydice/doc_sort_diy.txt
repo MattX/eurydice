@@ -1,0 +1,33 @@
+function: sort SEQUENCE:s {
+ SORTED: {}
+ loop P over {2..#SEQUENCE} {
+  SORTED: [sort helper add P@SEQUENCE to SORTED]
+ }
+ result: SORTED
+}
+
+function: sort helper add N:n to S:s {
+ if #S = 0 { result: {N} }
+ if N >= 1@S { result: {N, S} }
+ if N <= (#S)@S { result: {S, N} }
+
+ R: {}
+ loop P over {1..#S} {
+  if N >= P@S {
+   R: {R, N, P@S}
+   N: {}
+  }
+  else { R: {R, P@S} }
+ }
+ if #N { R: {R, N} }
+ result: R
+}
+
+output 1 @ [sort {1, 2, 4, 6, 5, 3}] named "It's a six!"
+
+\\\ Result \\\
+
+"It's a six!",6,0,6,6
+#,%
+6,100
+

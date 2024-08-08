@@ -1,0 +1,21 @@
+function: reverse SEQUENCE:s{
+ R: {}
+ loop P over {1..#SEQUENCE}{
+  R: {P@SEQUENCE, R}
+ }
+ result: R
+}
+
+output 1 @ {1..6}
+output 1 @ [reverse {1..6}]
+
+\\\ Result \\\
+
+"output 1",1,0,1,1
+#,%
+1,100
+
+"output 2",6,0,6,6
+#,%
+6,100
+

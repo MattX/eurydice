@@ -1066,7 +1066,10 @@ mod tests {
         let result = pool1.flat_map(|outcome| {
             let mut summed_pool = pool2.clone();
             summed_pool.set_n(outcome[0] as u32);
-            summed_pool.sum().into_die_iter().collect::<BTreeMap<_, _>>()
+            summed_pool
+                .sum()
+                .into_die_iter()
+                .collect::<BTreeMap<_, _>>()
         });
         let map = result.into_die_iter().collect::<HashMap<_, _>>();
         let expected = [

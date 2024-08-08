@@ -17,6 +17,12 @@ output [number of rolls in d6 to reach 3]
 output [number of rolls in 2d6 to reach 5]
 output [number of rolls in 4d10 to reach 10]
 
+set "position order" to "lowest first"
+
+output [number of rolls in d6 to reach 3]
+output [number of rolls in 2d6 to reach 5]
+output [number of rolls in 4d10 to reach 10]
+
 \\\ Result \\\
 
 "output 1",0.333333333334,0.9428090415818275,-1,1
@@ -37,3 +43,22 @@ output [number of rolls in 4d10 to reach 10]
 2,59.05
 3,4.25
 4,1.05
+
+"output 4",0.333333333334,0.9428090415818275,-1,1
+#,%
+-1,33.3333333333
+1,66.6666666667
+
+"output 5",1.3888888888880002,1.1124991330286313,-1,2
+#,%
+-1,16.6666666667
+1,11.1111111111
+2,72.2222222222
+
+"output 6",2.9314,0.7858078900087476,-1,4
+#,%
+-1,1.26
+1,0.01
+2,21.91
+3,56.71
+4,20.11

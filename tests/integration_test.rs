@@ -23,7 +23,7 @@ fn test_anydice_programs() {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
         let path_string = path.to_string_lossy().to_string();
-        if path.file_name().unwrap().to_str().unwrap().starts_with("_") {
+        if path.file_name().unwrap().to_str().unwrap().starts_with('_') {
             continue;
         }
 
@@ -34,7 +34,11 @@ fn test_anydice_programs() {
 
             if parts.len() != 2 {
                 paths_with_errors.insert(path_string);
-                println!("Error: {} sections (2 expected) found in {}", parts.len(), path.display());
+                println!(
+                    "Error: {} sections (2 expected) found in {}",
+                    parts.len(),
+                    path.display()
+                );
                 continue;
             }
 
