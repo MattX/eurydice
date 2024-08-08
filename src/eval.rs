@@ -7,16 +7,14 @@ use std::{
 };
 
 use malachite::{
-    num::basic::traits::{One, Zero},
-    Natural,
+    num::basic::traits::{One, Zero}, Natural
 };
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
     ast::{
-        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, StaticType, UnaryOp,
-        WithRange,
+        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, PositionOrder, SetParam, StaticType, UnaryOp, WithRange
     },
     dice::{explode, Pool},
 };
@@ -362,6 +360,9 @@ impl Evaluator {
                     }
                 }
             }
+            ast::Statement::Set(SetParam::PositionOrder(order)) => self.lowest_first = *order == PositionOrder::Ascending,
+            ast::Statement::Set(SetParam::ExplodeDepth(d)) => self.explode_depth = *d,
+            ast::Statement::Set(SetParam::MaximumFunctionDepth(d)) => self.recursion_depth = *d,
         }
         Ok(None)
     }
@@ -648,7 +649,8 @@ fn apply_binary_op(
                 }
             }
         }
-        BinaryOp::Pow => Ok(math_binary_op(left, right, |a, b| a.pow(b as u32))),
+        // TODO should report an error if b < 0
+        BinaryOp::Pow => Ok(math_binary_op(left, right, |a, b| a.pow(b.abs() as u32))),
         BinaryOp::Add => Ok(math_binary_op(left, right, |a, b| a + b)),
         BinaryOp::Sub => Ok(math_binary_op(left, right, |a, b| a - b)),
         BinaryOp::Mul => Ok(math_binary_op(left, right, |a, b| a * b)),

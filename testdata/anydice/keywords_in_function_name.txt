@@ -1,0 +1,12 @@
+function: if set else to loop over function result output {
+result: 1
+}
+
+output [if set else to loop over function result output]
+
+\\\ Result \\\
+
+"output 1",1,0,1,1
+#,%
+1,100
+

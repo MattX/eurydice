@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use crate::ast::{WithRange, Expression, UnaryOp, BinaryOp, Statement, ListLiteralItem, ListLiteral,
-                 FunctionCallItem, FunctionDefinitionItem, FunctionDefinition, StaticType,
+                 FunctionCallItem, FunctionDefinitionItem, FunctionDefinition, StaticType, SetParam,
+                 PositionOrder,
                  apply_string_escapes,
                  make_function_definition, make_function_call};
 
@@ -26,7 +27,7 @@ pub StatementInner: Statement = {
     <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
     "output" <e:Expr> <n:OutputName?> => Statement::Output { value: e, named: n },
     "result" ":" <e:Expr> => Statement::Return { value: e },
-    "set" => todo!(),
+    <s:SetStatement> => s,
     "loop" <id_start: @L> <id:VariableIdentifier> <id_end: @L> "over" <e:Expr> "{" <b:Block> "}" =>
         Statement::Loop { variable: WithRange::new(id_start, id_end, id), range_expression: Box::new(e), body: b },
     <i:IfStatement> => i,
@@ -40,6 +41,14 @@ IfStatement: Statement = {
         Statement::If { condition: Box::new(e), then_block: thn,
             else_block: Some(vec![WithRange::new(start, end, other)]) },
 };
+
+SetStatement: Statement = {
+    // TODO: remove as here
+    "set" "\"explode depth\"" "to" <n:Num> => Statement::Set(SetParam::ExplodeDepth(n as usize)),
+    "set" "\"maximum function depth\"" "to" <n:Num> => Statement::Set(SetParam::MaximumFunctionDepth(n as usize)),
+    "set" "\"position order\"" "to" "\"lowest first\"" => Statement::Set(SetParam::PositionOrder(PositionOrder::Ascending)),
+    "set" "\"position order\"" "to" "\"highest first\"" => Statement::Set(SetParam::PositionOrder(PositionOrder::Descending)),
+}
 
 pub Block: Vec<WithRange<Statement>> = {
     <ss:Statement*> => ss,
@@ -183,9 +192,20 @@ pub StaticType: StaticType = {
 };
 
 // TOOD: avoid unwrap here
-Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
+Num: i32 = <s:r"-?[0-9]+"> => i32::from_str(s).unwrap();
 VariableIdentifier: String = <s:r"[A-Z][A-Z_]*"> => s.to_string();
-Word: String = <s:r"[a-z][a-z_]+"> => s.to_string();
+Word: String = {
+    <s:r"[a-z][a-z_]+"> => s.to_string(),
+    "if" => "if".to_string(),
+    "set" => "set".to_string(),
+    "else" => "else".to_string(),
+    "to" => "to".to_string(),
+    "function" => "function".to_string(),
+    "result" => "result".to_string(),
+    "over" => "over".to_string(),
+    "loop" => "loop".to_string(),
+    "output" => "output".to_string(),
+};
 
 SafeUnaryOp: UnaryOp = {
     "!" => UnaryOp::Invert,

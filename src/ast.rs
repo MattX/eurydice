@@ -46,6 +46,7 @@ pub enum Statement {
         range_expression: Box<WithRange<Expression>>,
         body: Vec<WithRange<Statement>>,
     },
+    Set(SetParam),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -186,6 +187,19 @@ impl std::fmt::Display for StaticType {
             StaticType::Pool => write!(f, "die"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum SetParam {
+    PositionOrder(PositionOrder),
+    MaximumFunctionDepth(usize),
+    ExplodeDepth(usize),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum PositionOrder {
+    Ascending,
+    Descending,
 }
 
 #[derive(Debug, Clone)]
@@ -354,8 +368,8 @@ mod tests {
 
     #[test]
     fn test_parse_binary_op_precedence() {
-        let text = "((value\n  BinaryOp\n  (op (value . Add))\n  (left (value Int . 1))\n  (right\n   (value\n    BinaryOp\n    (op (value . Mul))\n    (left (value Int . 2))\n    (right (value Int . 3))))))";
+        let text = "1 + 2 * 3";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
-        assert_eq!(print_expression(&ast), "");
+        assert_eq!(print_expression(&ast), "((value\n  BinaryOp\n  (op (value . Add))\n  (left (value Int . 1))\n  (right\n   (value\n    BinaryOp\n    (op (value . Mul))\n    (left (value Int . 2))\n    (right (value Int . 3))))))");
     }
 }
