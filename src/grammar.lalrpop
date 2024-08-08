@@ -91,8 +91,11 @@ SafeExprInner3 = ExprInnerTier<BinaryOp3, ExprInner4, SafeExprInner4>;
 ExprInner4 = ExprInnerTier<BinaryOp4, ExprInner5, ExprInner5>;
 SafeExprInner4 = ExprInnerTier<BinaryOp4, ExprInner5, SafeExprInner5>;
 
-ExprInner5 = ExprInnerTier<BinaryOp5, ExprInner11, ExprInner11>;
-SafeExprInner5 = ExprInnerTier<BinaryOp5, ExprInner11, SafeExprInner11>;
+ExprInner5 = ExprInnerTier<BinaryOp5, ExprInner6, ExprInner6>;
+SafeExprInner5 = ExprInnerTier<BinaryOp5, ExprInner6, SafeExprInner6>;
+
+ExprInner6 = ExprInnerTier<BinaryOp6, ExprInner11, ExprInner11>;
+SafeExprInner6 = ExprInnerTier<BinaryOp6, ExprInner11, SafeExprInner11>;
 
 pub ExprInner11: Expression = {
     <op_start: @L> <o:UnsafeUnaryOp> <op_end: @R> <start: @L> <e:ExprInner11> <end: @R> =>
@@ -219,26 +222,24 @@ UnsafeUnaryOp: UnaryOp = {
     "-" => UnaryOp::Negate,
 };
 
-BinaryOp5: BinaryOp = {
+BinaryOp6: BinaryOp = {
     "d" => BinaryOp::D,
-    "@" => BinaryOp::At,
 };
-BinaryOp4: BinaryOp = {
+BinaryOp5: BinaryOp = {
     "^" => BinaryOp::Pow,
 };
-BinaryOp3: BinaryOp = {
+BinaryOp4: BinaryOp = {
     "*" => BinaryOp::Mul,
     "/" => BinaryOp::Div,
 };
-BinaryOp2: BinaryOp = {
+BinaryOp3: BinaryOp = {
     "+" => BinaryOp::Add,
     "-" => BinaryOp::Sub,
 };
+BinaryOp2: BinaryOp = {
+    "@" => BinaryOp::At,
+};
 BinaryOp1: BinaryOp = {
-    "&" => BinaryOp::And,
-    "|" => BinaryOp::Or,
-}
-BinaryOp0: BinaryOp = {
     "=" => BinaryOp::Eq,
     "!=" => BinaryOp::Ne,
     "<" => BinaryOp::Lt,
@@ -246,6 +247,10 @@ BinaryOp0: BinaryOp = {
     ">" => BinaryOp::Gt,
     ">=" => BinaryOp::Ge,
 };
+BinaryOp0: BinaryOp = {
+    "&" => BinaryOp::And,
+    "|" => BinaryOp::Or,
+}
 
 Comma<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T?> => match e {

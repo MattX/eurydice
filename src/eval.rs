@@ -360,9 +360,20 @@ impl Evaluator {
                     }
                 }
             }
-            ast::Statement::Set(SetParam::PositionOrder(order)) => self.lowest_first = *order == PositionOrder::Ascending,
-            ast::Statement::Set(SetParam::ExplodeDepth(d)) => self.explode_depth = *d,
-            ast::Statement::Set(SetParam::MaximumFunctionDepth(d)) => self.recursion_depth = *d,
+            ast::Statement::Set(s) => {
+                if eval_context.recursion_depth != 0 {
+                    return Err(RuntimeError::SetNotAtTopLevel {
+                        range: statement.range.into(),
+                    });
+                }
+                match s {
+                    SetParam::PositionOrder(order) => {
+                        self.lowest_first = *order == PositionOrder::Ascending
+                    }
+                    SetParam::ExplodeDepth(d) => self.explode_depth = *d,
+                    SetParam::MaximumFunctionDepth(d) => self.recursion_depth = *d,
+                }
+            }
         }
         Ok(None)
     }
@@ -643,7 +654,7 @@ fn apply_binary_op(
                         .collect();
                     Ok(select_positions(&left, &digits, lowest_first).into())
                 }
-                RuntimeValue::List(lst) => Ok(select_positions(&left, lst, false).into()),
+                RuntimeValue::List(lst) => Ok(select_positions(&left, lst, true).into()),
                 RuntimeValue::Pool(p) => {
                     Ok(select_in_dice(&left, (**p).clone(), lowest_first).into())
                 }
@@ -706,13 +717,13 @@ fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
     indices
         .iter()
         .map(|&i| {
-            if i < 0 || i >= vec.len() as i32 {
+            if i < 1 || i > vec.len() as i32 {
                 return 0;
             }
             let i = if !lowest_first {
-                vec.len() - i as usize - 1
+                vec.len() - i as usize
             } else {
-                i as usize
+                i as usize - 1
             };
             vec.get(i).copied().unwrap_or(0)
         })
@@ -723,12 +734,15 @@ fn select_in_dice(indices: &[i32], mut pool: Pool, lowest_first: bool) -> Pool {
     let size = pool.get_n() as usize;
     let mut keep_list = vec![false; size];
     for &i in indices {
-        if let Ok(mut i) = usize::try_from(i) {
-            if lowest_first {
-                i = size - i - 1;
-            }
-            keep_list[i] = true;
+        if i < 1 || i > size as i32 {
+            continue;
         }
+        let i = if !lowest_first {
+            size - i as usize
+        } else {
+            i as usize - 1
+        };
+        keep_list[i] = true;
     }
     pool.set_keep_list(keep_list);
     pool.sum()
@@ -989,6 +1003,13 @@ pub enum RuntimeError {
     #[diagnostic(help("Output statements can only appear outside functions."))]
     OutputNotAtTopLevel {
         #[label = "Output statement inside a function"]
+        range: SourceSpan,
+    },
+
+    #[error("Set statement inside a function")]
+    #[diagnostic(help("Set statements can only appear outside functions."))]
+    SetNotAtTopLevel {
+        #[label = "Set statement inside a function"]
         range: SourceSpan,
     },
 

@@ -550,8 +550,8 @@ pub const PRODUCT_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMap
     f: product_mapper,
 };
 
-fn max_mapper(state: &i32, outcome: i32, _count: u32) -> i32 {
-    (*state).max(outcome)
+fn max_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
+    if count > 0 { (*state).max(outcome) } else { *state }
 }
 
 /// Mapper that takes the maximum of the outcomes.
@@ -560,8 +560,8 @@ pub const MAX_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper 
     f: max_mapper,
 };
 
-fn min_mapper(state: &i32, outcome: i32, _count: u32) -> i32 {
-    (*state).min(outcome)
+fn min_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
+    if count > 0 { (*state).min(outcome) } else { *state }
 }
 
 /// Mapper that takes the minimum of the outcomes.
@@ -1182,5 +1182,18 @@ mod tests {
             Some((vec![3, 3].as_slice().into(), 1usize.into()))
         );
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_max_mapper() {
+        let pool = Pool::ndn(3, 6);
+        let result = pool.apply(MAX_MAPPER);
+        assert_eq!(result.len(), 6);
+        assert_eq!(result[&1], Natural::from(1u32));
+        assert_eq!(result[&2], Natural::from(7u32));
+        assert_eq!(result[&3], Natural::from(19u32));
+        assert_eq!(result[&4], Natural::from(37u32));
+        assert_eq!(result[&5], Natural::from(61u32));
+        assert_eq!(result[&6], Natural::from(91u32));
     }
 }
