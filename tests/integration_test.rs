@@ -287,15 +287,15 @@ fn convert_lalrpop_error<T: std::fmt::Display, E: std::fmt::Display>(
         lalrpop_util::ParseError::InvalidToken { location } => {
             ParseError::new(SourceSpan::new((*location).into(), 0), format!("{}", err))
         }
-        lalrpop_util::ParseError::UnrecognizedEof { location, expected } => {
+        lalrpop_util::ParseError::UnrecognizedEof { location, .. } => {
             ParseError::new(SourceSpan::new((*location).into(), 0), format!("{}", err))
         }
-        lalrpop_util::ParseError::UnrecognizedToken { token, expected } => ParseError::new(
-            SourceSpan::new(token.0.into(), (token.2 - token.0)),
+        lalrpop_util::ParseError::UnrecognizedToken { token, .. } => ParseError::new(
+            SourceSpan::new(token.0.into(), token.2 - token.0),
             format!("{}", err),
         ),
         lalrpop_util::ParseError::ExtraToken { token } => ParseError::new(
-            SourceSpan::new(token.0.into(), (token.2 - token.0)),
+            SourceSpan::new(token.0.into(), token.2 - token.0),
             format!("{}", err),
         ),
         lalrpop_util::ParseError::User { error } => {

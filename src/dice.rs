@@ -251,7 +251,7 @@ impl Pool {
         self.apply(SUM_MAPPER).into_iter().collect()
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = (i32, Natural)> {
+    pub fn into_die_iter(self) -> impl Iterator<Item = (i32, Natural)> {
         self.ordered_outcomes.into_iter()
     }
 
@@ -412,6 +412,7 @@ fn item_factorials(outcome: &TinyVec<[i32; 6]>) -> Natural {
 }
 
 /// Iterator over all possible outcomes in a pool.
+#[derive(Debug)]
 pub struct PoolIterator<'a> {
     pool: &'a Pool,
     positions: Vec<usize>,
@@ -493,7 +494,7 @@ impl From<Vec<(i32, Natural)>> for Pool {
 
 impl From<Pool> for BTreeMap<i32, Natural> {
     fn from(pool: Pool) -> Self {
-        pool.into_iter().collect()
+        pool.into_die_iter().collect()
     }
 }
 
@@ -917,7 +918,7 @@ mod tests {
 
         let result = pool.map(multiset_to_int);
 
-        let map = result.into_iter().collect::<HashMap<_, _>>();
+        let map = result.into_die_iter().collect::<HashMap<_, _>>();
         let expected = [
             (0, 1),
             (1, 5),
@@ -1060,9 +1061,9 @@ mod tests {
         let result = pool1.flat_map(|outcome| {
             let mut summed_pool = pool2.clone();
             summed_pool.set_n(outcome[0] as u32);
-            summed_pool.sum().into_iter().collect::<BTreeMap<_, _>>()
+            summed_pool.sum().into_die_iter().collect::<BTreeMap<_, _>>()
         });
-        let map = result.into_iter().collect::<HashMap<_, _>>();
+        let map = result.into_die_iter().collect::<HashMap<_, _>>();
         let expected = [
             (1, 16),
             (2, 20),

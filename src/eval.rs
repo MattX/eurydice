@@ -18,7 +18,7 @@ use crate::{
         self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, PositionOrder, SetParam,
         Statement, StaticType, UnaryOp, WithRange,
     },
-    dice::{explode, Pool},
+    dice::{explode, Pool, PoolIterator},
 };
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ impl RuntimeValue {
             RuntimeValue::List(list) => Rc::clone(list).repeat(repeat),
             RuntimeValue::Pool(d) => (**d)
                 .sum()
-                .into_iter()
+                .into_die_iter()
                 .map(|(k, _)| k)
                 .collect::<Vec<_>>()
                 .repeat(repeat),
@@ -554,25 +554,28 @@ impl Evaluator {
         // |pool_iterators| contains triples of (iterator, index, expected_type == int).
         // pool_iterators[i].index = k if the i-th element of pool_iterators corresponds to the k-th argument.
         let mut pool_iterators = Vec::new();
-        for (i, (arg, expected_type)) in args.iter().zip(expected_types).enumerate() {
-            match (&arg, expected_type) {
-                (RuntimeValue::Pool(p), Some(StaticType::Int) | Some(StaticType::List)) => {
-                    // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum.
-                    pool_iterators.push((
-                        p.outcome_iterator(),
-                        i,
-                        expected_type == Some(StaticType::Int),
-                    ));
-                }
-                _ => {}
+        for (i, (arg, expected_type)) in args.iter().zip(expected_types.iter()).enumerate() {
+            if let (RuntimeValue::Pool(p), Some(StaticType::Int) | Some(StaticType::List)) =
+                (&arg, expected_type)
+            {
+                // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum,
+                // with outcomes of length 1.
+                pool_iterators.push((
+                    p.outcome_iterator(),
+                    i,
+                    *expected_type == Some(StaticType::Int),
+                ));
             }
         }
 
         let mut results = Vec::new();
         let mut args = args.clone();
+        let mut weight = match fill_args(&mut args, &mut pool_iterators) {
+            Some(w) => w,
+            None => return Ok(vec![].into()),
+        };
         // This loop executes exactly once if there are no pool iterators.
         loop {
-            let mut weight = Natural::ONE;
             let mut finished = !pool_iterators.is_empty();
 
             // Advance the pool iterators.
@@ -596,13 +599,14 @@ impl Evaluator {
                         };
                         weight *= outcome_weight;
                     } else {
-                        // This pool iterator didn't return a value after being reset, so it's empty.
-                        // The function doesn't get called at all, return an empty list.
-                        return Ok(vec![].into());
+                        // This can only happen if one of the iterators is empty, in which
+                        // case we should have returned from the function after calling
+                        // |fill_args| above.
+                        unreachable!();
                     }
                 }
             }
-            // If we have pool iterators, but all of them reached the end and have to be reset, break.
+            // If we have pool iterators, but all of them have reached the end and had to be reset, we're done.
             if finished {
                 break;
             }
@@ -627,6 +631,7 @@ impl Evaluator {
                             break;
                         }
                     }
+                    // If there's no result, there was no return statement in the function.
                     result.unwrap_or(vec![].into())
                 }
             };
@@ -635,6 +640,8 @@ impl Evaluator {
             if pool_iterators.is_empty() {
                 break;
             }
+
+            weight = Natural::ONE;
         }
 
         // If there were any pool iterators, collect the results into a dice
@@ -977,7 +984,7 @@ impl Primitive {
             Primitive::Explode => {
                 // args: pool
                 if let RuntimeValue::Pool(d) = &args[0] {
-                    let die: Vec<_> = (*d).clone().sum().into_iter().collect();
+                    let die: Vec<_> = (*d).clone().sum().into_die_iter().collect();
                     let highest_value = die.last().unwrap().0;
                     Ok(Pool::from_die(explode(die, &[highest_value], explode_depth)).into())
                 } else {
@@ -1131,6 +1138,31 @@ fn interpolate_variable_names(
         }
     }
     Ok(result)
+}
+
+/// Fills arguments in |args| which have a corresponding pool iterator with the first outcome of the iterator.
+/// Returns the weight of the combined outcome.
+///
+/// If any iterator is empty, the cross-product pool is empty as well, and the function returns None. In this case,
+/// |args| is left in an unspecified state.
+fn fill_args(
+    args: &mut [RuntimeValue],
+    pool_iterators: &mut [(PoolIterator, usize, bool)],
+) -> Option<Natural> {
+    let mut weight = Natural::ONE;
+    for (pool_iterator, arg_index, is_int) in pool_iterators {
+        if let Some((outcome, outcome_weight)) = pool_iterator.next() {
+            args[*arg_index] = if *is_int {
+                outcome[0].into()
+            } else {
+                outcome.to_vec().into()
+            };
+            weight *= outcome_weight;
+        } else {
+            return None;
+        }
+    }
+    Some(weight)
 }
 
 #[derive(Debug, Error, Diagnostic)]
