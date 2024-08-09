@@ -724,9 +724,11 @@ fn apply_binary_op(
             match right {
                 RuntimeValue::Int(i) => {
                     let digits: Vec<i32> = i
+                        .abs()
                         .to_string()
                         .chars()
-                        .map(|c| c.to_digit(10).unwrap() as i32)
+                        // Unwrap here is ok as all chars for a *positive* integer are valid digits.
+                        .map(|c| c.to_digit(10).unwrap() as i32 * i.signum())
                         .collect();
                     Ok(select_positions(&left, &digits, lowest_first).into())
                 }
@@ -1077,6 +1079,7 @@ impl Primitive {
             Primitive::HighestOf => {
                 // args: int, int
                 if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
+                    println!("highest of {} {}", i, j);
                     Ok((*(i.max(j))).into())
                 } else {
                     panic!("wrong argument types to [highest of]");

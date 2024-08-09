@@ -228,18 +228,18 @@ BinaryOp6: BinaryOp = {
     "d" => BinaryOp::D,
 };
 BinaryOp5: BinaryOp = {
-    "^" => BinaryOp::Pow,
+    "@" => BinaryOp::At,
 };
 BinaryOp4: BinaryOp = {
+    "^" => BinaryOp::Pow,
+};
+BinaryOp3: BinaryOp = {
     "*" => BinaryOp::Mul,
     "/" => BinaryOp::Div,
 };
-BinaryOp3: BinaryOp = {
+BinaryOp2: BinaryOp = {
     "+" => BinaryOp::Add,
     "-" => BinaryOp::Sub,
-};
-BinaryOp2: BinaryOp = {
-    "@" => BinaryOp::At,
 };
 BinaryOp1: BinaryOp = {
     "=" => BinaryOp::Eq,

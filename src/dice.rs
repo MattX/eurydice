@@ -373,7 +373,7 @@ impl<'a> Iterator for PoolMultisetIterator<'a> {
     type Item = (TinyVec<[i32; 6]>, Natural);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
+        if self.done || self.pool.ordered_outcomes.is_empty() {
             return None;
         }
         let outcome = self
