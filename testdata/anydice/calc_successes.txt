@@ -1,0 +1,28 @@
+function: roll TIMES:n die SIDES:n modified MOD:n succeeds on SUCC:n explode on EXPL:n {
+  SUCCESSES: 0
+  DIE: 1dSIDES
+  loop N over {1..TIMES} {
+    SUCCESSES: SUCCESSES + [DIE modified MOD succeeds on SUCC explode on EXPL]
+  }
+  result: SUCCESSES
+}
+
+function: N:n modified MOD:n succeeds on SUCC:n explode on EXPL:n {
+  SUCCESSES: 0
+  
+if N+MOD >= SUCC { SUCCESSES: 1 }
+  if N = EXPL { SUCCESSES: SUCCESSES + [DIE+N modified MOD succeeds on SUCC explode on EXPL] }
+
+  result: SUCCESSES
+}
+
+output [roll 2 die 6 modified -2 succeeds on 4 explode on 6]
+
+\\\ Result \\\
+
+"output 1",0.6666666666672001,1.0540925533896706,0,4
+#,%
+0,69.4444444444
+2,27.7777777778
+4,2.77777777778
+
