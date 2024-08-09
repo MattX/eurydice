@@ -283,59 +283,6 @@ pub fn make_function_call(items: Vec<WithRange<FunctionCallItem>>) -> Expression
     }
 }
 
-/// Prints the code in sexpr
-pub fn print_expression<T>(expression: &T) -> String
-where
-    T: serde::ser::Serialize,
-{
-    let val = serde_lexpr::to_value(expression).unwrap();
-    let doc = to_doc(&val);
-    doc.pretty(80).to_string()
-}
-
-fn to_doc(value: &lexpr::Value) -> pretty::RcDoc {
-    match value {
-        lexpr::Value::Cons(cons) => {
-            let mut doc = pretty::RcDoc::text("(");
-            let mut inner_doc = pretty::RcDoc::<()>::nil();
-            for (i, value) in cons.iter().enumerate() {
-                if i > 0 {
-                    inner_doc = inner_doc.append(pretty::RcDoc::line());
-                }
-                inner_doc = inner_doc.append(to_doc(value.car()));
-                match value.cdr() {
-                    lexpr::Value::Cons(_) | lexpr::Value::Nil | lexpr::Value::Null => (),
-                    _ => {
-                        // This can only happen during the loop's last iteration
-                        inner_doc = inner_doc
-                            .append(pretty::RcDoc::line())
-                            .append(pretty::RcDoc::text("."))
-                            .append(pretty::RcDoc::line())
-                            .append(to_doc(value.cdr()));
-                    }
-                }
-            }
-            inner_doc = inner_doc.nest(1).group();
-            doc = doc.append(inner_doc).append(pretty::RcDoc::text(")"));
-            doc
-        }
-        lexpr::Value::Vector(elements) => {
-            let mut doc = pretty::RcDoc::text("#(");
-            let mut inner_doc = pretty::RcDoc::<()>::nil();
-            for (i, value) in elements.iter().enumerate() {
-                if i > 0 {
-                    inner_doc = inner_doc.append(pretty::RcDoc::line());
-                }
-                inner_doc = inner_doc.append(to_doc(value));
-            }
-            inner_doc = inner_doc.nest(1).group();
-            doc = doc.append(inner_doc).append(pretty::RcDoc::text(")"));
-            doc
-        }
-        _ => pretty::RcDoc::text(lexpr::to_string(value).unwrap()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,14 +303,14 @@ mod tests {
     fn test_parse_function_call() {
         let text = "[test 1 2]";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
-        assert_eq!(print_expression(&ast), "((value\n  FunctionCall\n  (name (value . \"test {} {}\"))\n  (args ((value Int . 1)) ((value Int . 2)))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value FunctionCall (name (value . \"test {} {}\")) (args ((value Int . 1)) ((value Int . 2)))))");
     }
 
     #[test]
     fn test_parse_unop_function_call() {
         let text = "[test 1 - 2]";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
-        assert_eq!(print_expression(&ast), "((value\n  FunctionCall\n  (name (value . \"test {}\"))\n  (args\n   ((value\n     BinaryOp\n     (op (value . Sub))\n     (left (value Int . 1))\n     (right (value Int . 2)))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value FunctionCall (name (value . \"test {}\")) (args ((value BinaryOp (op (value . Sub)) (left (value Int . 1)) (right (value Int . 2)))))))");
     }
 
     #[test]
@@ -372,7 +319,7 @@ mod tests {
         let ast = grammar::FunctionDefinitionParser::new()
             .parse(text)
             .unwrap();
-        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value (name . \"DIE\") (ty Pool))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((name (value . \"explode {}\")) (args ((value (name . \"DIE\") (ty Pool)))) (body ((value Return (value (value Reference . \"DIE\"))))))");
     }
 
     #[test]
@@ -381,13 +328,13 @@ mod tests {
         let ast = grammar::FunctionDefinitionParser::new()
             .parse(text)
             .unwrap();
-        assert_eq!(print_expression(&ast), "((name (value . \"explode {}\"))\n (args ((value (name . \"DIE\") (ty))))\n (body ((value Return (value (value Reference . \"DIE\"))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((name (value . \"explode {}\")) (args ((value (name . \"DIE\") (ty)))) (body ((value Return (value (value Reference . \"DIE\"))))))");
     }
 
     #[test]
     fn test_parse_binary_op_precedence() {
         let text = "1 + 2 * 3";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
-        assert_eq!(print_expression(&ast), "((value\n  BinaryOp\n  (op (value . Add))\n  (left (value Int . 1))\n  (right\n   (value\n    BinaryOp\n    (op (value . Mul))\n    (left (value Int . 2))\n    (right (value Int . 3))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value BinaryOp (op (value . Add)) (left (value Int . 1)) (right (value BinaryOp (op (value . Mul)) (left (value Int . 2)) (right (value Int . 3))))))");
     }
 }
