@@ -2,13 +2,35 @@
 
 This is an implementation of the AnyDice DSL.
 
-## Types
+## Getting stuff to run
+
+The packages in this directory are:
+
+* `eurydice_engine/`: Contains a parser and evaluator for AnyDice programs (Rust).
+* `eurydice_cli/`: Contains a CLI frontend for Eurydice.
+* `eurydice_wasm/`: WASM wrapper for `eurydice_engine`
+* `eurydice_www/`: A Vite + React + TS app to serve as a frontend.
+
+Build the wasm with `wasm-pack ./eurydice_wasm --target no-modules`.
+
+There are two important symlinks in `eurydice_www/src`:
+
+* `eurydice_wasm_bg.wasm -> ../../eurydice_wasm/pkg/eurydice_wasm_bg.wasm`
+* `eurydice_wasm.js -> ../../eurydice_wasm/pkg/eurydice_wasm.js`
+
+These allow the compiled wasm to be run in a web worker for Eurydice's web frontend.
+
+See also notes in <https://rustwasm.github.io/wasm-bindgen/examples/wasm-in-web-worker.html>.
+
+## Eurydice documentation (todo)
+
+### Types
 
 * Ints are 32-bit signed integers.
 * Sequences are ordered and can have repeated values.
 * Dice are distributions over sequences (possibly of length 1), and possibly weighted.
 
-## Literals
+### Literals
 
 * `123`: generates the number `123`
 * `{a, b..c, d:count}`: sequence literals can contain two types of subexpressions:

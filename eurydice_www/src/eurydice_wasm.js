@@ -1,0 +1,1 @@
+../../eurydice_wasm/pkg/eurydice_wasm.js

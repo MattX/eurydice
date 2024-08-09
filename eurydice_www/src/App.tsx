@@ -1,14 +1,18 @@
-import init, { greet } from "eurydice_wasm";
 import CodeMirror, { ViewUpdate } from "@uiw/react-codemirror";
 import React from "react";
 
+const worker = new Worker(new URL('./worker.js', import.meta.url));
+
 function App() {
-  // init().then(() => greet());
+  console.log(import.meta.url);
+  // worker.postMessage({ a: 1, b: 2 });
   const [value, setValue] = React.useState("output 1d6 + 8");
   const onChange = React.useCallback((val: string, viewUpdate: ViewUpdate) => {
-    console.log("val:", val);
     setValue(val);
   }, []);
+
+  worker.postMessage({});
+  worker.onmessage = (event) => { console.log(event.data); };
 
   return (
     <>

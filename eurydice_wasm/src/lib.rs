@@ -8,6 +8,6 @@ extern "C" {
 }
 
 #[wasm_bindgen]
-pub fn greet() {
-    alert("Hello, eurydice_wasm!");
+pub fn return_three() -> i32 {
+    3
 }
