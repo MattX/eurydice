@@ -1,18 +1,11 @@
-mod ast;
-mod dice;
-mod eval;
-mod output;
-
-use dice::Pool;
-use lalrpop_util::{lalrpop_mod, ParseError};
-use output::{export_anydice_format, print_diagnostic};
-
-lalrpop_mod!(grammar);
+use eurydice_engine::dice::Pool;
+use eurydice_engine::output::{export_anydice_format, print_diagnostic};
+use lalrpop_util::ParseError;
 
 fn main() {
-    let parser = grammar::BodyParser::new();
+    let parser = eurydice_engine::grammar::BodyParser::new();
     let mut rl = rustyline::DefaultEditor::new().unwrap();
-    let mut evaluator = eval::Evaluator::new();
+    let mut evaluator = eurydice_engine::eval::Evaluator::new();
     let mut code = String::new();
     while let Ok(line) = rl.readline(if code.is_empty() { "> " } else { ". " }) {
         code.push_str(&line);
@@ -40,9 +33,9 @@ fn main() {
         }
         for (value, name) in evaluator.take_outputs() {
             let d = match value {
-                eval::RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
-                eval::RuntimeValue::List(is) => Pool::from_list(1, is.to_vec()),
-                eval::RuntimeValue::Pool(d) => (*d).clone(),
+                eurydice_engine::eval::RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
+                eurydice_engine::eval::RuntimeValue::List(is) => Pool::from_list(1, is.to_vec()),
+                eurydice_engine::eval::RuntimeValue::Pool(d) => (*d).clone(),
             };
             println!("{}", export_anydice_format(&name, &d));
         }

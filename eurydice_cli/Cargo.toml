@@ -1,0 +1,9 @@
+[package]
+name = "eurydice_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eurydice_engine = { path = "../eurydice_engine" }
+lalrpop-util = "0.20.2"
+rustyline = "14.0.0"

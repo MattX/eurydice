@@ -1,6 +1,6 @@
 use approx::relative_ne;
 use csv::ReaderBuilder;
-use everydice::{
+use eurydice_engine::{
     dice::Pool,
     eval, grammar,
     output::{

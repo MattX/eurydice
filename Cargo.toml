@@ -1,54 +1,7 @@
-[package]
-name = "everydice"
-version = "0.1.0"
-edition = "2021"
+[workspace]
 
-[lib]
-name = "everydice"
-path = "src/lib.rs"
-
-[[bin]]
-name = "everydice"
-path = "src/main.rs"
-
-[profile.profiling]
-inherits = "release"
-debug = true
-
-[dependencies]
-# Used to output distributions vaguely fancily.
-crossterm = "0.28.1"
-
-# Used to report errors nicely.
-miette = { version = "7.2.0", features = ["fancy"] }
-thiserror = "1.0.63"
-
-# Serde, serde-lexpr and pretty are just used to print the AST
-serde = { version = "1.0.204", features = ["derive"] }
-serde-lexpr = "0.1.3"
-pretty = "0.12.3"
-lexpr = "0.2.7"
-
-# Parser stuff
-lalrpop-util = { version = "0.20.2", features = ["lexer", "unicode"] }
-
-# Used for the REPL
-rustyline = "14.0.0"
-
-# Used for bigints
-malachite = "0.4.14"
-
-# Random utility stuff
-lazy_static = "1.5.0"
-
-# Used for multiset iteration
-tinyvec = { version = "1.8.0", features = ["alloc"] }
-
-[build-dependencies]
-cc="*"
-lalrpop = "0.20.2"
-
-[dev-dependencies]
-pretty_assertions = "1.4.0"
-approx = "0.5.1"
-csv = "1.3.0"
+resolver = "2"
+members = [
+    "eurydice_cli",
+    "eurydice_engine",
+]
