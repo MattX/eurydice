@@ -1,5 +1,6 @@
+use eurydice_cli::print_diagnostic;
 use eurydice_engine::dice::Pool;
-use eurydice_engine::output::{export_anydice_format, print_diagnostic};
+use eurydice_engine::output::export_anydice_format;
 use lalrpop_util::ParseError;
 
 fn main() {

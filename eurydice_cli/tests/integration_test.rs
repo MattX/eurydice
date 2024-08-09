@@ -1,11 +1,10 @@
 use approx::relative_ne;
 use csv::ReaderBuilder;
+use eurydice_cli::print_diagnostic;
 use eurydice_engine::{
     dice::Pool,
     eval, grammar,
-    output::{
-        export_anydice_format, mean, min_and_max, print_diagnostic, stddev, to_probabilities,
-    },
+    output::{export_anydice_format, mean, min_and_max, stddev, to_probabilities},
 };
 use miette::{Diagnostic, SourceSpan};
 use pretty_assertions::StrComparison;

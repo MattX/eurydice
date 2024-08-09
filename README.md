@@ -6,12 +6,12 @@ This is an implementation of the AnyDice DSL.
 
 The packages in this directory are:
 
-* `eurydice_engine/`: Contains a parser and evaluator for AnyDice programs (Rust).
-* `eurydice_cli/`: Contains a CLI frontend for Eurydice.
-* `eurydice_wasm/`: WASM wrapper for `eurydice_engine`
-* `eurydice_www/`: A Vite + React + TS app to serve as a frontend.
+* `eurydice_engine`: Contains a parser and evaluator for AnyDice programs (Rust).
+* `eurydice_cli`: Contains a CLI frontend for Eurydice. **Most serious tests are in this package** so we can display results in a pretty way without bundling terminal dependencies in `eurydice_engine`.
+* `eurydice_wasm`: WASM wrapper for `eurydice_engine`
+* `eurydice_www`: A Vite + React + TS app to serve as a frontend.
 
-Build the wasm with `wasm-pack ./eurydice_wasm --target no-modules`.
+Build the wasm with `wasm-pack build ./eurydice_wasm --target no-modules`.
 
 There are two important symlinks in `eurydice_www/src`:
 
@@ -21,6 +21,13 @@ There are two important symlinks in `eurydice_www/src`:
 These allow the compiled wasm to be run in a web worker for Eurydice's web frontend.
 
 See also notes in <https://rustwasm.github.io/wasm-bindgen/examples/wasm-in-web-worker.html>.
+
+## General TODO
+
+1. There are still a bunch of panic cases, most notably integer overflows, both during parsing and during arithmetic op execution. There may also be ones related to empty `Pool`s.
+2. Some of the code in `eurydice_engine/src/dice.rs` and `eurydice_engine/src/eval.rs` can probably be simplified now that we have a working implementation.
+3. LALRPOP error recovery.
+4. Like, the entire web UI.
 
 ## Eurydice documentation (todo)
 

@@ -210,6 +210,8 @@ Word: String = {
     "over" => "over".to_string(),
     "loop" => "loop".to_string(),
     "output" => "output".to_string(),
+    "print" => "print".to_string(),
+    "named" => "named".to_string(),
 };
 
 SafeUnaryOp: UnaryOp = {

@@ -8,11 +8,8 @@ name = "eurydice_engine"
 path = "src/lib.rs"
 
 [dependencies]
-# Used to output distributions vaguely fancily.
-crossterm = "0.28.1"
-
 # Used to report errors nicely.
-miette = { version = "7.2.0", features = ["fancy"] }
+miette = "7.2.0"
 thiserror = "1.0.63"
 
 # Serde, serde-lexpr and pretty are just used to print the AST
@@ -23,9 +20,6 @@ lexpr = "0.2.7"
 
 # Parser stuff
 lalrpop-util = { version = "0.20.2", features = ["lexer", "unicode"] }
-
-# Used for the REPL
-rustyline = "14.0.0"
 
 # Used for bigints
 malachite = "0.4.14"
