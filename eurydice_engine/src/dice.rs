@@ -537,79 +537,11 @@ fn sum_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
 }
 
 /// Mapper that sums the outcomes.
+#[allow(clippy::type_complexity)]
 pub const SUM_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
     initial_state: 0,
     f: sum_mapper,
 };
-
-fn product_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
-    state * outcome.pow(count)
-}
-
-/// Mapper that multiplies the outcomes.
-pub const PRODUCT_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
-    initial_state: 1,
-    f: product_mapper,
-};
-
-fn max_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
-    if count > 0 {
-        (*state).max(outcome)
-    } else {
-        *state
-    }
-}
-
-/// Mapper that takes the maximum of the outcomes.
-pub const MAX_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
-    initial_state: i32::MIN,
-    f: max_mapper,
-};
-
-fn min_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
-    if count > 0 {
-        (*state).min(outcome)
-    } else {
-        *state
-    }
-}
-
-/// Mapper that takes the minimum of the outcomes.
-pub const MIN_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
-    initial_state: i32::MAX,
-    f: min_mapper,
-};
-
-/// The first value represents the current sum, or None if the target is already reached.
-/// The second value represents the number of rolls made so far.
-type MaxDiceToReachState = (Option<i32>, i32);
-
-/// Returns a mapper that calculates the minimum number of dice to sum, starting from the
-/// lowest dice, to reach the target.
-pub fn make_max_dice_to_reach_mapper(
-    target: i32,
-) -> StateMapper<MaxDiceToReachState, impl Fn(&MaxDiceToReachState, i32, u32) -> MaxDiceToReachState>
-{
-    StateMapper {
-        initial_state: (Some(0), 0),
-        f: move |state, outcome, count| {
-            let count = count as i32;
-            let (sum, rolls) = state;
-            let sum = match sum {
-                Some(sum) => sum,
-                None => {
-                    return *state;
-                }
-            };
-            let count_needed = (target - sum + outcome - 1) / outcome;
-            if count_needed <= count {
-                (None, rolls + count_needed)
-            } else {
-                (Some(sum + count * outcome), rolls + count)
-            }
-        },
-    }
-}
 
 lazy_static! {
     /// Cache for binomial coefficients. Rows are either missing or fully calculated.
@@ -728,6 +660,40 @@ mod tests {
             result,
             to_counter(vec![(2, 1), (3, 2), (4, 3), (5, 2), (6, 1),])
         );
+    }
+
+    /// The first value represents the current sum, or None if the target is already reached.
+    /// The second value represents the number of rolls made so far.
+    type MaxDiceToReachState = (Option<i32>, i32);
+
+    /// Returns a mapper that calculates the minimum number of dice to sum, starting from the
+    /// lowest dice, to reach the target.
+    #[allow(clippy::type_complexity)]
+    pub fn make_max_dice_to_reach_mapper(
+        target: i32,
+    ) -> StateMapper<
+        MaxDiceToReachState,
+        impl Fn(&MaxDiceToReachState, i32, u32) -> MaxDiceToReachState,
+    > {
+        StateMapper {
+            initial_state: (Some(0), 0),
+            f: move |state, outcome, count| {
+                let count = count as i32;
+                let (sum, rolls) = state;
+                let sum = match sum {
+                    Some(sum) => sum,
+                    None => {
+                        return *state;
+                    }
+                };
+                let count_needed = (target - sum + outcome - 1) / outcome;
+                if count_needed <= count {
+                    (None, rolls + count_needed)
+                } else {
+                    (Some(sum + count * outcome), rolls + count)
+                }
+            },
+        }
     }
 
     #[test]
@@ -1195,18 +1161,5 @@ mod tests {
             Some((vec![3, 3].as_slice().into(), 1usize.into()))
         );
         assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_max_mapper() {
-        let pool = Pool::ndn(3, 6);
-        let result = pool.apply(MAX_MAPPER);
-        assert_eq!(result.len(), 6);
-        assert_eq!(result[&1], Natural::from(1u32));
-        assert_eq!(result[&2], Natural::from(7u32));
-        assert_eq!(result[&3], Natural::from(19u32));
-        assert_eq!(result[&4], Natural::from(37u32));
-        assert_eq!(result[&5], Natural::from(61u32));
-        assert_eq!(result[&6], Natural::from(91u32));
     }
 }

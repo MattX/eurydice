@@ -116,7 +116,7 @@ impl From<Pool> for RuntimeValue {
 #[derive(Debug)]
 struct ValEnv {
     parent: Option<RcValEnv>,
-    env: HashMap<String, (RuntimeValue, ast::Range)>,
+    env: HashMap<String, RuntimeValue>,
 }
 type RcValEnv = Rc<RefCell<ValEnv>>;
 
@@ -137,7 +137,7 @@ impl ValEnv {
 
     fn get(&self, key: &str) -> Option<RuntimeValue> {
         if let Some(value) = self.env.get(key) {
-            Some(value.0.clone())
+            Some(value.clone())
         } else if let Some(parent) = &self.parent {
             parent.borrow().get(key)
         } else {
@@ -145,18 +145,8 @@ impl ValEnv {
         }
     }
 
-    fn get_range(&self, key: &str) -> Option<ast::Range> {
-        if let Some(value) = self.env.get(key) {
-            Some(value.1)
-        } else if let Some(parent) = &self.parent {
-            parent.borrow().get_range(key)
-        } else {
-            None
-        }
-    }
-
-    fn insert(&mut self, key: String, value: RuntimeValue, range: ast::Range) {
-        self.env.insert(key, (value, range));
+    fn insert(&mut self, key: String, value: RuntimeValue) {
+        self.env.insert(key, value);
     }
 }
 
@@ -313,7 +303,7 @@ impl Evaluator {
                 eval_context
                     .env
                     .borrow_mut()
-                    .insert(name.value.clone(), value, name.range);
+                    .insert(name.value.clone(), value);
             }
             Statement::FunctionDefinition(fd) => {
                 self.functions.insert(
@@ -393,11 +383,10 @@ impl Evaluator {
                     }
                 };
                 for value in range.iter() {
-                    eval_context.env.borrow_mut().insert(
-                        variable.value.clone(),
-                        RuntimeValue::Int(*value),
-                        variable.range,
-                    );
+                    eval_context
+                        .env
+                        .borrow_mut()
+                        .insert(variable.value.clone(), RuntimeValue::Int(*value));
                     for statement in body {
                         let res = self.execute_statement(eval_context, statement)?;
                         if res.is_some() {
@@ -588,7 +577,7 @@ impl Evaluator {
                 Function::UserDefined(user_function) => {
                     let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
                     for (arg, formal) in args.iter().zip(user_function.args.iter()) {
-                        new_env.insert(formal.value.name.clone(), arg.clone(), formal.range);
+                        new_env.insert(formal.value.name.clone(), arg.clone());
                     }
                     let new_context = EvalContext {
                         env: Rc::new(RefCell::new(new_env)),
@@ -1356,12 +1345,9 @@ mod tests {
         }
 
         let env = Rc::new(RefCell::new(ValEnv::new()));
-        env.borrow_mut()
-            .insert("a".to_string(), 1.into(), ast::Range { start: 0, end: 0 });
-        env.borrow_mut()
-            .insert("b".to_string(), 2.into(), ast::Range { start: 0, end: 0 });
-        env.borrow_mut()
-            .insert("c".to_string(), 3.into(), ast::Range { start: 0, end: 0 });
+        env.borrow_mut().insert("a".to_string(), 1.into());
+        env.borrow_mut().insert("b".to_string(), 2.into());
+        env.borrow_mut().insert("c".to_string(), 3.into());
         assert_eq!(
             interpolate_variable_names(&ranged("a + b = [a] + [b]"), &env).unwrap(),
             "a + b = 1 + 2"
