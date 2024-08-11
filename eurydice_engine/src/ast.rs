@@ -1,4 +1,6 @@
+use miette::Diagnostic;
 use serde::Serialize;
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Range {
@@ -49,6 +51,7 @@ pub enum Statement {
     Set(SetParam),
     Print {
         expr: WithRange<Expression>,
+        named: Option<WithRange<String>>,
     },
 }
 
@@ -82,11 +85,17 @@ pub enum Expression {
 #[derive(Debug, Clone, Serialize)]
 pub struct ListLiteral {
     /// (Item, number of repetitions)
-    pub items: Vec<(ListLiteralItem, usize)>,
+    pub items: Vec<ListItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub enum ListLiteralItem {
+pub struct ListItem {
+    pub item: BareListItem,
+    pub repeat: Option<WithRange<Expression>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum BareListItem {
     Expr(WithRange<Expression>),
     Range(WithRange<Expression>, WithRange<Expression>),
 }
@@ -281,6 +290,15 @@ pub fn make_function_call(items: Vec<WithRange<FunctionCallItem>>) -> Expression
         name: WithRange::new(range_start, range_end, name.join(" ")),
         args,
     }
+}
+
+/// This corresponds to inner errors in the grammar - when the LR parser succeeded,
+/// but custom action code failed.
+#[derive(Debug, Diagnostic, Error)]
+pub enum ParseActionError {
+    #[error("Invalid integer literal")]
+    #[diagnostic(help("Integer literals must be in the range -2^31 to 2^31-1"))]
+    InvalidIntegerLiteral,
 }
 
 #[cfg(test)]

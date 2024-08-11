@@ -16,8 +16,8 @@ use thiserror::Error;
 
 use crate::{
     ast::{
-        self, BinaryOp, Expression, FunctionDefinition, ListLiteralItem, PositionOrder, SetParam,
-        Statement, StaticType, UnaryOp, WithRange,
+        self, BareListItem, BinaryOp, Expression, FunctionDefinition, ListItem, PositionOrder,
+        SetParam, Statement, StaticType, UnaryOp, WithRange,
     },
     dice::{explode, Pool, PoolMultisetIterator},
 };
@@ -328,6 +328,11 @@ impl Evaluator {
                         .push((value, format!("output {}", self.outputs.len() + 1)));
                 }
             }
+            // TODO handle named prints
+            Statement::Print { expr, .. } => {
+                let value = self.evaluate(eval_context, expr)?;
+                println!("{}", value);
+            }
             Statement::Return { value } => {
                 if self.recursion_depth == 0 {
                     return Err(RuntimeError::ReturnOutsideFunction {
@@ -409,10 +414,6 @@ impl Evaluator {
                     SetParam::MaximumFunctionDepth(d) => self.recursion_depth = *d,
                 }
             }
-            Statement::Print { expr } => {
-                let value = self.evaluate(eval_context, expr)?;
-                println!("{}", value);
-            }
         }
         Ok(None)
     }
@@ -487,12 +488,26 @@ impl Evaluator {
     fn evaluate_list_literal_item(
         &mut self,
         eval_context: &EvalContext,
-        item: &(ListLiteralItem, usize),
+        item: &ListItem,
     ) -> Result<Vec<i32>, RuntimeError> {
-        let (item, repeats) = item;
-        let base = match item {
-            ListLiteralItem::Expr(expression) => self.evaluate(eval_context, expression),
-            ListLiteralItem::Range(start_expr, end_expr) => {
+        let repeat_count = match &item.repeat {
+            Some(repeat) => match self.evaluate(eval_context, repeat)? {
+                RuntimeValue::Int(i) => {
+                    usize::try_from(i.max(0)).expect("converting a positive i32 into usize")
+                }
+                repeat_value => {
+                    return Err(RuntimeError::InvalidRepeatExpression {
+                        range: repeat.range.into(),
+                        found: repeat_value.runtime_type(),
+                        value: repeat_value,
+                    })
+                }
+            },
+            None => 1,
+        };
+        let base = match &item.item {
+            BareListItem::Expr(expression) => self.evaluate(eval_context, expression),
+            BareListItem::Range(start_expr, end_expr) => {
                 let start = self.evaluate(eval_context, start_expr)?;
                 let start = match start {
                     RuntimeValue::Int(i) => i,
@@ -516,7 +531,7 @@ impl Evaluator {
                 Ok(RuntimeValue::List(Rc::new((start..=end).collect())))
             }
         }?;
-        Ok(base.to_list(*repeats))
+        Ok(base.to_list(repeat_count))
     }
 
     fn evaluate_function_call(
@@ -938,7 +953,12 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
             // For each outcome in the left pool, sum the right pool with itself k times
             left_p
                 .flat_map(|count| {
-                    debug_assert_eq!(count.len(), 1, "summed distribution has count of {}", count.len());
+                    debug_assert_eq!(
+                        count.len(),
+                        1,
+                        "summed distribution has count of {}",
+                        count.len()
+                    );
                     let mut dup_right = right.clone();
                     let multiplier = count[0];
                     if multiplier < 0 {
@@ -1326,6 +1346,15 @@ pub enum RuntimeError {
         #[label = "This evaluates to {value}."]
         found_range: SourceSpan,
         value: i32,
+    },
+
+    #[error("Invalid repeat expression")]
+    #[diagnostic(help("The expression inside the repeat operator must evaluate to an int."))]
+    InvalidRepeatExpression {
+        #[label = "This is a {found}: {value}."]
+        range: SourceSpan,
+        found: StaticType,
+        value: RuntimeValue,
     },
 }
 

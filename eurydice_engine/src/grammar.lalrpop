@@ -1,11 +1,14 @@
 use std::str::FromStr;
-use crate::ast::{WithRange, Expression, UnaryOp, BinaryOp, Statement, ListLiteralItem, ListLiteral,
-                 FunctionCallItem, FunctionDefinitionItem, FunctionDefinition, StaticType, SetParam,
-                 PositionOrder, ArgWithType,
-                 apply_string_escapes,
-                 make_function_definition, make_function_call};
+
+use lalrpop_util::ParseError;
+
+use crate::ast::*;
 
 grammar;
+
+extern {
+    type Error = ParseActionError;
+}
 
 match {
     r"\s*" => { }, // The default whitespace skipping is disabled if an `ignore pattern` is specified
@@ -17,21 +20,21 @@ pub Body: Vec<WithRange<Statement>> = {
     <ss:Statement*> => ss,
 };
 
-pub Statement: WithRange<Statement> = {
+Statement: WithRange<Statement> = {
     <start: @L> <s:StatementInner> <end: @R> => WithRange::new(start, end, s),
 };
 
-pub StatementInner: Statement = {
+StatementInner: Statement = {
     <id_start: @L> <id:VariableIdentifier> <id_end: @L> ":" <e:Expr> => 
         Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
     <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
     "output" <e:Expr> <n:OutputName?> => Statement::Output { value: e, named: n },
+    "print" <e:Expr> <n:OutputName?> => Statement::Print { expr: e, named: n },
     "result" ":" <e:Expr> => Statement::Return { value: e },
     <s:SetStatement> => s,
     "loop" <id_start: @L> <id:VariableIdentifier> <id_end: @L> "over" <e:Expr> "{" <b:Block> "}" =>
         Statement::Loop { variable: WithRange::new(id_start, id_end, id), range_expression: Box::new(e), body: b },
     <i:IfStatement> => i,
-    "print" <e:Expr> => Statement::Print { expr: e },
 };
 
 IfStatement: Statement = {
@@ -51,15 +54,15 @@ SetStatement: Statement = {
     "set" "\"position order\"" "to" "\"highest first\"" => Statement::Set(SetParam::PositionOrder(PositionOrder::Descending)),
 }
 
-pub Block: Vec<WithRange<Statement>> = {
+Block: Vec<WithRange<Statement>> = {
     <ss:Statement*> => ss,
 };
 
-pub Expr: WithRange<Expression> = {
+pub(crate) Expr: WithRange<Expression> = {
     <start: @L> <e:ExprInner0> <end: @R> => WithRange::new(start, end, e),
 };
 
-pub SafeExpr: WithRange<Expression> = {
+SafeExpr: WithRange<Expression> = {
     <start: @L> <e:SafeExprInner0> <end: @R> => WithRange::new(start, end, e),
 };
 
@@ -98,7 +101,7 @@ SafeExprInner5 = ExprInnerTier<BinaryOp5, ExprInner6, SafeExprInner6>;
 ExprInner6 = ExprInnerTier<BinaryOp6, ExprInner11, ExprInner11>;
 SafeExprInner6 = ExprInnerTier<BinaryOp6, ExprInner11, SafeExprInner11>;
 
-pub ExprInner11: Expression = {
+ExprInner11: Expression = {
     <op_start: @L> <o:UnsafeUnaryOp> <op_end: @R> <start: @L> <e:ExprInner11> <end: @R> =>
         Expression::UnaryOp { 
             op: WithRange::new(op_start, op_end, o),
@@ -107,7 +110,7 @@ pub ExprInner11: Expression = {
     SafeExprInner11,
 }
 
-pub SafeExprInner11: Expression = {
+SafeExprInner11: Expression = {
     <op_start: @L> <o:SafeUnaryOp> <op_end: @R> <start: @L> <e:ExprInner11> <end: @R> =>
         Expression::UnaryOp { 
             op: WithRange::new(op_start, op_end, o),
@@ -116,7 +119,7 @@ pub SafeExprInner11: Expression = {
     ExprInner12,
 }
 
-pub ExprInner12: Expression = {
+ExprInner12: Expression = {
     #[precedence(level="0")]
     "(" <e:Expr> ")" => e.value,
     <l:List> => Expression::List(l),
@@ -125,30 +128,29 @@ pub ExprInner12: Expression = {
     <n:Num> => Expression::Int(n),
 };
 
-pub OutputName: WithRange<String> = {
+OutputName: WithRange<String> = {
     "named" <start: @L> <l:r#""(\\\\|\\"|[^"\\])*""#> <end: @R> =>
         WithRange::new(start, end, apply_string_escapes(&l[1..l.len()-1]).into()),
 }
 
-pub List: ListLiteral = {
+List: ListLiteral = {
     "{" <es:Comma<ListItemWithRepeat>> "}" => ListLiteral { items: es },
 }
 
-pub ListItemWithRepeat: (ListLiteralItem, usize) = {
-    <e:ListItem> <r:Repeat?> => (e, r.unwrap_or(1)),
+ListItemWithRepeat: ListItem = {
+    <e:BareListItem> <r:Repeat?> => ListItem { item: e, repeat: r },
 };
 
-pub Repeat: usize = {
-    // TODO disallow negative numbers
-    ":" <n:Num> => n as usize
+Repeat: WithRange<Expression> = {
+    ":" <e:Expr> => e,
 };
 
-pub ListItem: ListLiteralItem = {
-    <e:Expr> => ListLiteralItem::Expr(e),
-    <start:Expr> ".." <end:Expr> => ListLiteralItem::Range(start, end),
+BareListItem: BareListItem = {
+    <e:Expr> => BareListItem::Expr(e),
+    <start:Expr> ".." <end:Expr> => BareListItem::Range(start, end),
 };
 
-pub FunctionCall: Expression = {
+FunctionCall: Expression = {
     "[" <items:FunctionCallItem*> <last:FinalFunctionCallItem?> "]" => {
         let mut all_items = items.into_iter().flatten().collect::<Vec<_>>();
         if let Some(last) = last {
@@ -158,7 +160,7 @@ pub FunctionCall: Expression = {
     }
 };
 
-pub FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
+FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
     <start: @L> <w:Word> <end: @R> => vec![WithRange::new(start, end, FunctionCallItem::Word(w))],
     <e:Expr> <es:SafeExpr*> <start: @L> <w:Word> <end: @R> => {
         let mut items = vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))];
@@ -168,7 +170,7 @@ pub FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
     }
 };
 
-pub FinalFunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
+FinalFunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
     <e:Expr> <es:SafeExpr*> => {
         let mut items = vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))];
         items.extend(es.into_iter().map(|e| WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))));
@@ -176,21 +178,21 @@ pub FinalFunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
     }
 }
 
-pub FunctionDefinition: FunctionDefinition = {
+pub(crate) FunctionDefinition: FunctionDefinition = {
     "function" ":" <items:FunctionDefinitionItem+> "{" <b:Block> "}" => make_function_definition(items, b),
 };
 
-pub FunctionDefinitionItem: WithRange<FunctionDefinitionItem> = {
+FunctionDefinitionItem: WithRange<FunctionDefinitionItem> = {
     <start: @L> <w:Word> <end: @R> => WithRange::new(start, end, FunctionDefinitionItem::Word(w)),
     <start: @L> <id:SingleArg> <end: @R> => WithRange::new(start, end, id),
 };
 
-pub SingleArg: FunctionDefinitionItem = {
+SingleArg: FunctionDefinitionItem = {
     <id:VariableIdentifier> ":" <t:StaticType> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: Some(t) }),
     <id:VariableIdentifier> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: None }),
 };
 
-pub StaticType: StaticType = {
+StaticType: StaticType = {
     "n" => StaticType::Int,
     "s" => StaticType::List,
     "d" => StaticType::Pool,
@@ -198,7 +200,7 @@ pub StaticType: StaticType = {
 
 // TOOD: avoid unwrap here
 // Negative numbers are handled by the unary `-` op.
-Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
+Num: i32 = <s:r"[0-9]+"> =>? i32::from_str(s).map_err(|_| ParseError::User { error: ParseActionError::InvalidIntegerLiteral });
 VariableIdentifier: String = <s:r"[A-Z][A-Z_]*"> => s.to_string();
 Word: String = {
     <s:r"[a-z][a-z_]+"> => s.to_string(),
