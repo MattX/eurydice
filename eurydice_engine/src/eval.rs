@@ -697,7 +697,7 @@ fn apply_unary_op(op: UnaryOp, operand: &RuntimeValue) -> RuntimeValue {
         UnaryOp::Length => match operand {
             RuntimeValue::Int(i) => (i.to_string().len() as i32).into(),
             RuntimeValue::List(list) => (list.len() as i32).into(),
-            RuntimeValue::Pool(d) => ((*d).get_n() as i32).into(),
+            RuntimeValue::Pool(d) => ((*d).dimension() as i32).into(),
         },
     }
 }
@@ -819,7 +819,7 @@ fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
 }
 
 fn select_in_dice(indices: &[i32], pool: Pool, lowest_first: bool) -> Pool {
-    let size = pool.get_n() as usize;
+    let size = pool.dimension() as usize;
     let mut keep_list = vec![false; size];
     for &i in indices {
         if i < 1 || i > size as i32 {
@@ -939,7 +939,7 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
             if i < 0 {
                 new_pool = new_pool.map_outcomes(|o| -o);
             }
-            new_pool.set_n(new_pool.get_n() * i.unsigned_abs());
+            new_pool.set_dimension(new_pool.dimension() * i.unsigned_abs());
             new_pool.into()
         }
         (DLeftSide::Pool(left_p), right) => {
@@ -963,7 +963,7 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
                     if multiplier < 0 {
                         dup_right = dup_right.map_outcomes(|o| -o);
                     }
-                    dup_right.set_n(dup_right.get_n() * multiplier.unsigned_abs());
+                    dup_right.set_dimension(dup_right.dimension() * multiplier.unsigned_abs());
                     dup_right.sum().into()
                 })
                 .into()
@@ -1067,7 +1067,7 @@ impl Primitive {
                 if let RuntimeValue::Pool(d) = &args[0] {
                     let die: Vec<_> = (*d).clone().sum().into_die_iter().collect();
                     let highest_value = die.last().unwrap().0;
-                    Ok(Pool::from_die(explode(die, &[highest_value], explode_depth)).into())
+                    Ok(Pool::from(explode(die, &[highest_value], explode_depth)).into())
                 } else {
                     panic!("wrong argument types to [explode]");
                 }
@@ -1079,7 +1079,7 @@ impl Primitive {
                         self,
                         *i,
                         arg_ranges[0],
-                        d.get_n() as usize,
+                        d.dimension() as usize,
                         function_range,
                     )?;
                     Ok(d.sum_with_keep_list(&keep_list).into())
@@ -1106,8 +1106,7 @@ impl Primitive {
             Primitive::Maximum => {
                 // args: pool
                 if let RuntimeValue::Pool(d) = &args[0] {
-                    Ok(d
-                        .sum()
+                    Ok(d.sum()
                         .ordered_outcomes()
                         .last()
                         .map(|(o, _)| *o)

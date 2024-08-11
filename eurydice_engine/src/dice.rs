@@ -24,7 +24,7 @@ use tinyvec::TinyVec;
 /// Represents a pool of identical independent dice.
 #[derive(Debug, Clone)]
 pub struct Pool {
-    n: u32,
+    dimension: u32,
     // Outcomes are ordered by their face value. The tuple represents (value, weight / count).
     // Outcomes must be unique and have nonzero weight.
     ordered_outcomes: Vec<(i32, Natural)>,
@@ -32,8 +32,8 @@ pub struct Pool {
 
 impl std::fmt::Display for Pool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.n != 1 {
-            write!(f, "{}", self.n)?;
+        if self.dimension != 1 {
+            write!(f, "{}", self.dimension)?;
         }
         if self
             .ordered_outcomes
@@ -67,14 +67,14 @@ impl std::fmt::Display for Pool {
 /// The outcomes that remain in consideration are the `remaining_count` smallest outcomes.`
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Copy)]
 struct SubPool {
-    n: u32,
+    dimension: u32,
     remaining_outcomes: usize,
 }
 
 impl SubPool {
     fn initial(pool: &Pool) -> Self {
         Self {
-            n: pool.n,
+            dimension: pool.dimension,
             remaining_outcomes: pool.ordered_outcomes.len(),
         }
     }
@@ -82,9 +82,9 @@ impl SubPool {
 
 impl Pool {
     /// Creates a new pool of `n` dice, each with `sides` sides.
-    pub fn ndn(n: u32, sides: u32) -> Self {
+    pub fn ndn(dimension: u32, sides: u32) -> Self {
         Self {
-            n,
+            dimension,
             ordered_outcomes: (1..=sides)
                 .map(|side| (side as i32, 1usize.into()))
                 .collect::<Vec<_>>(),
@@ -92,25 +92,14 @@ impl Pool {
     }
 
     /// Creates a new pool from a list of outcomes. Repeats are allowed and will count as multiple weights.
-    pub fn from_list(n: u32, outcomes: Vec<i32>) -> Self {
+    pub fn from_list(dimension: u32, outcomes: Vec<i32>) -> Self {
         let mut outcomes_map = BTreeMap::new();
         for outcome in outcomes {
             *outcomes_map.entry(outcome).or_insert(Natural::from(0usize)) += Natural::from(1usize);
         }
         let ordered_outcomes = outcomes_map.into_iter().collect::<Vec<_>>();
         Self {
-            n,
-            ordered_outcomes,
-        }
-    }
-
-    /// Creates a new pool (comprised of a single die) from a list of outcomes. Repeats
-    /// are not allowed.
-    pub fn from_die(die: Vec<(i32, Natural)>) -> Self {
-        let mut ordered_outcomes = die.clone();
-        ordered_outcomes.sort_unstable();
-        Self {
-            n: 1,
+            dimension,
             ordered_outcomes,
         }
     }
@@ -118,13 +107,13 @@ impl Pool {
     /// Sets the number of dice in the pool, resetting the keep list.
     ///
     /// Panics if `n` is negative.
-    pub fn set_n(&mut self, n: u32) {
-        self.n = n;
+    pub fn set_dimension(&mut self, dimension: u32) {
+        self.dimension = dimension;
     }
 
     /// Gets the number of dice in the pool.
-    pub fn get_n(&self) -> u32 {
-        self.n
+    pub fn dimension(&self) -> u32 {
+        self.dimension
     }
 
     /// Maps the outcomes of the pool using the given function. The function can be non-injective,
@@ -158,7 +147,7 @@ impl Pool {
         let mut ordered_outcomes = outcomes.collect::<Vec<_>>();
         ordered_outcomes.sort_unstable();
         Self {
-            n: 1,
+            dimension: 1,
             ordered_outcomes,
         }
     }
@@ -168,7 +157,11 @@ impl Pool {
         S: Clone + Hash + Eq,
         F: Fn(&S, i32, u32) -> S,
     {
-        debug_assert_eq!(keep_list.len(), self.n as usize, "`apply` called with keep list of incorrect length");
+        debug_assert_eq!(
+            keep_list.len(),
+            self.dimension as usize,
+            "`apply` called with keep list of incorrect length"
+        );
         if self.ordered_outcomes.is_empty() {
             return [(mapper.initial_state.clone(), Natural::ONE)].into();
         }
@@ -193,21 +186,21 @@ impl Pool {
         let new_remaining_outcomes = sub_pool.remaining_outcomes - 1;
         let (outcome, weight) = &self.ordered_outcomes[new_remaining_outcomes];
         let result = if new_remaining_outcomes == 0 {
-            let num_kept = self.num_kept(keep_list, sub_pool, sub_pool.n);
+            let num_kept = self.num_kept(keep_list, sub_pool, sub_pool.dimension);
             [(
                 (mapper.f)(&mapper.initial_state, *outcome, num_kept),
-                weight.pow(sub_pool.n as u64),
+                weight.pow(sub_pool.dimension as u64),
             )]
             .into()
         } else {
             let mut result = HashMap::new();
-            for num_with_outcome in 0..=sub_pool.n {
+            for num_with_outcome in 0..=sub_pool.dimension {
                 // Replace num_with_outcome with the actual number of dice to keep in the considered range.
                 // Ignore anything in the keep list above index `sub_pool.n`, and below `sub_pool.n - num_with_outcome`.
                 let num_kept = self.num_kept(keep_list, sub_pool, num_with_outcome);
 
                 let sub_sub_pool = SubPool {
-                    n: sub_pool.n - num_with_outcome,
+                    dimension: sub_pool.dimension - num_with_outcome,
                     remaining_outcomes: new_remaining_outcomes,
                 };
                 let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper, keep_list);
@@ -216,7 +209,7 @@ impl Pool {
                     // There were binom(self.n, num_with_outcome) ways to get this outcome,
                     // times weight^num_with_outcome if the weight is >1.
                     *result.entry(inner_state).or_default() += count
-                        * binom(sub_pool.n as usize, num_with_outcome as usize)
+                        * binom(sub_pool.dimension as usize, num_with_outcome as usize)
                         * weight.pow(num_with_outcome as u64);
                 }
             }
@@ -227,15 +220,15 @@ impl Pool {
     }
 
     fn num_kept(&self, keep_list: &[bool], sub_pool: SubPool, num_with_outcome: u32) -> u32 {
-        keep_list[(sub_pool.n - num_with_outcome) as usize..sub_pool.n as usize]
+        keep_list[(sub_pool.dimension - num_with_outcome) as usize..sub_pool.dimension as usize]
             .iter()
             .filter(|&&keep| keep)
             .count() as u32
     }
 
-    /// Sums the distribution; the resulting pool is guaranteed to have n=1.
+    /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
     pub fn sum(&self) -> Pool {
-        let keep_list = vec![true; self.n as usize];
+        let keep_list = vec![true; self.dimension as usize];
         self.apply(SUM_MAPPER, &keep_list).into_iter().collect()
     }
 
@@ -253,10 +246,6 @@ impl Pool {
 
     pub fn multiset_iterator(&self) -> PoolMultisetIterator {
         PoolMultisetIterator::new(self)
-    }
-
-    pub fn outcome_iterator(&self) -> PoolIterator {
-        PoolIterator::new(self)
     }
 
     /// This functions call `f` with each multiset outcome from the pool. The distributions returned
@@ -328,19 +317,19 @@ impl<'a> PoolMultisetIterator<'a> {
     fn new(pool: &'a Pool) -> Self {
         Self {
             pool,
-            positions: vec![0; pool.n as usize],
-            factorial: Natural::factorial(pool.n as u64),
+            positions: vec![0; pool.dimension as usize],
+            factorial: Natural::factorial(pool.dimension as u64),
             done: false,
         }
     }
 
     pub fn reset(&mut self) {
-        self.positions = vec![0; self.pool.n as usize];
+        self.positions = vec![0; self.pool.dimension as usize];
         self.done = false;
     }
 
     fn advance_position(&mut self) {
-        let pool_size = self.pool.n as isize;
+        let pool_size = self.pool.dimension as isize;
         let mut position_index = pool_size - 1;
         while position_index >= 0 {
             self.positions[position_index as usize] += 1;
@@ -408,71 +397,12 @@ fn item_factorials(outcome: &TinyVec<[i32; 6]>) -> Natural {
     product
 }
 
-/// Iterator over all possible outcomes in a pool.
-#[derive(Debug)]
-pub struct PoolIterator<'a> {
-    pool: &'a Pool,
-    positions: Vec<usize>,
-    /// Whether we're finished; if true, then |positions| may contain invalid indices.
-    done: bool,
-}
-
-impl<'a> PoolIterator<'a> {
-    fn new(pool: &'a Pool) -> Self {
-        Self {
-            pool,
-            positions: vec![0; pool.n as usize],
-            done: false,
-        }
-    }
-
-    pub fn reset(&mut self) {
-        self.positions = vec![0; self.pool.n as usize];
-        self.done = false;
-    }
-}
-
-impl<'a> Iterator for PoolIterator<'a> {
-    type Item = (TinyVec<[i32; 6]>, Natural);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-        let outcome = self
-            .positions
-            .iter()
-            .map(|&i| self.pool.ordered_outcomes[i].0)
-            .collect::<TinyVec<[i32; 6]>>();
-        let weight: Natural = self
-            .positions
-            .iter()
-            .map(|&i| &self.pool.ordered_outcomes[i].1)
-            .product();
-        let mut position = self.pool.n as isize - 1;
-        while position >= 0 {
-            self.positions[position as usize] += 1;
-            if self.positions[position as usize] == self.pool.ordered_outcomes.len() {
-                if position == 0 {
-                    self.done = true;
-                    break;
-                }
-                self.positions[position as usize] = 0;
-                position -= 1;
-            } else {
-                break;
-            }
-        }
-        Some((outcome, weight))
-    }
-}
-
 impl FromIterator<(i32, Natural)> for Pool {
     fn from_iter<I: IntoIterator<Item = (i32, Natural)>>(iter: I) -> Self {
         let mut ordered_outcomes = iter.into_iter().collect::<Vec<_>>();
         ordered_outcomes.sort_unstable();
         Self {
-            n: 1,
+            dimension: 1,
             ordered_outcomes,
         }
     }
@@ -481,7 +411,7 @@ impl FromIterator<(i32, Natural)> for Pool {
 impl From<Vec<(i32, Natural)>> for Pool {
     fn from(ordered_outcomes: Vec<(i32, Natural)>) -> Self {
         Self {
-            n: 1,
+            dimension: 1,
             ordered_outcomes,
         }
     }
@@ -1028,7 +958,7 @@ mod tests {
         let pool2 = Pool::from_list(1, vec![1, 2, 3, 4]);
         let result = pool1.flat_map(|outcome| {
             let mut summed_pool = pool2.clone();
-            summed_pool.set_n(outcome[0] as u32);
+            summed_pool.set_dimension(outcome[0] as u32);
             summed_pool
                 .sum()
                 .into_die_iter()
@@ -1113,49 +1043,6 @@ mod tests {
         assert_eq!(
             iter.next(),
             Some((vec![3, 3].as_slice().into(), 9usize.into()))
-        );
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_pool_iterator() {
-        let pool = Pool::from_list(2, vec![1, 2, 2, 3]);
-        let mut iter = pool.outcome_iterator();
-        assert_eq!(
-            iter.next(),
-            Some((vec![1, 1].as_slice().into(), 1usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![1, 2].as_slice().into(), 2usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![1, 3].as_slice().into(), 1usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![2, 1].as_slice().into(), 2usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![2, 2].as_slice().into(), 4usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![2, 3].as_slice().into(), 2usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![3, 1].as_slice().into(), 1usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![3, 2].as_slice().into(), 2usize.into()))
-        );
-        assert_eq!(
-            iter.next(),
-            Some((vec![3, 3].as_slice().into(), 1usize.into()))
         );
         assert_eq!(iter.next(), None);
     }
