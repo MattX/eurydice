@@ -1,18 +1,19 @@
 import CodeMirror, { ViewUpdate } from "@uiw/react-codemirror";
 import React from "react";
+import { Line } from "react-chartjs-2";
 
 const worker = new Worker(new URL('./worker.js', import.meta.url));
+worker.onmessage = (event) => { console.log(event.data); };
 
 function App() {
   console.log(import.meta.url);
   // worker.postMessage({ a: 1, b: 2 });
   const [value, setValue] = React.useState("output 1d6 + 8");
+  const [chartData, setChartData] = React.useState([]);
   const onChange = React.useCallback((val: string, viewUpdate: ViewUpdate) => {
     setValue(val);
+    worker.postMessage(val);
   }, []);
-
-  worker.postMessage({});
-  worker.onmessage = (event) => { console.log(event.data); };
 
   return (
     <>
@@ -25,11 +26,7 @@ function App() {
           />
         </div>
         <div className="w-full md:w-1/2 p-4">
-          <h2 className="text-xl font-bold mb-2">Right Pane</h2>
-          <p>
-            This is the content for the right pane (or bottom pane on smaller
-            screens).
-          </p>
+          <Line data={{datasets: chartData, }} />
         </div>
       </div>
     </>

@@ -14,7 +14,7 @@ thiserror = "1.0.63"
 
 # Serde derive is used for testing only, but we need it here to derive
 # the traits.
-serde = { version = "1.0.204", features = ["derive"] }
+serde = { version = "1.0.204", features = ["derive", "rc"] }
 
 # Parser stuff
 lalrpop-util = { version = "0.20.2", features = ["lexer", "unicode"] }
