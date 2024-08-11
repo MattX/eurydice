@@ -19,7 +19,7 @@ use crate::{
         self, BareListItem, BinaryOp, Expression, FunctionDefinition, ListItem, PositionOrder,
         SetParam, Statement, StaticType, UnaryOp, WithRange,
     },
-    dice::{explode, MultisetCrossProductIterator, Pool, PoolMultisetIterator},
+    dice::{explode, MultisetCrossProductIterator, Pool},
 };
 
 #[derive(Debug, Clone)]
@@ -559,7 +559,7 @@ impl Evaluator {
             .collect::<Result<Vec<_>, _>>()?;
 
         // This vector will contain references to pools which match an int or list arguments. These
-        // are the pools over which we need to iterate.
+        // are the pools over which we need to iterate to get the argument values.
         let mut pools = Vec::new();
         // Contains (index, is_int) for the corresponding pool.
         let mut pool_iterator_info = Vec::new();
@@ -1192,31 +1192,6 @@ fn interpolate_variable_names(
         }
     }
     Ok(result)
-}
-
-/// Fills arguments in |args| which have a corresponding pool iterator with the first outcome of the iterator.
-/// Returns the weight of the combined outcome.
-///
-/// If any iterator is empty, the cross-product pool is empty as well, and the function returns None. In this case,
-/// |args| is left in an unspecified state.
-fn fill_args(
-    args: &mut [RuntimeValue],
-    pool_iterators: &mut [(PoolMultisetIterator, usize, bool)],
-) -> Option<Natural> {
-    let mut weight = Natural::ONE;
-    for (pool_iterator, arg_index, is_int) in pool_iterators {
-        if let Some((outcome, outcome_weight)) = pool_iterator.next() {
-            args[*arg_index] = if *is_int {
-                outcome[0].into()
-            } else {
-                outcome.to_vec().into()
-            };
-            weight *= outcome_weight;
-        } else {
-            return None;
-        }
-    }
-    Some(weight)
 }
 
 fn reverse_if(should_reverse: bool, v: &[i32]) -> Vec<i32> {

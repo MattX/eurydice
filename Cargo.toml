@@ -5,3 +5,7 @@ members = [
     "eurydice_engine",
     "eurydice_wasm",
 ]
+
+[profile.profiling]
+inherits = "release"
+debug = true

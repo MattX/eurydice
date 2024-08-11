@@ -1,0 +1,4 @@
+function: iterate A:s B:s C:n {
+    result: (A < B) + C
+}
+output [iterate 4d10 4d10 (d2)]

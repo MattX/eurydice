@@ -94,7 +94,7 @@ impl Pool {
     pub fn from_list(dimension: u32, outcomes: Vec<i32>) -> Self {
         let mut outcomes_map = BTreeMap::new();
         for outcome in outcomes {
-            *outcomes_map.entry(outcome).or_insert(Natural::from(0usize)) += Natural::from(1usize);
+            *outcomes_map.entry(outcome).or_insert(Natural::ZERO) += Natural::ONE;
         }
         let ordered_outcomes = outcomes_map.into_iter().collect::<Vec<_>>();
         Self {
@@ -227,6 +227,14 @@ impl Pool {
 
     /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
     pub fn sum(&self) -> Pool {
+        if self.dimension == 0 || self.ordered_outcomes.is_empty() {
+            return Pool {
+                dimension: 1,
+                ordered_outcomes: vec![(0, Natural::ONE)],
+            };
+        } else if self.dimension == 1 {
+            return self.clone();
+        }
         let keep_list = vec![true; self.dimension as usize];
         self.apply(SUM_MAPPER, &keep_list).into_iter().collect()
     }
