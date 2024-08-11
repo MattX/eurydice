@@ -1,4 +1,8 @@
 @top Program { expression }
 
-@skip { @whitespace | Comment }
+@skip { space | Comment }
 
+@tokens {
+    space { @whitespace+ }
+    Comment { "\\" ![\\]* "\\" }
+}

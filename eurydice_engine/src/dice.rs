@@ -19,7 +19,6 @@ use malachite::num::basic::traits::{One, Zero};
 use malachite::{Natural, Rational};
 use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
-use tinyvec::TinyVec;
 
 /// Represents a pool of identical independent dice.
 #[derive(Debug, Clone)]
@@ -252,7 +251,7 @@ impl Pool {
     /// by `f` are flatmapped together to create a new distribution, stored as a size-1 pool.
     pub fn flat_map<F>(&self, f: F) -> Self
     where
-        F: Fn(TinyVec<[i32; 6]>) -> BTreeMap<i32, Natural>,
+        F: Fn(&[i32]) -> BTreeMap<i32, Natural>,
     {
         // Positions will take all values between [0, 0, ..., 0] and [self.n - 1, self.n - 1, ..., self.n - 1],
         // in lexicographic order.
@@ -265,7 +264,7 @@ impl Pool {
             // To solve this, we store each weight in |new_outcomes| as a fraction (divided by the total
             // weight returned by f), and multiply everything by the LCM at the end to go back
             // to naturals.
-            let f_outcome = f(outcome);
+            let f_outcome = f(&outcome);
             let f_outcome_sum = f_outcome.values().sum();
             outcome_sum_lcm = outcome_sum_lcm.lcm(&f_outcome_sum);
             for (new_outcome, sub_weight) in f_outcome {
@@ -288,7 +287,7 @@ impl Pool {
     /// Maps multiset outcomes to a single value each.
     pub fn map<F>(&self, f: F) -> Self
     where
-        F: Fn(TinyVec<[i32; 6]>) -> i32,
+        F: Fn(&[i32]) -> i32,
     {
         self.flat_map(|outcome| BTreeMap::from([(f(outcome), 1usize.into())]))
     }
@@ -351,17 +350,17 @@ impl<'a> PoolMultisetIterator<'a> {
 }
 
 impl<'a> Iterator for PoolMultisetIterator<'a> {
-    type Item = (TinyVec<[i32; 6]>, Natural);
+    type Item = (Vec<i32>, Natural);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done || self.pool.ordered_outcomes.is_empty() {
+        if self.done || self.pool.ordered_outcomes.is_empty() || self.pool.dimension == 0 {
             return None;
         }
         let outcome = self
             .positions
             .iter()
             .map(|&i| self.pool.ordered_outcomes[i].0)
-            .collect::<TinyVec<[i32; 6]>>();
+            .collect::<Vec<i32>>();
 
         // Compute the number of ways to get this outcome, and multiply by the weight of all
         // elements that make it up.
@@ -381,21 +380,84 @@ impl<'a> Iterator for PoolMultisetIterator<'a> {
 /// An interator over the cross product of several PoolMultisetIterators.
 struct MultisetCrossProductIterator<'a> {
     sub_iterators: Vec<PoolMultisetIterator<'a>>,
-    values: Vec<Vec<i32>>,
+    started: bool,
+    /// None if the iterator is finished. If Some, the outer vector has the same
+    /// length as `sub_iterators`.
+    values: Option<Vec<(Vec<i32>, Natural)>>,
+}
+
+impl<'a> MultisetCrossProductIterator<'a> {
+    fn new(sub_iterators: Vec<PoolMultisetIterator<'a>>) -> Self {
+        let mut result = Self {
+            sub_iterators,
+            started: false,
+            values: None,
+        };
+        let values: Option<Vec<_>> = result
+            .sub_iterators
+            .iter_mut()
+            .map(|iter| iter.next())
+            .collect();
+        let values = match values {
+            Some(values) => values,
+            None => return result,
+        };
+        result.values = Some(values);
+        result
+    }
+
+    fn advance_values(&mut self) {
+        if self.values.is_none() {
+            return;
+        }
+        let values = self.values.as_mut().unwrap();
+        let mut stopped = false;
+        for (idx, iterator) in self.sub_iterators.iter_mut().enumerate() {
+            let (new_val, cont) = match iterator.next() {
+                Some(val) => (val, false),
+                None => {
+                    iterator.reset();
+                    // OK to unwrap here: if any iterators were empty after reset, we have gotten here
+                    (iterator.next().unwrap(), true)
+                }
+            };
+            values[idx] = new_val;
+            if !cont {
+                stopped = true;
+                break;
+            }
+        }
+        if !stopped {
+            // If *every* iterator had to be reset, we've already gone through every permutation.
+            self.values = None;
+        }
+    }
 }
 
 impl<'a> Iterator for MultisetCrossProductIterator<'a> {
-    type Item = (&'a [Vec<i32>], Natural);
+    type Item = (Vec<Vec<i32>>, Natural);
 
-    fn next(&mut self) -> Option<(&'a [Vec<i32>], Natural)> {
-        todo!()
+    fn next(&mut self) -> Option<(Vec<Vec<i32>>, Natural)> {
+        if !self.started {
+            self.started = true;
+        } else {
+            self.advance_values();
+        }
+        match self.values {
+            Some(ref values) => {
+                let ways = values.iter().map(|(_, w)| w).product();
+                let outcomes = values.iter().map(|(o, _)| o.clone()).collect();
+                Some((outcomes, ways))
+            }
+            None => None,
+        }
     }
 }
 
 /// For each group of consecutive equal values in the outcomes, this computes
 /// factorial(numer of same outcomes). The result is the product of all these
 /// factorials.
-fn item_factorials(outcome: &TinyVec<[i32; 6]>) -> Natural {
+fn item_factorials(outcome: &[i32]) -> Natural {
     let mut product = Natural::ONE;
     let mut count = 1;
     for i in 1..outcome.len() {
@@ -714,6 +776,22 @@ mod tests {
     }
 
     #[test]
+    fn test_sum_no_outcomes() {
+        let pool = Pool::from_list(10, vec![]);
+        let keep_list = vec![true; 10];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
+        assert_eq!(result.into_iter().collect::<Vec<_>>(), vec![(0, Natural::ONE)]);
+    }
+
+    #[test]
+    fn test_sum_0_dim() {
+        let pool = Pool::from_list(0, vec![1, 2, 3]);
+        let keep_list = vec![];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
+        assert_eq!(result.into_iter().collect::<Vec<_>>(), vec![(0, Natural::ONE)]);
+    }
+
+    #[test]
     fn test_explode_d5_on_3() {
         let die = vec![1, 2, 3, 4, 5]
             .into_iter()
@@ -820,7 +898,7 @@ mod tests {
     #[test]
     fn test_map() {
         let pool = Pool::from_list(5, vec![1, 2, 3, 4, 5]);
-        fn multiset_to_int(multiset: TinyVec<[i32; 6]>) -> i32 {
+        fn multiset_to_int(multiset: &[i32]) -> i32 {
             let mut total = 0;
             for (idx, item) in multiset.iter().rev().enumerate() {
                 total += (item - 1) * 5i32.pow(idx as u32);
@@ -1059,5 +1137,111 @@ mod tests {
             Some((vec![3, 3].as_slice().into(), 9usize.into()))
         );
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_multiset_iterator_0_dim() {
+        let pool = Pool::from_list(0, vec![1, 2, 3]);
+        let mut iter = pool.multiset_iterator();
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_multiset_iterator_no_outcomes() {
+        let pool = Pool::from_list(2, vec![]);
+        let mut iter = pool.multiset_iterator();
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_multiset_cross_product_dim1() {
+        let pools = [
+            Pool::from_list(1, vec![1, 2, 3]),
+            Pool::from_list(1, vec![4, 5, 6]),
+        ];
+        let iter = MultisetCrossProductIterator::new(
+            pools.iter().map(|pool| pool.multiset_iterator()).collect(),
+        );
+        let values = iter.collect::<Vec<_>>();
+        let values_only = values.iter().map(|(v, _)| v).cloned().collect::<Vec<_>>();
+        assert_eq!(
+            values_only,
+            vec![
+                vec![vec![1], vec![4]],
+                vec![vec![2], vec![4]],
+                vec![vec![3], vec![4]],
+                vec![vec![1], vec![5]],
+                vec![vec![2], vec![5]],
+                vec![vec![3], vec![5]],
+                vec![vec![1], vec![6]],
+                vec![vec![2], vec![6]],
+                vec![vec![3], vec![6]],
+            ]
+        );
+        let weights_only = values.iter().map(|(_, w)| w).collect::<Vec<_>>();
+        assert_eq!(weights_only, vec![&Natural::ONE; 9])
+    }
+
+    #[test]
+    fn test_multiset_cross_product_higher_dim() {
+        let pools = [
+            Pool::from_list(2, vec![1, 2]),
+            Pool::from_list(3, vec![4, 5]),
+        ];
+        let iter = MultisetCrossProductIterator::new(
+            pools.iter().map(|pool| pool.multiset_iterator()).collect(),
+        );
+        let values = iter.collect::<Vec<_>>();
+        let values_only = values.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            values_only,
+            vec![
+                vec![vec![1, 1], vec![4, 4, 4]],
+                vec![vec![1, 2], vec![4, 4, 4]],
+                vec![vec![2, 2], vec![4, 4, 4]],
+                vec![vec![1, 1], vec![4, 4, 5]],
+                vec![vec![1, 2], vec![4, 4, 5]],
+                vec![vec![2, 2], vec![4, 4, 5]],
+                vec![vec![1, 1], vec![4, 5, 5]],
+                vec![vec![1, 2], vec![4, 5, 5]],
+                vec![vec![2, 2], vec![4, 5, 5]],
+                vec![vec![1, 1], vec![5, 5, 5]],
+                vec![vec![1, 2], vec![5, 5, 5]],
+                vec![vec![2, 2], vec![5, 5, 5]],
+            ]
+        );
+        let weights_only = values.iter().map(|(_, w)| w).cloned().collect::<Vec<_>>();
+        assert_eq!(
+            weights_only,
+            vec![
+                Natural::from(1usize),
+                2usize.into(),
+                1usize.into(),
+                3usize.into(),
+                6usize.into(),
+                3usize.into(),
+                3usize.into(),
+                6usize.into(),
+                3usize.into(),
+                1usize.into(),
+                2usize.into(),
+                1usize.into()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_multiset_cross_product_one_empy() {
+        let pools = [
+            Pool::from_list(2, vec![1, 2]),
+            Pool::from_list(0, vec![4, 5, 6]),
+        ];
+        let mut iter = MultisetCrossProductIterator::new(
+            pools.iter().map(|pool| pool.multiset_iterator()).collect(),
+        );
+        assert!(iter.next().is_none());
+        assert!(iter.next().is_none());
     }
 }
