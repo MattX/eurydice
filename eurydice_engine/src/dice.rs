@@ -28,9 +28,6 @@ pub struct Pool {
     // Outcomes are ordered by their face value. The tuple represents (value, weight / count).
     // Outcomes must be unique and have nonzero weight.
     ordered_outcomes: Vec<(i32, Natural)>,
-    // This vector must be of size `n`. A false element at position `n` means that the n-th
-    // lowest dice should be ignored.
-    keep_list: Vec<bool>,
 }
 
 impl std::fmt::Display for Pool {
@@ -91,7 +88,6 @@ impl Pool {
             ordered_outcomes: (1..=sides)
                 .map(|side| (side as i32, 1usize.into()))
                 .collect::<Vec<_>>(),
-            keep_list: vec![true; n as usize],
         }
     }
 
@@ -105,7 +101,6 @@ impl Pool {
         Self {
             n,
             ordered_outcomes,
-            keep_list: vec![true; n as usize],
         }
     }
 
@@ -117,7 +112,6 @@ impl Pool {
         Self {
             n: 1,
             ordered_outcomes,
-            keep_list: vec![true],
         }
     }
 
@@ -126,7 +120,6 @@ impl Pool {
     /// Panics if `n` is negative.
     pub fn set_n(&mut self, n: u32) {
         self.n = n;
-        self.keep_list = vec![true; n as usize];
     }
 
     /// Gets the number of dice in the pool.
@@ -167,29 +160,20 @@ impl Pool {
         Self {
             n: 1,
             ordered_outcomes,
-            keep_list: vec![true],
         }
     }
 
-    pub fn set_keep_list(&mut self, keep_list: Vec<bool>) {
-        assert_eq!(
-            keep_list.len(),
-            self.n as usize,
-            "keep list length must be the number of dice in the pool"
-        );
-        self.keep_list = keep_list;
-    }
-
-    pub fn apply<S, F>(&self, mapper: StateMapper<S, F>) -> HashMap<S, Natural>
+    pub fn apply<S, F>(&self, mapper: StateMapper<S, F>, keep_list: &[bool]) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
         F: Fn(&S, i32, u32) -> S,
     {
+        debug_assert_eq!(keep_list.len(), self.n as usize, "`apply` called with keep list of incorrect length");
         if self.ordered_outcomes.is_empty() {
             return [(mapper.initial_state.clone(), Natural::ONE)].into();
         }
         let mut cache = HashMap::new();
-        self.apply_inner(SubPool::initial(self), &mut cache, &mapper)
+        self.apply_inner(SubPool::initial(self), &mut cache, &mapper, keep_list)
     }
 
     fn apply_inner<S, F>(
@@ -197,6 +181,7 @@ impl Pool {
         sub_pool: SubPool,
         cache: &mut HashMap<SubPool, HashMap<S, Natural>>,
         mapper: &StateMapper<S, F>,
+        keep_list: &[bool],
     ) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
@@ -208,7 +193,7 @@ impl Pool {
         let new_remaining_outcomes = sub_pool.remaining_outcomes - 1;
         let (outcome, weight) = &self.ordered_outcomes[new_remaining_outcomes];
         let result = if new_remaining_outcomes == 0 {
-            let num_kept = self.num_kept(sub_pool, sub_pool.n);
+            let num_kept = self.num_kept(keep_list, sub_pool, sub_pool.n);
             [(
                 (mapper.f)(&mapper.initial_state, *outcome, num_kept),
                 weight.pow(sub_pool.n as u64),
@@ -219,13 +204,13 @@ impl Pool {
             for num_with_outcome in 0..=sub_pool.n {
                 // Replace num_with_outcome with the actual number of dice to keep in the considered range.
                 // Ignore anything in the keep list above index `sub_pool.n`, and below `sub_pool.n - num_with_outcome`.
-                let num_kept = self.num_kept(sub_pool, num_with_outcome);
+                let num_kept = self.num_kept(keep_list, sub_pool, num_with_outcome);
 
                 let sub_sub_pool = SubPool {
                     n: sub_pool.n - num_with_outcome,
                     remaining_outcomes: new_remaining_outcomes,
                 };
-                let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper);
+                let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper, keep_list);
                 for (state, count) in sub_sub_pool_result {
                     let inner_state = (mapper.f)(&state, *outcome, num_kept);
                     // There were binom(self.n, num_with_outcome) ways to get this outcome,
@@ -241,8 +226,8 @@ impl Pool {
         result
     }
 
-    fn num_kept(&self, sub_pool: SubPool, num_with_outcome: u32) -> u32 {
-        self.keep_list[(sub_pool.n - num_with_outcome) as usize..sub_pool.n as usize]
+    fn num_kept(&self, keep_list: &[bool], sub_pool: SubPool, num_with_outcome: u32) -> u32 {
+        keep_list[(sub_pool.n - num_with_outcome) as usize..sub_pool.n as usize]
             .iter()
             .filter(|&&keep| keep)
             .count() as u32
@@ -250,7 +235,12 @@ impl Pool {
 
     /// Sums the distribution; the resulting pool is guaranteed to have n=1.
     pub fn sum(&self) -> Pool {
-        self.apply(SUM_MAPPER).into_iter().collect()
+        let keep_list = vec![true; self.n as usize];
+        self.apply(SUM_MAPPER, &keep_list).into_iter().collect()
+    }
+
+    pub fn sum_with_keep_list(&self, keep_list: &[bool]) -> Pool {
+        self.apply(SUM_MAPPER, keep_list).into_iter().collect()
     }
 
     pub fn into_die_iter(self) -> impl Iterator<Item = (i32, Natural)> {
@@ -484,7 +474,6 @@ impl FromIterator<(i32, Natural)> for Pool {
         Self {
             n: 1,
             ordered_outcomes,
-            keep_list: vec![true],
         }
     }
 }
@@ -494,7 +483,6 @@ impl From<Vec<(i32, Natural)>> for Pool {
         Self {
             n: 1,
             ordered_outcomes,
-            keep_list: vec![true],
         }
     }
 }
@@ -617,7 +605,8 @@ mod tests {
     #[test]
     fn test_sum_10d20() {
         let pool = Pool::ndn(10, 20);
-        let result = pool.apply(SUM_MAPPER);
+        let keep_list = vec![true; 10];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(result.len(), 191);
         assert_eq!(result[&133], Natural::from(70942066700u64));
     }
@@ -625,7 +614,8 @@ mod tests {
     #[test]
     fn test_sum_1d6() {
         let pool = Pool::ndn(1, 6);
-        let result = pool.apply(SUM_MAPPER);
+        let keep_list = vec![true; 1];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(
             result,
             to_counter(vec![(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)])
@@ -635,7 +625,8 @@ mod tests {
     #[test]
     fn test_sum_2d6() {
         let pool = Pool::ndn(2, 6);
-        let result = pool.apply(SUM_MAPPER);
+        let keep_list = vec![true; 2];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(
             result,
             to_counter(vec![
@@ -657,7 +648,8 @@ mod tests {
     #[test]
     fn test_sum_2d3() {
         let pool = Pool::ndn(2, 3);
-        let result = pool.apply(SUM_MAPPER);
+        let keep_list = vec![true; 2];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(
             result,
             to_counter(vec![(2, 1), (3, 2), (4, 3), (5, 2), (6, 1),])
@@ -701,7 +693,8 @@ mod tests {
     #[test]
     fn test_make_max_dice_to_reach_mapper() {
         let mapper = make_max_dice_to_reach_mapper(10);
-        let result = Pool::ndn(3, 6).apply(mapper);
+        let keep_list = vec![true; 3];
+        let result = Pool::ndn(3, 6).apply(mapper, &keep_list);
         let mut keep_count_only = HashMap::new();
         for (k, v) in result {
             // If the sum is None, we've already reached the target. Replace with a number of rolls.
@@ -722,7 +715,8 @@ mod tests {
     #[test]
     fn test_sum_non_continuous() {
         let pool = Pool::from_list(3, vec![-2, 0, 1, 5]);
-        let result = pool.apply(SUM_MAPPER);
+        let keep_list = vec![true; 3];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(
             result,
             to_counter(vec![
@@ -750,7 +744,8 @@ mod tests {
     #[test]
     fn test_sum_weighted() {
         let pool = Pool::from_list(3, vec![-1, -1, 0, 1, 1, 1]);
-        let result = pool.apply(SUM_MAPPER);
+        let keep_list = vec![true; 3];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(
             result,
             to_counter(vec![
@@ -767,9 +762,9 @@ mod tests {
 
     #[test]
     fn test_sum_6d10_keep_3() {
-        let mut pool = Pool::ndn(6, 10);
-        pool.set_keep_list(vec![false, false, false, true, true, true]);
-        let result = pool.apply(SUM_MAPPER);
+        let pool = Pool::ndn(6, 10);
+        let keep_list = vec![false, false, false, true, true, true];
+        let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(result.len(), 28);
         assert_eq!(result[&15], Natural::from(16617u64));
     }

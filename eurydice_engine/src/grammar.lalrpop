@@ -130,7 +130,7 @@ ExprInner12: Expression = {
 
 OutputName: WithRange<String> = {
     "named" <start: @L> <l:r#""(\\\\|\\"|[^"\\])*""#> <end: @R> =>
-        WithRange::new(start, end, apply_string_escapes(&l[1..l.len()-1]).into()),
+        WithRange::new(start, end, apply_string_escapes(&l[1..l.len()-1])),
 }
 
 List: ListLiteral = {
@@ -154,7 +154,7 @@ FunctionCall: Expression = {
     "[" <items:FunctionCallItem*> <last:FinalFunctionCallItem?> "]" => {
         let mut all_items = items.into_iter().flatten().collect::<Vec<_>>();
         if let Some(last) = last {
-            all_items.extend(last.into_iter());
+            all_items.extend(last);
         }
         make_function_call(all_items)
     }

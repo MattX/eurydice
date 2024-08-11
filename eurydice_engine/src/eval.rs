@@ -59,7 +59,7 @@ impl RuntimeValue {
         match self {
             RuntimeValue::Int(i) => vec![*i; repeat],
             RuntimeValue::List(list) => Rc::clone(list).repeat(repeat),
-            RuntimeValue::Pool(d) => (**d)
+            RuntimeValue::Pool(d) => d
                 .sum()
                 .into_die_iter()
                 .map(|(k, _)| k)
@@ -818,7 +818,7 @@ fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
         .sum()
 }
 
-fn select_in_dice(indices: &[i32], mut pool: Pool, lowest_first: bool) -> Pool {
+fn select_in_dice(indices: &[i32], pool: Pool, lowest_first: bool) -> Pool {
     let size = pool.get_n() as usize;
     let mut keep_list = vec![false; size];
     for &i in indices {
@@ -832,8 +832,7 @@ fn select_in_dice(indices: &[i32], mut pool: Pool, lowest_first: bool) -> Pool {
         };
         keep_list[i] = true;
     }
-    pool.set_keep_list(keep_list);
-    pool.sum()
+    pool.sum_with_keep_list(&keep_list)
 }
 
 fn math_binary_op(
@@ -1083,9 +1082,7 @@ impl Primitive {
                         d.get_n() as usize,
                         function_range,
                     )?;
-                    let mut d = (**d).clone();
-                    d.set_keep_list(keep_list);
-                    Ok(d.sum().into())
+                    Ok(d.sum_with_keep_list(&keep_list).into())
                 } else {
                     panic!("wrong argument types to [highest/lowest/middle]");
                 }
@@ -1109,8 +1106,7 @@ impl Primitive {
             Primitive::Maximum => {
                 // args: pool
                 if let RuntimeValue::Pool(d) = &args[0] {
-                    Ok((**d)
-                        .clone()
+                    Ok(d
                         .sum()
                         .ordered_outcomes()
                         .last()

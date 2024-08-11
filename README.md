@@ -11,7 +11,7 @@ The packages in this directory are:
 * `eurydice_wasm`: WASM wrapper for `eurydice_engine`
 * `eurydice_www`: A Vite + React + TS app to serve as a frontend.
 
-Build the wasm with `wasm-pack build ./eurydice_wasm --target no-modules`.
+Build the wasm (from this directory) with `wasm-pack build ./eurydice_wasm --target no-modules`.
 
 There are two important symlinks in `eurydice_www/src`:
 

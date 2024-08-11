@@ -7,6 +7,12 @@ edition = "2021"
 name = "eurydice_engine"
 path = "src/lib.rs"
 
+[lints.clippy]
+cast_possible_wrap = "warn"
+cast_possible_truncation = "warn"
+cast_precision_loss = "warn"
+cast_sign_loss = "warn"
+
 [dependencies]
 # Used to report errors nicely.
 miette = "7.2.0"
