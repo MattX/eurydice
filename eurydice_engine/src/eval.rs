@@ -19,7 +19,7 @@ use crate::{
         self, BareListItem, BinaryOp, Expression, FunctionDefinition, ListItem, PositionOrder,
         SetParam, Statement, StaticType, UnaryOp, WithRange,
     },
-    dice::{explode, Pool, PoolMultisetIterator},
+    dice::{explode, MultisetCrossProductIterator, Pool, PoolMultisetIterator},
 };
 
 #[derive(Debug, Clone)]
@@ -558,133 +558,107 @@ impl Evaluator {
             .map(|(arg, &expected)| coerce_arg(arg.value, expected))
             .collect::<Result<Vec<_>, _>>()?;
 
-        // For any argument where the provided argument is a pool, but the expected argument is an int or a list,
-        // create an iterator over all possible outcomes of the pool.
-        // |pool_iterators| contains triples of (iterator, index, expected_type == int).
-        // pool_iterators[i].index = k if the i-th element of pool_iterators corresponds to the k-th argument.
-        let mut pool_iterators = Vec::new();
+        // This vector will contain references to pools which match an int or list arguments. These
+        // are the pools over which we need to iterate.
+        let mut pools = Vec::new();
+        // Contains (index, is_int) for the corresponding pool.
+        let mut pool_iterator_info = Vec::new();
         for (i, (arg, expected_type)) in args.iter().zip(expected_types.iter()).enumerate() {
             if let (RuntimeValue::Pool(p), Some(StaticType::Int) | Some(StaticType::List)) =
                 (&arg, expected_type)
             {
                 // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum,
                 // with outcomes of length 1.
-                pool_iterators.push((
-                    p.multiset_iterator(),
-                    i,
-                    *expected_type == Some(StaticType::Int),
-                ));
+                pools.push(p);
+                pool_iterator_info.push((i, *expected_type == Some(StaticType::Int)));
             }
         }
 
-        let mut results = Vec::new();
+        if pools.is_empty() {
+            return self.call_function(eval_context, function, &args, &arg_ranges);
+        }
+
+        let cross_product_iterator = MultisetCrossProductIterator::new(
+            pools.iter().map(|p| p.multiset_iterator()).collect(),
+        );
+
         let mut args = args.clone();
-        let mut weight = match fill_args(&mut args, &mut pool_iterators) {
-            Some(w) => w,
-            None => return Ok(vec![].into()),
-        };
-        // This loop executes exactly once if there are no pool iterators.
-        'outer: loop {
-            let current_result = match &function.value {
-                Function::Primitive(primitive) => {
-                    primitive.execute(&args, &arg_ranges, self.explode_depth, function.range)?
-                }
-                Function::UserDefined(user_function) => {
-                    let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
-                    for (arg, formal) in args.iter().zip(user_function.args.iter()) {
-                        new_env.insert(formal.value.name.clone(), arg.clone());
-                    }
-                    let new_context = EvalContext {
-                        env: Rc::new(RefCell::new(new_env)),
-                        recursion_depth: eval_context.recursion_depth + 1,
-                    };
-                    let mut result = None;
-                    for statement in &user_function.body {
-                        result = self.execute_statement(&new_context, statement)?;
-                        if result.is_some() {
-                            break;
-                        }
-                    }
-                    // If there's no result, there was no return statement in the function.
-                    result.unwrap_or(Pool::from_list(1, vec![]).into())
-                }
-            };
-            results.push((current_result, weight));
-            // If there are no pool iterators, run the loop only once.
-            if pool_iterators.is_empty() {
-                break;
-            }
-
-            weight = Natural::ONE;
-            // Advance the pool iterators.
-            let pool_iterator_count = pool_iterators.len();
-            for (iterator_index, (pool_iterator, arg_index, is_int)) in
-                pool_iterators.iter_mut().enumerate()
-            {
-                if let Some((outcome, outcome_weight)) = pool_iterator.next() {
-                    args[*arg_index] = if *is_int {
-                        outcome[0].into()
-                    } else {
-                        reverse_if(!self.lowest_first, outcome.to_vec()).into()
-                    };
-                    weight *= outcome_weight;
-                    break;
-                } else if iterator_index == pool_iterator_count - 1 {
-                    // We've exhausted all iterators.
-                    break 'outer;
+        let mut results = Vec::new();
+        for (values, weight) in cross_product_iterator {
+            for ((i, is_int), value) in pool_iterator_info.iter().zip(values.iter()) {
+                if *is_int {
+                    args[*i] = value[0].into();
                 } else {
-                    pool_iterator.reset();
-                    // Safe to unwrap here because none of the iterators are empty after
-                    // reset -- otherwise we would not have entered the loop after |fill_args|.
-                    let (outcome, outcome_weight) = pool_iterator.next().unwrap();
-                    args[*arg_index] = if *is_int {
-                        outcome[0].into()
-                    } else {
-                        reverse_if(!self.lowest_first, outcome.to_vec()).into()
-                    };
-                    weight *= outcome_weight;
+                    args[*i] = reverse_if(!self.lowest_first, value).into();
                 }
             }
+            results.push((self.call_function(eval_context, function, &args, &arg_ranges)?, weight));
         }
 
-        // If there were any pool iterators, collect the results into a dice
-        // Otherwise, there is exactly one result, which we should return as is
-        if pool_iterators.is_empty() {
-            debug_assert!(results.len() == 1);
-            Ok(results.pop().unwrap().0)
-        } else {
-            // TODO this is similar to the logic in flat_map in Pool, find a way to use that?
-            let mut total_results = BTreeMap::<i32, Rational>::new();
-            let mut lcm = Natural::ONE;
-            for (result, weight) in results {
-                if let RuntimeValue::Pool(ref p) = result {
-                    // The empty die is ignored in this context, but the empty list is not.
-                    if p.ordered_outcomes().is_empty() {
-                        continue;
-                    }
-                }
-                let summed = result.to_pool().sum();
-                let total_count = summed
-                    .ordered_outcomes()
-                    .iter()
-                    .map(|(_, count)| count)
-                    .sum();
-                lcm = lcm.lcm(&total_count);
-                for (outcome, count) in summed.ordered_outcomes() {
-                    *total_results.entry(*outcome).or_insert(Rational::ZERO) +=
-                        Rational::from_naturals(count * &weight, total_count.clone());
+        // TODO this is similar to the logic in flat_map in Pool, find a way to use that?
+        let mut total_results = BTreeMap::<i32, Rational>::new();
+        let mut lcm = Natural::ONE;
+        for (result, weight) in results {
+            if let RuntimeValue::Pool(ref p) = result {
+                // The empty die is ignored in this context, but the empty list is not.
+                if p.ordered_outcomes().is_empty() {
+                    continue;
                 }
             }
-            Ok(total_results
-                .into_iter()
-                .map(|(outcome, weight)| {
-                    let (numerator, denominator) =
-                        (weight * Rational::from(&lcm)).into_numerator_and_denominator();
-                    debug_assert_eq!(denominator, Natural::ONE);
-                    (outcome, numerator)
-                })
-                .collect::<Pool>()
-                .into())
+            let summed = result.to_pool().sum();
+            let total_count = summed
+                .ordered_outcomes()
+                .iter()
+                .map(|(_, count)| count)
+                .sum();
+            lcm = lcm.lcm(&total_count);
+            for (outcome, count) in summed.ordered_outcomes() {
+                *total_results.entry(*outcome).or_insert(Rational::ZERO) +=
+                    Rational::from_naturals(count * &weight, total_count.clone());
+            }
+        }
+        Ok(total_results
+            .into_iter()
+            .map(|(outcome, weight)| {
+                let (numerator, denominator) =
+                    (weight * Rational::from(&lcm)).into_numerator_and_denominator();
+                debug_assert_eq!(denominator, Natural::ONE);
+                (outcome, numerator)
+            })
+            .collect::<Pool>()
+            .into())
+    }
+
+    fn call_function(
+        &mut self,
+        eval_context: &EvalContext,
+        function: &WithRange<Function>,
+        args: &[RuntimeValue],
+        arg_ranges: &[ast::Range],
+    ) -> Result<RuntimeValue, RuntimeError> {
+        match &function.value {
+            Function::Primitive(primitive) => {
+                primitive.execute(args, arg_ranges, self.explode_depth, function.range)
+            }
+            Function::UserDefined(user_function) => {
+                let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
+                for (arg, formal) in args.iter().zip(user_function.args.iter()) {
+                    new_env.insert(formal.value.name.clone(), arg.clone());
+                }
+                let new_context = EvalContext {
+                    env: Rc::new(RefCell::new(new_env)),
+                    recursion_depth: eval_context.recursion_depth + 1,
+                };
+                let mut result = None;
+                for statement in &user_function.body {
+                    result = self.execute_statement(&new_context, statement)?;
+                    if result.is_some() {
+                        break;
+                    }
+                }
+                // If there's no result, there was no return statement in the function.
+                Ok(result.unwrap_or(Pool::from_list(1, vec![]).into()))
+            }
         }
     }
 }
@@ -1245,11 +1219,11 @@ fn fill_args(
     Some(weight)
 }
 
-fn reverse_if(should_reverse: bool, v: Vec<i32>) -> Vec<i32> {
+fn reverse_if(should_reverse: bool, v: &[i32]) -> Vec<i32> {
     if should_reverse {
-        v.into_iter().rev().collect()
+        v.into_iter().copied().rev().collect()
     } else {
-        v
+        v.into()
     }
 }
 

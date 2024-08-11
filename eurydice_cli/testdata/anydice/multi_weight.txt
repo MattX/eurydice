@@ -1,0 +1,15 @@
+function: do stuff with A:n and B:n {
+    result: A + B
+}
+
+output [do stuff with d{1:4, 2} and d{1:4, 3}]
+
+\\\ Result \\\
+
+"output 1",2.6,0.8944271909999159,2,5
+#,%
+2,64
+3,16
+4,16
+5,4
+

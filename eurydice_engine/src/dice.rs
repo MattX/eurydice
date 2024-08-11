@@ -378,7 +378,7 @@ impl<'a> Iterator for PoolMultisetIterator<'a> {
 }
 
 /// An interator over the cross product of several PoolMultisetIterators.
-struct MultisetCrossProductIterator<'a> {
+pub struct MultisetCrossProductIterator<'a> {
     sub_iterators: Vec<PoolMultisetIterator<'a>>,
     started: bool,
     /// None if the iterator is finished. If Some, the outer vector has the same
@@ -387,7 +387,7 @@ struct MultisetCrossProductIterator<'a> {
 }
 
 impl<'a> MultisetCrossProductIterator<'a> {
-    fn new(sub_iterators: Vec<PoolMultisetIterator<'a>>) -> Self {
+    pub fn new(sub_iterators: Vec<PoolMultisetIterator<'a>>) -> Self {
         let mut result = Self {
             sub_iterators,
             started: false,
