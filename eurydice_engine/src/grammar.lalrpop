@@ -197,7 +197,8 @@ pub StaticType: StaticType = {
 };
 
 // TOOD: avoid unwrap here
-Num: i32 = <s:r"-?[0-9]+"> => i32::from_str(s).unwrap();
+// Negative numbers are handled by the unary `-` op.
+Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
 VariableIdentifier: String = <s:r"[A-Z][A-Z_]*"> => s.to_string();
 Word: String = {
     <s:r"[a-z][a-z_]+"> => s.to_string(),

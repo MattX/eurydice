@@ -591,7 +591,7 @@ impl Evaluator {
                         }
                     }
                     // If there's no result, there was no return statement in the function.
-                    result.unwrap_or(vec![].into())
+                    result.unwrap_or(Pool::from_list(1, vec![]).into())
                 }
             };
             results.push((current_result, weight));
@@ -938,8 +938,13 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
             // For each outcome in the left pool, sum the right pool with itself k times
             left_p
                 .flat_map(|count| {
+                    debug_assert_eq!(count.len(), 1, "summed distribution has count of {}", count.len());
                     let mut dup_right = right.clone();
-                    dup_right.set_n(count[0] as u32);
+                    let multiplier = count[0];
+                    if multiplier < 0 {
+                        dup_right = dup_right.map_outcomes(|o| -o);
+                    }
+                    dup_right.set_n(dup_right.get_n() * multiplier.unsigned_abs());
                     dup_right.sum().into()
                 })
                 .into()
@@ -1068,7 +1073,6 @@ impl Primitive {
             Primitive::HighestOf => {
                 // args: int, int
                 if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
-                    println!("highest of {} {}", i, j);
                     Ok((*(i.max(j))).into())
                 } else {
                     panic!("wrong argument types to [highest of]");

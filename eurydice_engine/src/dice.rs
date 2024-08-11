@@ -122,6 +122,8 @@ impl Pool {
     }
 
     /// Sets the number of dice in the pool, resetting the keep list.
+    /// 
+    /// Panics if `n` is negative.
     pub fn set_n(&mut self, n: u32) {
         self.n = n;
         self.keep_list = vec![true; n as usize];

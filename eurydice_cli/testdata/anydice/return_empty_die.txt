@@ -12,6 +12,14 @@ function: sometimes empty list A:n {
 
 output [sometimes empty list d10]
 
+function: sometimes nothing A:n {
+  if A >= 5 {
+    result: A
+  }
+}
+
+output [sometimes nothing d10]
+
 \\\ Result \\\
 
 "output 1",7.500000000015,1.7078251276616407,5,10
@@ -32,3 +40,12 @@ output [sometimes empty list d10]
 8,10
 9,10
 10,10
+
+"output 3",7.500000000015,1.7078251276616407,5,10
+#,%
+5,16.6666666667
+6,16.6666666667
+7,16.6666666667
+8,16.6666666667
+9,16.6666666667
+10,16.6666666667
