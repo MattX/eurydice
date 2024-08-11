@@ -378,6 +378,20 @@ impl<'a> Iterator for PoolMultisetIterator<'a> {
     }
 }
 
+/// An interator over the cross product of several PoolMultisetIterators.
+struct MultisetCrossProductIterator<'a> {
+    sub_iterators: Vec<PoolMultisetIterator<'a>>,
+    values: Vec<Vec<i32>>,
+}
+
+impl<'a> Iterator for MultisetCrossProductIterator<'a> {
+    type Item = (&'a [Vec<i32>], Natural);
+
+    fn next(&mut self) -> Option<(&'a [Vec<i32>], Natural)> {
+        todo!()
+    }
+}
+
 /// For each group of consecutive equal values in the outcomes, this computes
 /// factorial(numer of same outcomes). The result is the product of all these
 /// factorials.
