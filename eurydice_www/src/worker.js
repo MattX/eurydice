@@ -19,7 +19,7 @@ async function init_wasm_in_worker() {
         var worker_result = run(event.data);
         const end = performance.now();
         self.postMessage(worker_result);
-        console.log(`Worker execution time: ${end - start}`);
+        console.log(`Worker execution time: ${end - start}ms`);
     };
 };
 

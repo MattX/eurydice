@@ -94,7 +94,7 @@ function App() {
 export default App;
 
 interface EurydiceMessage {
-  Ok: Map<string, DistributionWrapper> | undefined;
+  Ok: [string, DistributionWrapper][] | undefined;
   Err: string | undefined;
 }
 
