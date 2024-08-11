@@ -7,6 +7,10 @@ edition = "2021"
 name = "eurydice_engine"
 path = "src/lib.rs"
 
+[[bench]]
+name = "benchmark"
+harness = false
+
 [lints.clippy]
 cast_possible_wrap = "warn"
 cast_possible_truncation = "warn"
@@ -39,4 +43,5 @@ cc="*"
 lalrpop = "0.20.2"
 
 [dev-dependencies]
+criterion = { version = "0.5.1", features = ["html_reports"] }
 serde-lexpr = "0.1.3"

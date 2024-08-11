@@ -321,14 +321,19 @@ mod tests {
     fn test_parse_function_call() {
         let text = "[test 1 2]";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
-        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value FunctionCall (name (value . \"test {} {}\")) (args ((value Int . 1)) ((value Int . 2)))))");
+        assert_eq!(
+            serde_lexpr::to_string(&ast).unwrap(),
+            "((value FunctionCall (name (value . \
+                \"test {} {}\")) (args ((value Int . 1)) ((value Int . 2)))))"
+        );
     }
 
     #[test]
     fn test_parse_unop_function_call() {
         let text = "[test 1 - 2]";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
-        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value FunctionCall (name (value . \"test {}\")) (args ((value BinaryOp (op (value . Sub)) (left (value Int . 1)) (right (value Int . 2)))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value FunctionCall (name (value . \
+            \"test {}\")) (args ((value BinaryOp (op (value . Sub)) (left (value Int . 1)) (right (value Int . 2)))))))");
     }
 
     #[test]
@@ -337,7 +342,8 @@ mod tests {
         let ast = grammar::FunctionDefinitionParser::new()
             .parse(text)
             .unwrap();
-        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((name (value . \"explode {}\")) (args ((value (name . \"DIE\") (ty Pool)))) (body ((value Return (value (value Reference . \"DIE\"))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((name (value . \"explode {}\")) \
+            (args ((value (name . \"DIE\") (ty Pool)))) (body ((value Return (value (value Reference . \"DIE\"))))))");
     }
 
     #[test]
@@ -346,13 +352,15 @@ mod tests {
         let ast = grammar::FunctionDefinitionParser::new()
             .parse(text)
             .unwrap();
-        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((name (value . \"explode {}\")) (args ((value (name . \"DIE\") (ty)))) (body ((value Return (value (value Reference . \"DIE\"))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((name (value . \"explode {}\")) \
+            (args ((value (name . \"DIE\") (ty)))) (body ((value Return (value (value Reference . \"DIE\"))))))");
     }
 
     #[test]
     fn test_parse_binary_op_precedence() {
         let text = "1 + 2 * 3";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
-        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value BinaryOp (op (value . Add)) (left (value Int . 1)) (right (value BinaryOp (op (value . Mul)) (left (value Int . 2)) (right (value Int . 3))))))");
+        assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value BinaryOp (op (value . Add)) \
+            (left (value Int . 1)) (right (value BinaryOp (op (value . Mul)) (left (value Int . 2)) (right (value Int . 3))))))");
     }
 }
