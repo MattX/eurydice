@@ -672,9 +672,15 @@ fn apply_unary_op(op: UnaryOp, operand: &RuntimeValue) -> RuntimeValue {
         UnaryOp::Negate => operand.map_outcomes(|o| -o),
         UnaryOp::Invert => operand.map_outcomes(|o| if o == 0 { 1 } else { 0 }),
         UnaryOp::Length => match operand {
-            RuntimeValue::Int(i) => (i.to_string().len() as i32).into(),
-            RuntimeValue::List(list) => (list.len() as i32).into(),
-            RuntimeValue::Pool(d) => ((*d).dimension() as i32).into(),
+            RuntimeValue::Int(i) => i32::try_from(i.to_string().len())
+                .expect("vector length fits in i32")
+                .into(),
+            RuntimeValue::List(list) => i32::try_from(list.len())
+                .expect("vector length fits in i32")
+                .into(),
+            RuntimeValue::Pool(d) => i32::try_from(d.dimension())
+                .expect("vector length fits in i32")
+                .into(),
         },
     }
 }
@@ -782,14 +788,12 @@ fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
     indices
         .iter()
         .map(|&i| {
-            if i < 1 || i > vec.len() as i32 {
+            if i < 1 || i > i32::try_from(vec.len()).expect("vector length fits in i32") {
                 return 0;
             }
-            let i = if lowest_first {
-                vec.len() - i as usize
-            } else {
-                i as usize - 1
-            };
+            let i = usize::try_from(i)
+                .expect("i is positive, and a positive i32 should fit in a usize");
+            let i = if lowest_first { vec.len() - i } else { i - 1 };
             vec.get(i).copied().unwrap_or(0)
         })
         .sum()
@@ -799,14 +803,12 @@ fn select_in_dice(indices: &[i32], pool: Pool, lowest_first: bool) -> Pool {
     let dimension = usize::try_from(pool.dimension()).expect("usize is at least 32 bits");
     let mut keep_list = vec![false; dimension];
     for &i in indices {
-        if i < 1 || i > i32::try_from(dimension).expect("dimension fits in i32") {
+        if i < 1 || i > i32::try_from(dimension).expect("vector length fits in i32") {
             continue;
         }
-        let i = if !lowest_first {
-            dimension - i as usize
-        } else {
-            i as usize - 1
-        };
+        let i =
+            usize::try_from(i).expect("i is positive, and a positive i32 should fit in a usize");
+        let i = if !lowest_first { dimension - i } else { i - 1 };
         keep_list[i] = true;
     }
     pool.sum_with_keep_list(&keep_list)

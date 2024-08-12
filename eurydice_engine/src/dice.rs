@@ -340,12 +340,14 @@ impl<'a> PoolMultisetIterator<'a> {
     }
 
     fn advance_position(&mut self) {
-        let pool_size = isize::try_from(self.pool.dimension).expect("dimension fits in isize");
+        let pool_size = isize::try_from(self.pool.dimension).expect("pool dimension fits in isize");
         let mut position_index = pool_size - 1;
         while position_index >= 0 {
-            self.positions[position_index as usize] += 1;
-            if self.positions[position_index as usize] == self.pool.ordered_outcomes.len() {
-                if position_index == 0 {
+            let position_index_u =
+                usize::try_from(position_index).expect("position_index is a positive isize");
+            self.positions[position_index_u] += 1;
+            if self.positions[position_index_u] == self.pool.ordered_outcomes.len() {
+                if position_index_u == 0 {
                     self.done = true;
                     return;
                 }
@@ -354,9 +356,12 @@ impl<'a> PoolMultisetIterator<'a> {
                 break;
             }
         }
+        let first_position_index =
+            usize::try_from(position_index + 1).expect("position_index is >= -1");
+        let pool_size = usize::try_from(pool_size).expect("pool_size is positive");
         // Now go back and fix up the position indices
-        for i in position_index + 1..pool_size {
-            self.positions[i as usize] = self.positions[i as usize - 1];
+        for i in first_position_index..pool_size {
+            self.positions[i] = self.positions[i - 1];
         }
     }
 }
