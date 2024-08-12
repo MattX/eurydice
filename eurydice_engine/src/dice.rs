@@ -17,7 +17,6 @@ use lazy_static::lazy_static;
 use malachite::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::num::basic::traits::{One, Zero};
 use malachite::{Natural, Rational};
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
