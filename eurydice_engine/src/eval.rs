@@ -796,14 +796,14 @@ fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
 }
 
 fn select_in_dice(indices: &[i32], pool: Pool, lowest_first: bool) -> Pool {
-    let size = pool.dimension() as usize;
-    let mut keep_list = vec![false; size];
+    let dimension = usize::try_from(pool.dimension()).expect("usize is at least 32 bits");
+    let mut keep_list = vec![false; dimension];
     for &i in indices {
-        if i < 1 || i > size as i32 {
+        if i < 1 || i > i32::try_from(dimension).expect("dimension fits in i32") {
             continue;
         }
         let i = if !lowest_first {
-            size - i as usize
+            dimension - i as usize
         } else {
             i as usize - 1
         };

@@ -38,7 +38,9 @@ impl std::fmt::Display for Pool {
             .ordered_outcomes
             .iter()
             .enumerate()
-            .all(|(i, (outcome, weight))| *outcome == i as i32 + 1 && *weight == Natural::ONE)
+            .all(|(i, (outcome, weight))| {
+                usize::try_from(*outcome).ok() == Some(i + 1) && *weight == Natural::ONE
+            })
         {
             // This is a standard dn with no repeats.
             write!(f, "d{}", self.ordered_outcomes.len())
@@ -85,7 +87,7 @@ impl Pool {
         Self {
             dimension,
             ordered_outcomes: (1..=sides)
-                .map(|side| (side as i32, 1usize.into()))
+                .map(|side| (i32::try_from(side).expect("side is > 1"), 1usize.into()))
                 .collect::<Vec<_>>(),
         }
     }
@@ -219,10 +221,12 @@ impl Pool {
     }
 
     fn num_kept(&self, keep_list: &[bool], sub_pool: SubPool, num_with_outcome: u32) -> u32 {
-        keep_list[(sub_pool.dimension - num_with_outcome) as usize..sub_pool.dimension as usize]
+        let count = keep_list
+            [(sub_pool.dimension - num_with_outcome) as usize..sub_pool.dimension as usize]
             .iter()
             .filter(|&&keep| keep)
-            .count() as u32
+            .count();
+        u32::try_from(count).expect("count greater than max u32")
     }
 
     /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
@@ -336,7 +340,7 @@ impl<'a> PoolMultisetIterator<'a> {
     }
 
     fn advance_position(&mut self) {
-        let pool_size = self.pool.dimension as isize;
+        let pool_size = isize::try_from(self.pool.dimension).expect("dimension fits in isize");
         let mut position_index = pool_size - 1;
         while position_index >= 0 {
             self.positions[position_index as usize] += 1;
