@@ -150,12 +150,12 @@ BareListItem: BareListItem = {
 };
 
 FunctionCall: Expression = {
-    "[" <items:FunctionCallItem*> <last:FinalFunctionCallItem?> "]" => {
+    <start: @L> "[" <items:FunctionCallItem*> <last:FinalFunctionCallItem?> "]" <end: @R> =>? {
         let mut all_items = items.into_iter().flatten().collect::<Vec<_>>();
         if let Some(last) = last {
             all_items.extend(last);
         }
-        make_function_call(all_items)
+        make_function_call((start, end).into(), all_items)
     }
 };
 
@@ -199,7 +199,10 @@ StaticType: StaticType = {
 
 // TOOD: avoid unwrap here
 // Negative numbers are handled by the unary `-` op.
-Num: i32 = <s:r"[0-9]+"> =>? i32::from_str(s).map_err(|_| ParseError::User { error: ParseActionError::InvalidIntegerLiteral });
+Num: i32 = <start: @L> <s:r"[0-9]+"> <end: @R> =>?
+    i32::from_str(s).map_err(|e| ParseError::User {
+        error: ParseActionError::InvalidIntegerLiteral { range: (start, end).into(), error: e.to_string() }
+    });
 VariableIdentifier: String = <s:r"[A-Z_]+"> => s.to_string();
 Word: String = {
     <s:r"[a-z][a-z_]+"> => s.to_string(),

@@ -1,3 +1,4 @@
+use lalrpop_util::ParseError;
 use miette::Diagnostic;
 use serde::Serialize;
 use thiserror::Error;
@@ -6,6 +7,15 @@ use thiserror::Error;
 pub struct Range {
     pub start: usize,
     pub end: usize,
+}
+
+impl From<(usize, usize)> for Range {
+    fn from(range: (usize, usize)) -> Self {
+        Self {
+            start: range.0,
+            end: range.1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -233,11 +243,11 @@ pub fn make_function_definition(
     let range_start = items
         .first()
         .map(|i| i.range.start)
-        .expect("empty function definition");
+        .expect("grammar does not parse empty function definitions");
     let range_end = items
         .last()
         .map(|i| i.range.end)
-        .expect("empty function definition");
+        .expect("grammar does not parse empty function definitions");
     let mut name = Vec::new();
     let mut args = Vec::new();
     for item in items.into_iter() {
@@ -264,15 +274,20 @@ pub enum FunctionCallItem {
     Expr(Expression),
 }
 
-pub fn make_function_call(items: Vec<WithRange<FunctionCallItem>>) -> Expression {
+pub fn make_function_call<L: std::fmt::Debug, T: std::fmt::Debug>(
+    range: Range,
+    items: Vec<WithRange<FunctionCallItem>>,
+) -> Result<Expression, ParseError<L, T, ParseActionError>> {
     let range_start = items
         .first()
         .map(|i| i.range.start)
-        .expect("empty function call");
+        .ok_or_else(|| ParseError::<L, T, ParseActionError>::User {
+            error: ParseActionError::EmptyFunctionCall { range },
+        })?;
     let range_end = items
         .last()
         .map(|i| i.range.end)
-        .expect("empty function call");
+        .expect("we've just checked the items are not empty");
     let mut name = Vec::new();
     let mut args = Vec::new();
     for item in items.into_iter() {
@@ -286,10 +301,10 @@ pub fn make_function_call(items: Vec<WithRange<FunctionCallItem>>) -> Expression
             }
         }
     }
-    Expression::FunctionCall {
+    Ok(Expression::FunctionCall {
         name: WithRange::new(range_start, range_end, name.join(" ")),
         args,
-    }
+    })
 }
 
 /// This corresponds to inner errors in the grammar - when the LR parser succeeded,
@@ -298,7 +313,18 @@ pub fn make_function_call(items: Vec<WithRange<FunctionCallItem>>) -> Expression
 pub enum ParseActionError {
     #[error("Invalid integer literal")]
     #[diagnostic(help("Integer literals must be in the range -2^31 to 2^31-1"))]
-    InvalidIntegerLiteral,
+    InvalidIntegerLiteral {
+        #[label("Invalid integer literal: {error}")]
+        range: Range,
+        error: String,
+    },
+
+    #[error("Empty function call")]
+    #[diagnostic(help("Function calls must have at least item (word or expression)"))]
+    EmptyFunctionCall {
+        #[label("Empty function call")]
+        range: Range,
+    },
 }
 
 #[cfg(test)]
@@ -362,5 +388,12 @@ mod tests {
         let ast = grammar::ExprParser::new().parse(text).unwrap();
         assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((value BinaryOp (op (value . Add)) \
             (left (value Int . 1)) (right (value BinaryOp (op (value . Mul)) (left (value Int . 2)) (right (value Int . 3))))))");
+    }
+
+    #[test]
+    fn test_parse_empty_function_call() {
+        let text = "[]";
+        let ast = grammar::ExprParser::new().parse(text);
+        assert!(ast.is_err());
     }
 }
