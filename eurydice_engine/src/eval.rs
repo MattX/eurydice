@@ -592,7 +592,10 @@ impl Evaluator {
                     args[*i] = reverse_if(!self.lowest_first, value).into();
                 }
             }
-            results.push((self.call_function(eval_context, function, &args, &arg_ranges)?, weight));
+            results.push((
+                self.call_function(eval_context, function, &args, &arg_ranges)?,
+                weight,
+            ));
         }
 
         // TODO this is similar to the logic in flat_map in Pool, find a way to use that?
@@ -1196,7 +1199,7 @@ fn interpolate_variable_names(
 
 fn reverse_if(should_reverse: bool, v: &[i32]) -> Vec<i32> {
     if should_reverse {
-        v.into_iter().copied().rev().collect()
+        v.iter().copied().rev().collect()
     } else {
         v.into()
     }

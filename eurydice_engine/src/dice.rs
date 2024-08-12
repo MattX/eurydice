@@ -788,7 +788,10 @@ mod tests {
         let pool = Pool::from_list(10, vec![]);
         let keep_list = vec![true; 10];
         let result = pool.apply(SUM_MAPPER, &keep_list);
-        assert_eq!(result.into_iter().collect::<Vec<_>>(), vec![(0, Natural::ONE)]);
+        assert_eq!(
+            result.into_iter().collect::<Vec<_>>(),
+            vec![(0, Natural::ONE)]
+        );
     }
 
     #[test]
@@ -796,7 +799,10 @@ mod tests {
         let pool = Pool::from_list(0, vec![1, 2, 3]);
         let keep_list = vec![];
         let result = pool.apply(SUM_MAPPER, &keep_list);
-        assert_eq!(result.into_iter().collect::<Vec<_>>(), vec![(0, Natural::ONE)]);
+        assert_eq!(
+            result.into_iter().collect::<Vec<_>>(),
+            vec![(0, Natural::ONE)]
+        );
     }
 
     #[test]
