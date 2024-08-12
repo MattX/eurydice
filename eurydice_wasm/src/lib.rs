@@ -1,15 +1,12 @@
 mod utils;
 
 use eurydice_engine::output::OutputValue;
+use utils::set_panic_hook;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub fn return_three() -> i32 {
-    3
-}
-
-#[wasm_bindgen]
 pub fn run(input: &str) -> JsValue {
+    set_panic_hook();
     serde_wasm_bindgen::to_value(&run_inner(input)).unwrap()
 }
 
