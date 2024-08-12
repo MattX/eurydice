@@ -1,0 +1,113 @@
+@top Program { Statement* }
+
+@precedence {
+    unop,
+    d @left,
+    at @left,
+    pow @left,
+    mul @left,
+    times @left,
+    comp @left,
+    bool @left
+}
+
+@skip { space | Comment }
+
+@tokens {
+    space { @whitespace+ }
+    Comment { "\\" ![\\]* "\\" }
+    variableIdentifier { "[A-Z_]+" }
+    word { "[a-z][a-z_]+" }
+    Number { "[0-9]+" }
+    String { "\"" (!["\\] | "\\" _)* "\"" }
+    "(" ")"
+    "{" "}"
+    "[" "]"
+    ":"
+    "d"
+    "@"
+    "^"
+    "*" "/"
+    "+" "-"
+    "=" "!=" "<" "<=" ">" ">="
+    "&" "|"
+}
+
+kw<term> { @specialize[@name={term}]<word, term> }
+
+Statement {
+    Assignment |
+    // FunctionDefinition |
+    Output |
+    // Print |
+    // Return |
+    // SetStatement |
+    LoopStatement |
+    IfStatement
+}
+
+Assignment { variableIdentifier ":" expression }
+
+Output { kw<"output"> expression OutputName? }
+
+OutputName { kw<"named"> String }
+
+expression {
+    safeExpression |
+    !unop "d" expression |
+    !unop "-" expression |
+    expression !d "d" expression |
+    expression !at "@" expression |
+    expression !pow "^" expression |
+    expression !mul "*" expression |
+    expression !mul "/" expression |
+    expression !times "+" expression |
+    expression !times "-" expression |
+    expression !comp "=" expression |
+    expression !comp "!=" expression |
+    expression !comp "<" expression |
+    expression !comp "<=" expression |
+    expression !comp ">" expression |
+    expression !comp ">=" expression |
+    expression !bool "&" expression |
+    expression !bool "|" expression
+}
+
+safeExpression {
+    !unop "#" expression |
+    !unop "!" expression |
+    "(" expression ")" |
+    // ListLiteral |
+    // FunctionCall |
+    Reference |
+    Number |
+    safeExpression !d "d" expression |
+    safeExpression !at "@" expression |
+    safeExpression !pow "^" expression |
+    safeExpression !mul "*" expression |
+    safeExpression !mul "/" expression |
+    safeExpression !times "+" expression |
+    safeExpression !times "-" expression |
+    safeExpression !comp "=" expression |
+    safeExpression !comp "!=" expression |
+    safeExpression !comp "<" expression |
+    safeExpression !comp "<=" expression |
+    safeExpression !comp ">" expression |
+    safeExpression !comp ">=" expression |
+    safeExpression !bool "&" expression |
+    safeExpression !bool "|" expression
+}
+
+Reference { variableIdentifier }
+
+IfStatement {
+    kw<"if"> expression "{" Statement+ "}"
+}
+
+LoopStatement {
+    kw<"loop"> variableIdentifier kw<"over"> expression "{" Statement+ "}"
+}
+
+FunctionCall {
+    "[" FunctionCallItem* "]"
+}

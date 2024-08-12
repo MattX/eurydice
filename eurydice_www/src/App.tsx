@@ -1,12 +1,56 @@
 import CodeMirror, { ViewUpdate } from "@uiw/react-codemirror";
 import React from "react";
 import { Line } from "react-chartjs-2";
+import { parser } from "./grammar/eurydice";
+import {
+  foldNodeProp,
+  foldInside,
+  indentNodeProp,
+  LRLanguage,
+  LanguageSupport,
+} from "@codemirror/language";
+import { githubLight } from "@uiw/codemirror-theme-github";
+import { styleTags, tags as t } from "@lezer/highlight";
 
 // TODO: don't register everything
 import { Chart, registerables } from "chart.js";
+import { printTree } from "./printTree";
 Chart.register(...registerables);
 
 const worker = new Worker(new URL("./worker.js", import.meta.url));
+
+const parserWithMetadata = parser.configure({
+  props: [
+    styleTags({
+      Reference: t.variableName,
+      Number: t.number,
+      String: t.string,
+      Comment: t.blockComment,
+      "over result output print": t.keyword,
+      "if else loop": t.controlKeyword,
+      "function": t.definitionKeyword,
+      "( )": t.paren,
+      "{ }": t.brace,
+      "[ ]": t.squareBracket,
+    }),
+    indentNodeProp.add({
+      Application: (context) =>
+        context.column(context.node.from) + context.unit,
+    }),
+    foldNodeProp.add({
+      Application: foldInside,
+    }),
+  ],
+});
+
+const language = LRLanguage.define({
+  parser: parserWithMetadata,
+  languageData: {
+    commentTokens: { block: { open: "\\", close: "\\" } },
+  },
+});
+
+const languageSupport = new LanguageSupport(language);
 
 function App() {
   const [value, setValue] = React.useState("output 1d6 + 8");
@@ -14,10 +58,7 @@ function App() {
     new Map<string, Distribution>()
   );
   const [errors, setErrors] = React.useState<string[]>([]);
-  const onChange = React.useCallback((val: string, viewUpdate: ViewUpdate) => {
-    setValue(val);
-    worker.postMessage(val);
-  }, []);
+
   worker.onmessage = (event: MessageEvent<EurydiceMessage>) => {
     if (event.data.Err) {
       setErrors([event.data.Err]);
@@ -39,6 +80,11 @@ function App() {
       setChartData(chartData);
     }
   };
+
+  const onChange = React.useCallback((val: string, viewUpdate: ViewUpdate) => {
+    setValue(val);
+    worker.postMessage(val);
+  }, []);
 
   // Compute the range of outcomes
   const outcomes = Array.from(chartData.values()).flatMap((dist) => {
@@ -66,7 +112,13 @@ function App() {
     <>
       <div className="flex flex-col md:flex-row w-full">
         <div className="w-full md:w-1/2 p-4">
-          <CodeMirror value={value} height="400px" onChange={onChange} />
+          <CodeMirror
+            value={value}
+            height="400px"
+            onChange={onChange}
+            extensions={[languageSupport]}
+            theme={githubLight}
+          />
         </div>
         <div className="w-full md:w-1/2 p-4">
           <div>{errors}</div>
@@ -80,11 +132,15 @@ function App() {
                 y: {
                   ticks: {
                     callback: (value) => `${value}%`,
-                  }
-                }
-              }
+                  },
+                },
+              },
             }}
           />
+          <div><pre>
+            {printTree(parserWithMetadata.parse(value), value)}
+            </pre>
+          </div>
         </div>
       </div>
     </>

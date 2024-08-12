@@ -1,8 +1,0 @@
-@top Program { expression }
-
-@skip { space | Comment }
-
-@tokens {
-    space { @whitespace+ }
-    Comment { "\\" ![\\]* "\\" }
-}
