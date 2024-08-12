@@ -120,7 +120,6 @@ SafeExprInner11: Expression = {
 }
 
 ExprInner12: Expression = {
-    #[precedence(level="0")]
     "(" <e:Expr> ")" => e.value,
     <l:List> => Expression::List(l),
     <fc:FunctionCall> => fc,
@@ -201,7 +200,7 @@ StaticType: StaticType = {
 // TOOD: avoid unwrap here
 // Negative numbers are handled by the unary `-` op.
 Num: i32 = <s:r"[0-9]+"> =>? i32::from_str(s).map_err(|_| ParseError::User { error: ParseActionError::InvalidIntegerLiteral });
-VariableIdentifier: String = <s:r"[A-Z][A-Z_]*"> => s.to_string();
+VariableIdentifier: String = <s:r"[A-Z_]+"> => s.to_string();
 Word: String = {
     <s:r"[a-z][a-z_]+"> => s.to_string(),
     "if" => "if".to_string(),
@@ -215,6 +214,8 @@ Word: String = {
     "output" => "output".to_string(),
     "print" => "print".to_string(),
     "named" => "named".to_string(),
+    "n" => "n".to_string(),
+    "s" => "s".to_string(),
 };
 
 SafeUnaryOp: UnaryOp = {

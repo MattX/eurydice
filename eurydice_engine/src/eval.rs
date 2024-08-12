@@ -715,7 +715,10 @@ fn apply_binary_op(
                         .to_string()
                         .chars()
                         // Unwrap here is ok as all chars for a *positive* integer are valid digits.
-                        .map(|c| c.to_digit(10).unwrap() as i32 * i.signum())
+                        .map(|c| {
+                            i32::try_from(c.to_digit(10).unwrap()).expect("digit fits in i32")
+                                * i.signum()
+                        })
                         .collect();
                     Ok(select_positions(&left, &digits, lowest_first).into())
                 }
@@ -957,7 +960,7 @@ fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {
         }
         n = -n;
     }
-    Pool::from_list(n as u32, sides)
+    Pool::from_list(u32::try_from(n).expect("n is positive"), sides)
 }
 
 fn coerce_arg(
@@ -1141,17 +1144,18 @@ fn keep_list_for_primitive(
     if keep == 0 {
         return Ok(keep_list);
     }
+    let keep = usize::try_from(keep).expect("keep is positive");
     match primitive {
         Primitive::Highest => {
-            keep_list[outcomes_size - keep as usize..].fill(true);
+            keep_list[outcomes_size - keep..].fill(true);
         }
         Primitive::Lowest => {
-            keep_list[..keep as usize].fill(true);
+            keep_list[..keep].fill(true);
         }
         Primitive::Middle => {
             // This is rounding down
-            let start = (outcomes_size - keep as usize).div_ceil(2);
-            keep_list[start..start + keep as usize].fill(true);
+            let start = (outcomes_size - keep).div_ceil(2);
+            keep_list[start..start + keep].fill(true);
         }
         _ => unreachable!(),
     }

@@ -476,17 +476,17 @@ impl<'a> Iterator for MultisetCrossProductIterator<'a> {
 /// factorials.
 fn item_factorials(outcome: &[i32]) -> Natural {
     let mut product = Natural::ONE;
-    let mut count = 1;
+    let mut count = 1u64;
     for i in 1..outcome.len() {
         let prev = outcome.get(i - 1);
         if prev.is_some() && *prev.unwrap() == outcome[i] {
             count += 1;
         } else {
-            product *= Natural::factorial(count as u64);
+            product *= Natural::factorial(count);
             count = 1;
         }
     }
-    product *= Natural::factorial(count as u64);
+    product *= Natural::factorial(count);
     product
 }
 
