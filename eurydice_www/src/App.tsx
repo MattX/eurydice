@@ -26,23 +26,23 @@ const parserWithMetadata = parser.configure({
       Number: t.number,
       String: t.string,
       Comment: t.blockComment,
-      "over result output print": t.keyword,
-      "if else loop": t.controlKeyword,
+      "over output print set": t.keyword,
+      "if else loop result": t.controlKeyword,
       "function": t.definitionKeyword,
       "( )": t.paren,
       "{ }": t.brace,
       "[ ]": t.squareBracket,
-      // Some of these are missing otherwise I get an error: /, *, !=, @
+      // Some of these are missing otherwise I get an error: !, /, *, !=, @
       "# - ^ + = < <= > >= & |": t.operator,
       "d": t.operatorKeyword,
       "ty-n ty-s": t.typeName,
     }),
     indentNodeProp.add({
-      FunctionDefinition: (context) =>
-        context.column(context.node.from) + context.unit,
+      Block: (context) =>
+        context.column(context.node.parent?.from ?? 0) + context.unit,
     }),
     foldNodeProp.add({
-      FunctionDefinition: foldInside,
+      Block: foldInside,
     }),
   ],
 });

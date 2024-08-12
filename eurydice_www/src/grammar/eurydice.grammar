@@ -81,8 +81,8 @@ SafeExpression {
     !unop "#" Expression |
     !unop "!" Expression |
     "(" Expression ")" |
-    // ListLiteral |
-    // FunctionCall |
+    ListLiteral |
+    FunctionCall |
     Reference |
     Number |
     SafeExpression !d kw<"d"> Expression |
@@ -105,18 +105,50 @@ SafeExpression {
 Reference { VariableIdentifier }
 
 IfStatement {
-    kw<"if"> Expression "{" Statement+ "}"
+    kw<"if"> Expression Block (kw<"else"> Block | kw<"else"> IfStatement)?
+}
+
+Block {
+    "{" Statement* "}"
 }
 
 LoopStatement {
-    kw<"loop"> VariableIdentifier kw<"over"> Expression "{" Statement+ "}"
+    kw<"loop"> VariableIdentifier kw<"over"> Expression Block
 }
 
 FunctionDefinition {
-    kw<"function"> ":" (Word | Argument)+ "{" Statement+ "}"
+    kw<"function"> ":" (Word | Argument)+ Block
 }
 
 Argument { VariableIdentifier (":" Type)? }
+
+FunctionCall {
+    "[" FunctionCallItem* FinalFunctionCallItem? "]"
+}
+
+FunctionCallItem {
+    Word |
+    Expression SafeExpression* Word
+}
+
+FinalFunctionCallItem {
+    Expression SafeExpression*
+}
+
+ListLiteral {
+    "{" ListItemWithRepeat* "}"
+}
+
+ListItemWithRepeat {
+    BareListItem Repeat?
+}
+
+BareListItem {
+    Expression |
+    Expression ".." Expression
+}
+
+Repeat { ":" Expression }
 
 // Todo: use tokens or something to give "d" the right name
 Type { ty<"n", "ty-n"> | ty<"s", "ty-s"> | kw<"d"> }
