@@ -32,13 +32,17 @@ const parserWithMetadata = parser.configure({
       "( )": t.paren,
       "{ }": t.brace,
       "[ ]": t.squareBracket,
+      // Some of these are missing otherwise I get an error: /, *, !=, @
+      "# - ^ + = < <= > >= & |": t.operator,
+      "d": t.operatorKeyword,
+      "ty-n ty-s": t.typeName,
     }),
     indentNodeProp.add({
-      Application: (context) =>
+      FunctionDefinition: (context) =>
         context.column(context.node.from) + context.unit,
     }),
     foldNodeProp.add({
-      Application: foldInside,
+      FunctionDefinition: foldInside,
     }),
   ],
 });

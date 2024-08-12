@@ -177,13 +177,13 @@ function colorize(value: any, color: number): string {
       suffix = " (error)";
       break;
     case Color.Yellow:
-      suffix = " (warning)";
+      suffix = "";
       break;
     case Color.Green:
       suffix = " (ok)";
       break;
   }
-  return String(value) + " " + suffix;
+  return String(value) + suffix;
 }
 
 type PrintTreeOptions = { from?: number; to?: number; start?: number; includeParents?: boolean }

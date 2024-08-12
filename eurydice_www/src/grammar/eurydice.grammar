@@ -1,5 +1,7 @@
 @top Program { Statement* }
 
+@detectDelim
+
 @precedence {
     unop,
     d @left,
@@ -16,15 +18,14 @@
 @tokens {
     space { @whitespace+ }
     Comment { "\\" ![\\]* "\\" }
-    variableIdentifier { "[A-Z_]+" }
-    word { "[a-z][a-z_]+" }
-    Number { "[0-9]+" }
+    VariableIdentifier { $[A-Z_]+ }
+    Word { $[a-z]$[a-z_]* }
+    Number { $[0-9]+ }
     String { "\"" (!["\\] | "\\" _)* "\"" }
     "(" ")"
     "{" "}"
     "[" "]"
     ":"
-    "d"
     "@"
     "^"
     "*" "/"
@@ -33,81 +34,89 @@
     "&" "|"
 }
 
-kw<term> { @specialize[@name={term}]<word, term> }
+kw<term> { @specialize[@name={term}]<Word, term> }
+ty<term, name> { @specialize[@name={name}]<Word, term> }
 
 Statement {
     Assignment |
-    // FunctionDefinition |
+    FunctionDefinition |
     Output |
-    // Print |
-    // Return |
+    Print |
+    Return |
     // SetStatement |
     LoopStatement |
     IfStatement
 }
 
-Assignment { variableIdentifier ":" expression }
+Assignment { VariableIdentifier ":" Expression }
 
-Output { kw<"output"> expression OutputName? }
-
+Output { kw<"output"> Expression OutputName? }
+Print { kw<"print"> Expression OutputName? }
 OutputName { kw<"named"> String }
 
-expression {
-    safeExpression |
-    !unop "d" expression |
-    !unop "-" expression |
-    expression !d "d" expression |
-    expression !at "@" expression |
-    expression !pow "^" expression |
-    expression !mul "*" expression |
-    expression !mul "/" expression |
-    expression !times "+" expression |
-    expression !times "-" expression |
-    expression !comp "=" expression |
-    expression !comp "!=" expression |
-    expression !comp "<" expression |
-    expression !comp "<=" expression |
-    expression !comp ">" expression |
-    expression !comp ">=" expression |
-    expression !bool "&" expression |
-    expression !bool "|" expression
+Return { kw<"result"> ":" Expression }
+
+Expression {
+    SafeExpression |
+    !unop kw<"d"> Expression |
+    !unop "-" Expression |
+    Expression !d kw<"d"> Expression |
+    Expression !at "@" Expression |
+    Expression !pow "^" Expression |
+    Expression !mul "*" Expression |
+    Expression !mul "/" Expression |
+    Expression !times "+" Expression |
+    Expression !times "-" Expression |
+    Expression !comp "=" Expression |
+    Expression !comp "!=" Expression |
+    Expression !comp "<" Expression |
+    Expression !comp "<=" Expression |
+    Expression !comp ">" Expression |
+    Expression !comp ">=" Expression |
+    Expression !bool "&" Expression |
+    Expression !bool "|" Expression
 }
 
-safeExpression {
-    !unop "#" expression |
-    !unop "!" expression |
-    "(" expression ")" |
+SafeExpression {
+    !unop "#" Expression |
+    !unop "!" Expression |
+    "(" Expression ")" |
     // ListLiteral |
     // FunctionCall |
     Reference |
     Number |
-    safeExpression !d "d" expression |
-    safeExpression !at "@" expression |
-    safeExpression !pow "^" expression |
-    safeExpression !mul "*" expression |
-    safeExpression !mul "/" expression |
-    safeExpression !times "+" expression |
-    safeExpression !times "-" expression |
-    safeExpression !comp "=" expression |
-    safeExpression !comp "!=" expression |
-    safeExpression !comp "<" expression |
-    safeExpression !comp "<=" expression |
-    safeExpression !comp ">" expression |
-    safeExpression !comp ">=" expression |
-    safeExpression !bool "&" expression |
-    safeExpression !bool "|" expression
+    SafeExpression !d kw<"d"> Expression |
+    SafeExpression !at "@" Expression |
+    SafeExpression !pow "^" Expression |
+    SafeExpression !mul "*" Expression |
+    SafeExpression !mul "/" Expression |
+    SafeExpression !times "+" Expression |
+    SafeExpression !times "-" Expression |
+    SafeExpression !comp "=" Expression |
+    SafeExpression !comp "!=" Expression |
+    SafeExpression !comp "<" Expression |
+    SafeExpression !comp "<=" Expression |
+    SafeExpression !comp ">" Expression |
+    SafeExpression !comp ">=" Expression |
+    SafeExpression !bool "&" Expression |
+    SafeExpression !bool "|" Expression
 }
 
-Reference { variableIdentifier }
+Reference { VariableIdentifier }
 
 IfStatement {
-    kw<"if"> expression "{" Statement+ "}"
+    kw<"if"> Expression "{" Statement+ "}"
 }
 
 LoopStatement {
-    kw<"loop"> variableIdentifier kw<"over"> expression "{" Statement+ "}"
+    kw<"loop"> VariableIdentifier kw<"over"> Expression "{" Statement+ "}"
 }
 
-FunctionCall {
-    "[" FunctionCallItem* "]"
+FunctionDefinition {
+    kw<"function"> ":" (Word | Argument)+ "{" Statement+ "}"
 }
+
+Argument { VariableIdentifier (":" Type)? }
+
+// Todo: use tokens or something to give "d" the right name
+Type { ty<"n", "ty-n"> | ty<"s", "ty-s"> | kw<"d"> }
