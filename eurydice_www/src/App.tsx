@@ -1,5 +1,5 @@
 import CodeMirror, { ViewUpdate } from "@uiw/react-codemirror";
-import React from "react";
+import React, { useEffect } from "react";
 import { Line } from "react-chartjs-2";
 import { parser } from "./grammar/eurydice";
 import {
@@ -14,10 +14,13 @@ import { styleTags, tags as t } from "@lezer/highlight";
 
 // TODO: don't register everything
 import { Chart, registerables } from "chart.js";
-import { printTree } from "./printTree";
+// import { printTree } from "./printTree";
+import { WorkerWrapper } from "./WorkerWrapper";
 Chart.register(...registerables);
 
-const worker = new Worker(new URL("./worker.js", import.meta.url));
+const worker = new WorkerWrapper(
+  new Worker(new URL("./worker.js", import.meta.url))
+);
 
 const parserWithMetadata = parser.configure({
   props: [
@@ -28,13 +31,13 @@ const parserWithMetadata = parser.configure({
       Comment: t.blockComment,
       "over output print set": t.keyword,
       "if else loop result": t.controlKeyword,
-      "function": t.definitionKeyword,
+      function: t.definitionKeyword,
       "( )": t.paren,
       "{ }": t.brace,
       "[ ]": t.squareBracket,
       // Some of these are missing otherwise I get an error: !, /, *, !=, @
       "# - ^ + = < <= > >= & |": t.operator,
-      "d": t.operatorKeyword,
+      d: t.operatorKeyword,
       "ty-n ty-s": t.typeName,
     }),
     indentNodeProp.add({
@@ -57,37 +60,53 @@ const language = LRLanguage.define({
 const languageSupport = new LanguageSupport(language);
 
 function App() {
-  const [value, setValue] = React.useState("output 1d6 + 8");
+  const [value, setValueInner] = React.useState("");
   const [chartData, setChartData] = React.useState(
     new Map<string, Distribution>()
   );
   const [errors, setErrors] = React.useState<string[]>([]);
 
-  worker.onmessage = (event: MessageEvent<EurydiceMessage>) => {
-    if (event.data.Err) {
-      setErrors([event.data.Err]);
-    } else {
-      setErrors([]);
-      const chartData = new Map<string, Distribution>();
-      for (const [key, value] of event.data.Ok!) {
-        if (value.Distribution !== undefined) {
-          chartData.set(key, value.Distribution);
-        } else if (value.Int !== undefined) {
-          chartData.set(key, { probabilities: [[value.Int, 1]] });
-        } else if (value.List !== undefined) {
-          const length = value.List.length;
-          chartData.set(key, {
-            probabilities: value.List.map((x) => [x, 1.0 / length]),
-          });
-        }
-      }
-      setChartData(chartData);
-    }
-  };
-
-  const onChange = React.useCallback((val: string, viewUpdate: ViewUpdate) => {
-    setValue(val);
+  function setValue(val: string) {
+    setValueInner(val);
+    localStorage.setItem("eurydice0_editor_program", val);
     worker.postMessage(val);
+  }
+
+  useEffect(() => {
+    // Attach the onmessage listener
+    worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
+      if (event.data.Err) {
+        setErrors([event.data.Err]);
+      } else {
+        setErrors([]);
+        const chartData = new Map<string, Distribution>();
+        for (const [key, value] of event.data.Ok!) {
+          if (value.Distribution !== undefined) {
+            chartData.set(key, value.Distribution);
+          } else if (value.Int !== undefined) {
+            chartData.set(key, { probabilities: [[value.Int, 1]] });
+          } else if (value.List !== undefined) {
+            const length = value.List.length;
+            chartData.set(key, {
+              probabilities: value.List.map((x) => [x, 1.0 / length]),
+            });
+          }
+        }
+        setChartData(chartData);
+      }
+    });
+
+    // Load the saved text from localStorage when the component mounts
+    const savedText = localStorage.getItem("eurydice0_editor_program");
+    if (savedText) {
+      setValue(savedText);
+    } else {
+      setValue("output 1d6 + 2");
+    }
+  }, []);
+
+  const onChange = React.useCallback((val: string, _viewUpdate: ViewUpdate) => {
+    setValue(val);
   }, []);
 
   // Compute the range of outcomes
@@ -114,36 +133,60 @@ function App() {
 
   return (
     <>
-      <div className="flex flex-col md:flex-row w-full">
-        <div className="w-full md:w-1/2 p-4">
-          <CodeMirror
-            value={value}
-            height="400px"
-            onChange={onChange}
-            extensions={[languageSupport]}
-            theme={githubLight}
-          />
-        </div>
-        <div className="w-full md:w-1/2 p-4">
-          <div>{errors}</div>
-          <Line
-            data={{
-              labels: range,
-              datasets,
-            }}
-            options={{
-              scales: {
-                y: {
-                  ticks: {
-                    callback: (value) => `${value}%`,
+      <div className="flex flex-col min-h-screen">
+        <nav className="w-full md:w-1/2 p-4">
+          <ul className="flex [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
+            <li className="border-none">
+              <a href="#">Eurydice</a>
+            </li>
+            <li>About</li>
+            <li>Help</li>
+            <li>
+              <a href="https://anydice.com">AnyDice</a>
+            </li>
+          </ul>
+          <p className="px-4">
+            <em>
+              <small>(Eurydice is not affiliated with AnyDice)</small>
+            </em>
+          </p>
+        </nav>
+        <div className="flex flex-grow md:min-h-[400px]">
+          <div className="flex flex-col md:flex-row w-full h-full items-stretch">
+            <div className="w-full md:w-1/2 p-4 border-gray-300 border">
+              <CodeMirror
+                value={value}
+                onChange={onChange}
+                extensions={[languageSupport]}
+                theme={githubLight}
+                height="100%"
+                minHeight="100%"
+              />
+            </div>
+            <div className="w-full md:w-1/2 p-4 border-gray-300 border">
+              <div>{errors}</div>
+              <Line
+                data={{
+                  labels: range,
+                  datasets,
+                }}
+                options={{
+                  scales: {
+                    y: {
+                      ticks: {
+                        callback: (value) => `${value}%`,
+                      },
+                    },
                   },
-                },
-              },
-            }}
-          />
-          <div><pre>
-            {printTree(parserWithMetadata.parse(value), value)}
-            </pre>
+                  animation: false,
+                }}
+                width="100%"
+                height="100%"
+              />
+              <div>
+                {/* <pre>{printTree(parserWithMetadata.parse(value), value)}</pre> */}
+              </div>
+            </div>
           </div>
         </div>
       </div>
