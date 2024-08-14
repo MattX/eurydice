@@ -163,7 +163,7 @@ impl Pool {
             self.dimension as usize,
             "`apply` called with keep list of incorrect length"
         );
-        if self.ordered_outcomes.is_empty() {
+        if self.is_empty() {
             return [(mapper.initial_state.clone(), Natural::ONE)].into();
         }
         let mut cache = HashMap::new();
@@ -231,7 +231,7 @@ impl Pool {
 
     /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
     pub fn sum(&self) -> Pool {
-        if self.dimension == 0 || self.ordered_outcomes.is_empty() {
+        if self.is_empty() {
             return Pool {
                 dimension: 1,
                 ordered_outcomes: vec![(0, Natural::ONE)],
@@ -311,6 +311,10 @@ impl Pool {
                 .map(|other_outcome| outcome[0] + other_outcome[0])
                 .into()
         })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ordered_outcomes.is_empty() || self.dimension == 0
     }
 }
 

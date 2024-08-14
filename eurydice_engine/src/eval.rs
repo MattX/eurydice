@@ -1047,7 +1047,10 @@ impl Primitive {
             Primitive::Explode => {
                 // args: pool
                 if let RuntimeValue::Pool(d) = &args[0] {
-                    let die: Vec<_> = (*d).clone().sum().into_die_iter().collect();
+                    if d.is_empty() {
+                        return Ok(Pool::from_list(1, vec![]).into());
+                    }
+                    let die: Vec<_> = d.sum().into_die_iter().collect();
                     let highest_value = die.last().unwrap().0;
                     Ok(Pool::from(explode(die, &[highest_value], explode_depth)).into())
                 } else {
@@ -1140,11 +1143,14 @@ fn keep_list_for_primitive(
             value: keep,
         });
     }
+    let keep = usize::try_from(keep).expect("keep is positive");
+    if keep >= outcomes_size {
+        return Ok(vec![true; outcomes_size]);
+    }
     let mut keep_list = vec![false; outcomes_size];
     if keep == 0 {
         return Ok(keep_list);
     }
-    let keep = usize::try_from(keep).expect("keep is positive");
     match primitive {
         Primitive::Highest => {
             keep_list[outcomes_size - keep..].fill(true);
