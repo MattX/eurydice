@@ -49,4 +49,3 @@ output {} named "the empty sequence"
 
 "the empty sequence",0,0,0,0
 #,%
-0,100

@@ -199,6 +199,18 @@ fn parse_results(contents: &str) -> Result<ExpectedResult, Box<dyn std::error::E
 }
 
 fn create_expected_result(name: &str, pool: &Pool) -> ExpectedResult {
+    // Unfortunately we have to special case this I think
+    if pool.is_empty() {
+        return ExpectedResult {
+            name: name.to_string(),
+            mean: 0.0,
+            stddev: 0.0,
+            min: 0,
+            max: 0,
+            outcomes: Vec::new(),
+        };
+    }
+
     let probabilities = to_probabilities(pool.sum().ordered_outcomes());
     let mean = mean(&probabilities);
     let stddev = stddev(&probabilities, mean);

@@ -37,4 +37,3 @@ output d{} named "the empty die"
 
 "the empty die",0,0,0,0
 #,%
-0,100
