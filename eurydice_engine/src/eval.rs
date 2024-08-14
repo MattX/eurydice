@@ -1317,8 +1317,24 @@ pub enum RuntimeError {
     },
 }
 
-#[derive(Debug, Error, Diagnostic)]
-pub enum PrimitiveError {}
+impl RuntimeError {
+    pub fn range(&self) -> ast::Range {
+        match self {
+            RuntimeError::OutputNotAtTopLevel { range } => range.into(),
+            RuntimeError::SetNotAtTopLevel { range } => range.into(),
+            RuntimeError::ReturnOutsideFunction { range } => range.into(),
+            RuntimeError::LoopOverNonSequence { range, .. } => range.into(),
+            RuntimeError::UndefinedReference { range, .. } => range.into(),
+            RuntimeError::UndefinedFunction { range, .. } => range.into(),
+            RuntimeError::InvalidCondition { range, .. } => range.into(),
+            RuntimeError::RangeHasNonSequenceEndpoints { range, .. } => range.into(),
+            RuntimeError::NotYetImplemented { range } => range.into(),
+            RuntimeError::InvalidArgumentToOperator { operator_range, .. } => operator_range.into(),
+            RuntimeError::NegativeArgumentToFunction { range, .. } => range.into(),
+            RuntimeError::InvalidRepeatExpression { range, .. } => range.into(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,5 +1,5 @@
 use lalrpop_util::ParseError;
-use miette::Diagnostic;
+use miette::{Diagnostic, SourceSpan};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -14,6 +14,15 @@ impl From<(usize, usize)> for Range {
         Self {
             start: range.0,
             end: range.1,
+        }
+    }
+}
+
+impl From<&SourceSpan> for Range {
+    fn from(span: &SourceSpan) -> Self {
+        Self {
+            start: span.offset(),
+            end: span.offset() + span.len(),
         }
     }
 }

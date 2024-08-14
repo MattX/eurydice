@@ -45,4 +45,8 @@ export class WorkerWrapper {
       this.pendingCallback = callback;
     }
   }
+
+  terminate() {
+    this.worker.terminate();
+  }
 }

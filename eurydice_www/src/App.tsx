@@ -1,4 +1,4 @@
-import CodeMirror, { ViewUpdate } from "@uiw/react-codemirror";
+import CodeMirror, { EditorView, ViewUpdate } from "@uiw/react-codemirror";
 import React, { useEffect } from "react";
 import { Line } from "react-chartjs-2";
 import { parser } from "./grammar/eurydice";
@@ -16,9 +16,11 @@ import { styleTags, tags as t } from "@lezer/highlight";
 import { Chart, registerables } from "chart.js";
 // import { printTree } from "./printTree";
 import { WorkerWrapper } from "./WorkerWrapper";
+import { linter } from "@codemirror/lint";
+import Spinner from "./Spinner";
 Chart.register(...registerables);
 
-const worker = new WorkerWrapper(
+let worker = new WorkerWrapper(
   new Worker(new URL("./worker.js", import.meta.url))
 );
 
@@ -29,7 +31,7 @@ const parserWithMetadata = parser.configure({
       Number: t.number,
       String: t.string,
       Comment: t.blockComment,
-      "over output print set": t.keyword,
+      "over output print set named": t.keyword,
       "if else loop result": t.controlKeyword,
       function: t.definitionKeyword,
       "( )": t.paren,
@@ -64,17 +66,22 @@ function App() {
   const [chartData, setChartData] = React.useState(
     new Map<string, Distribution>()
   );
-  const [errors, setErrors] = React.useState<string[]>([]);
+  const [errors, setErrors] = React.useState<EurydiceError[]>([]);
+  const [runLive, setRunLiveInner] = React.useState(true);
+  const [running, setRunning] = React.useState(false);
 
-  function setValue(val: string) {
-    setValueInner(val);
-    localStorage.setItem("eurydice0_editor_program", val);
-    worker.postMessage(val);
+  function setRunLive(val: boolean) {
+    if (val) {
+      localStorage.removeItem("eurydice0_run_live");
+    } else {
+      localStorage.setItem("eurydice0_run_live", "false");
+    }
+    setRunLiveInner(val);
   }
 
-  useEffect(() => {
-    // Attach the onmessage listener
+  function attachOnMessage(worker: WorkerWrapper) {
     worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
+      setRunning(false);
       if (event.data.Err) {
         setErrors([event.data.Err]);
       } else {
@@ -95,19 +102,58 @@ function App() {
         setChartData(chartData);
       }
     });
+  }
 
-    // Load the saved text from localStorage when the component mounts
-    const savedText = localStorage.getItem("eurydice0_editor_program");
-    if (savedText) {
-      setValue(savedText);
-    } else {
-      setValue("output 1d6 + 2");
+  function run(val?: string) {
+    if (running) {
+      worker.terminate();
+      worker = new WorkerWrapper(
+        new Worker(new URL("./worker.js", import.meta.url))
+      );
+      attachOnMessage(worker);
+    }
+    setRunning(true);
+    worker.postMessage(val ?? value);
+  }
+
+  useEffect(() => {
+    // Attach the onmessage listener
+    attachOnMessage(worker);
+
+    // Load the saved state from local storage
+    const savedRunLive = localStorage.getItem("eurydice0_run_live") !== "false";
+    if (!savedRunLive) {
+      setRunLiveInner(false);
+    }
+    const savedText =
+      localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
+    setValueInner(savedText);
+    if (savedRunLive) {
+      run(savedText);
     }
   }, []);
 
-  const onChange = React.useCallback((val: string, _viewUpdate: ViewUpdate) => {
-    setValue(val);
-  }, []);
+  const onChange = React.useCallback(
+    (val: string, _viewUpdate: ViewUpdate) => {
+      setValueInner(val);
+      localStorage.setItem("eurydice0_editor_program", val);
+      if (runLive) {
+        run(val);
+      }
+    },
+    [runLive, running]
+  );
+
+  const eurydiceLinter = linter((_view: EditorView) => {
+    return errors.map((e) => ({
+      // Clamp values here - a slightly delayed worker response can cause
+      // a crash if the error is now out of bounds.
+      from: Math.min(e.from, value.length),
+      to: Math.min(e.from, value.length),
+      message: e.message,
+      severity: "error",
+    }));
+  });
 
   // Compute the range of outcomes
   const outcomes = Array.from(chartData.values()).flatMap((dist) => {
@@ -131,6 +177,10 @@ function App() {
     datasets.push({ label: name, data, borderColor: color });
   }
 
+  const runButtonClass = runLive
+    ? "border-gray-400 text-gray-400"
+    : "border-blue-500 hover:border-blue-700";
+
   return (
     <>
       <div className="flex flex-col min-h-screen">
@@ -145,26 +195,39 @@ function App() {
               <a href="https://anydice.com">AnyDice</a>
             </li>
           </ul>
-          <p className="px-4">
-            <em>
-              <small>(Eurydice is not affiliated with AnyDice)</small>
-            </em>
-          </p>
         </nav>
         <div className="flex flex-grow md:min-h-[400px]">
           <div className="flex flex-col md:flex-row w-full h-full items-stretch">
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
+              <div className="flex flex-row mb-4 px-2">
+                <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+                  <input
+                    type="checkbox"
+                    name="runLiveCheckbox"
+                    checked={runLive}
+                    onChange={(e) => setRunLive(e.target.checked)}
+                  />{" "}
+                  Run live
+                </label>
+                <button
+                  disabled={runLive}
+                  onClick={() => !runLive && run()}
+                  className={`border-2 ${runButtonClass} py-1 px-2 mx-1 rounded`}
+                >
+                  Run
+                </button>
+                {running && <Spinner />}
+              </div>
               <CodeMirror
                 value={value}
                 onChange={onChange}
-                extensions={[languageSupport]}
+                extensions={[languageSupport, eurydiceLinter]}
                 theme={githubLight}
                 height="100%"
                 minHeight="100%"
               />
             </div>
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
-              <div>{errors}</div>
               <Line
                 data={{
                   labels: range,
@@ -173,6 +236,7 @@ function App() {
                 options={{
                   scales: {
                     y: {
+                      beginAtZero: true,
                       ticks: {
                         callback: (value) => `${value}%`,
                       },
@@ -183,9 +247,9 @@ function App() {
                 width="100%"
                 height="100%"
               />
-              <div>
-                {/* <pre>{printTree(parserWithMetadata.parse(value), value)}</pre> */}
-              </div>
+              {/* <div>
+                <pre>{printTree(parserWithMetadata.parse(value), value)}</pre>
+              </div> */}
             </div>
           </div>
         </div>
@@ -198,7 +262,13 @@ export default App;
 
 interface EurydiceMessage {
   Ok: [string, DistributionWrapper][] | undefined;
-  Err: string | undefined;
+  Err: EurydiceError | undefined;
+}
+
+interface EurydiceError {
+  message: string;
+  from: number;
+  to: number;
 }
 
 interface DistributionWrapper {

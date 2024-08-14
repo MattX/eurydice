@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@codemirror/lint": "^6.8.1"
+  }
+}

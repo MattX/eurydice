@@ -16,9 +16,15 @@ async function init_wasm_in_worker() {
     // Set callback to handle messages passed to the worker.
     self.onmessage = async event => {
         const start = performance.now();
-        var worker_result = run(event.data);
+        var workerResult;
+        try {
+            workerResult = run(event.data);
+        } catch (e) {
+            console.error(e);
+            workerResult = { Err: { message: "Internal error", from: 0, to: 0} };
+        }
         const end = performance.now();
-        self.postMessage(worker_result);
+        self.postMessage(workerResult);
         console.log(`Worker execution time: ${end - start}ms`);
     };
     // Signal to the main thread's WorkerWrapper that the onmessage handler
