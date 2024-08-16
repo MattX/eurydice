@@ -13,7 +13,7 @@ import { githubLight } from "@uiw/codemirror-theme-github";
 import { styleTags, tags as t } from "@lezer/highlight";
 
 // TODO: don't register everything
-import { Chart, registerables } from "chart.js";
+import { Chart, ChartData, registerables } from "chart.js";
 // import { printTree } from "./printTree";
 import { WorkerWrapper } from "./WorkerWrapper";
 import { linter } from "@codemirror/lint";
@@ -69,14 +69,16 @@ function App() {
   const [errors, setErrors] = React.useState<EurydiceError[]>([]);
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
+  const [displayMode, setDisplayMode] = React.useState(DisplayMode.Distribution);
 
   function setRunLive(val: boolean) {
+    setRunLiveInner(val);
     if (val) {
       localStorage.removeItem("eurydice0_run_live");
+      run(value);
     } else {
       localStorage.setItem("eurydice0_run_live", "false");
     }
-    setRunLiveInner(val);
   }
 
   function attachOnMessage(worker: WorkerWrapper) {
@@ -155,27 +157,7 @@ function App() {
     }));
   });
 
-  // Compute the range of outcomes
-  const outcomes = Array.from(chartData.values()).flatMap((dist) => {
-    return dist.probabilities.map(([x, _]) => x);
-  });
-  const min_outcome = Math.min(...outcomes);
-  const max_outcome = Math.max(...outcomes);
-  const range = Array.from(
-    { length: max_outcome - min_outcome + 1 },
-    (_, i) => i + min_outcome
-  );
-  let datasets = [];
-  const rng = splitmix32(2);
-  for (const entry of chartData.entries()) {
-    const [name, dist] = entry;
-    const distMap = new Map(dist.probabilities);
-    const data = range.map((x) => (distMap.get(x) ?? 0) * 100);
-    const color = `rgba(${Math.floor(rng() * 256)}, ${Math.floor(
-      rng() * 256
-    )}, ${Math.floor(rng() * 256)}, 1.0)`;
-    datasets.push({ label: name, data, borderColor: color });
-  }
+  const datasets = prepareChartData(chartData, displayMode);
 
   const runButtonClass = runLive
     ? "border-gray-400 text-gray-400"
@@ -228,12 +210,42 @@ function App() {
               />
             </div>
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
+              <div className="flex flex-row mb-4 px-2">
+                <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+                  <input
+                    type="radio"
+                    name="displayMode"
+                    checked={displayMode === DisplayMode.Distribution}
+                    onChange={() => setDisplayMode(DisplayMode.Distribution)}
+                  />{" "}
+                  Distribution
+                </label>
+                <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+                  <input
+                    type="radio"
+                    name="displayMode"
+                    checked={displayMode === DisplayMode.AtLeast}
+                    onChange={() => setDisplayMode(DisplayMode.AtLeast)}
+                  />{" "}
+                  At least
+                </label>
+                <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+                  <input
+                    type="radio"
+                    name="displayMode"
+                    checked={displayMode === DisplayMode.AtMost}
+                    onChange={() => setDisplayMode(DisplayMode.AtMost)}
+                  />{" "}
+                  At most
+                </label>
+              </div>
               <Line
-                data={{
-                  labels: range,
-                  datasets,
-                }}
+                data={datasets}
                 options={{
+                  interaction: {
+                    // mode: "index",
+                    intersect: false,
+                  },
                   scales: {
                     y: {
                       beginAtZero: true,
@@ -281,6 +293,12 @@ interface Distribution {
   probabilities: [number, number][];
 }
 
+enum DisplayMode {
+  Distribution,
+  AtMost,
+  AtLeast,
+}
+
 /// A simple seedable random number generator
 /// https://stackoverflow.com/a/47593316
 function splitmix32(a: number) {
@@ -293,4 +311,61 @@ function splitmix32(a: number) {
     t = Math.imul(t, 0x735a2d97);
     return ((t = t ^ (t >>> 15)) >>> 0) / 4294967296;
   };
+}
+
+function prepareChartData(chartData: Map<string, Distribution>, mode: DisplayMode): ChartData<"line", number[], number> {
+  // Compute the range of outcomes
+  const outcomes = Array.from(chartData.values()).flatMap((dist) => {
+    return dist.probabilities.map(([x, _]) => x);
+  });
+  const min_outcome = Math.min(...outcomes);
+  const max_outcome = Math.max(...outcomes);
+  const range = Array.from(
+    { length: max_outcome - min_outcome + 1 },
+    (_, i) => i + min_outcome
+  );
+  let datasets = [];
+  const rng = splitmix32(2);
+  for (const nameAndDist of chartData.entries()) {
+    const [name, dist] = nameAndDist;
+    const distMap = new Map(dist.probabilities);
+    let data = range.map((x) => (distMap.get(x) ?? 0) * 100);
+
+    switch (mode) {
+      case DisplayMode.AtMost: {
+        data = partialSums(data, false);
+        break;
+      }
+      case DisplayMode.AtLeast: {
+        data = partialSums(data, true);
+        break;
+      }
+    }
+
+    const color = `rgba(${Math.floor(rng() * 256)}, ${Math.floor(
+      rng() * 256
+    )}, ${Math.floor(rng() * 256)}, 1.0)`;
+    datasets.push({ label: name, data, borderColor: color });
+  }
+  return {
+    labels: range,
+    datasets,
+  };
+}
+
+function partialSums(array: number[], backwards: boolean): number[] {
+  let sum = 0;
+  const sums = [];
+  for (let i = 0; i < array.length; i++) {
+    if (backwards) {
+      sum += array[array.length - 1 - i];
+    } else {
+      sum += array[i];
+    }
+    sums.push(sum);
+  }
+  if (backwards) {
+    sums.reverse();
+  }
+  return sums;
 }
