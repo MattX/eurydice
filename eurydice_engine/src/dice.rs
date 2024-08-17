@@ -18,6 +18,7 @@ use malachite::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::num::basic::traits::{One, Zero};
 use malachite::{Natural, Rational};
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
 /// Represents a pool of identical independent dice.
@@ -404,7 +405,7 @@ pub struct MultisetCrossProductIterator<'a> {
     started: bool,
     /// None if the iterator is finished. If Some, the outer vector has the same
     /// length as `sub_iterators`.
-    values: Option<Vec<(Vec<i32>, Natural)>>,
+    values: Option<Vec<(Rc<Vec<i32>>, Natural)>>,
 }
 
 impl<'a> MultisetCrossProductIterator<'a> {
@@ -417,7 +418,9 @@ impl<'a> MultisetCrossProductIterator<'a> {
         let values: Option<Vec<_>> = result
             .sub_iterators
             .iter_mut()
-            .map(|iter| iter.next())
+            .map(|iter| iter.next().map(
+                |(outcome, ways)| (Rc::new(outcome), ways),
+            ))
             .collect();
         let values = match values {
             Some(values) => values,
@@ -435,11 +438,12 @@ impl<'a> MultisetCrossProductIterator<'a> {
         let mut stopped = false;
         for (idx, iterator) in self.sub_iterators.iter_mut().enumerate() {
             let (new_val, cont) = match iterator.next() {
-                Some(val) => (val, false),
+                Some((outcome, ways)) => ((Rc::new(outcome), ways), false),
                 None => {
                     iterator.reset();
                     // OK to unwrap here: if any iterators were empty after reset, we have gotten here
-                    (iterator.next().unwrap(), true)
+                    let (outcome, ways) = iterator.next().unwrap();
+                    ((Rc::new(outcome), ways), true)
                 }
             };
             values[idx] = new_val;
@@ -456,9 +460,9 @@ impl<'a> MultisetCrossProductIterator<'a> {
 }
 
 impl<'a> Iterator for MultisetCrossProductIterator<'a> {
-    type Item = (Vec<Vec<i32>>, Natural);
+    type Item = (Vec<Rc<Vec<i32>>>, Natural);
 
-    fn next(&mut self) -> Option<(Vec<Vec<i32>>, Natural)> {
+    fn next(&mut self) -> Option<(Vec<Rc<Vec<i32>>>, Natural)> {
         if !self.started {
             self.started = true;
         } else {
@@ -1192,7 +1196,7 @@ mod tests {
             pools.iter().map(|pool| pool.multiset_iterator()).collect(),
         );
         let values = iter.collect::<Vec<_>>();
-        let values_only = values.iter().map(|(v, _)| v).cloned().collect::<Vec<_>>();
+        let values_only = values.iter().map(|(v, _)| v.iter().map(|o| (**o).clone()).collect::<Vec<_>>()).collect::<Vec<_>>();
         assert_eq!(
             values_only,
             vec![
@@ -1221,7 +1225,7 @@ mod tests {
             pools.iter().map(|pool| pool.multiset_iterator()).collect(),
         );
         let values = iter.collect::<Vec<_>>();
-        let values_only = values.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
+        let values_only = values.iter().map(|(v, _)| v.iter().map(|o| (**o).clone()).collect::<Vec<_>>()).collect::<Vec<_>>();
         assert_eq!(
             values_only,
             vec![

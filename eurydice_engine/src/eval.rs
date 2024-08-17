@@ -1361,19 +1361,23 @@ mod tests {
         }
 
         let env = Rc::new(RefCell::new(ValEnv::new()));
-        env.borrow_mut().insert("a".to_string(), 1.into());
-        env.borrow_mut().insert("b".to_string(), 2.into());
-        env.borrow_mut().insert("c".to_string(), 3.into());
+        env.borrow_mut().insert("A".to_string(), 1.into());
+        env.borrow_mut().insert("B".to_string(), 2.into());
+        env.borrow_mut().insert("C".to_string(), 3.into());
         assert_eq!(
-            interpolate_variable_names(&ranged("a + b = [a] + [b]"), &env).unwrap(),
-            "a + b = 1 + 2"
+            interpolate_variable_names(&ranged("A + B = [A] + [B]"), &env).unwrap(),
+            "A + B = 1 + 2"
         );
         assert!(
-            interpolate_variable_names(&ranged("a + b = [a] + [b] + [invalid]"), &env,).is_err()
+            interpolate_variable_names(&ranged("A + B = [A] + [B] + [INVALID]"), &env).is_err()
         );
         assert_eq!(
-            interpolate_variable_names(&ranged("a + b = [a] + [b] + [c"), &env,).unwrap(),
-            "a + b = 1 + 2 + [c"
+            interpolate_variable_names(&ranged("A + B = [A] + [B] + [invalid]"), &env).unwrap(),
+            "A + B = 1 + 2 + [invalid]"
+        );
+        assert_eq!(
+            interpolate_variable_names(&ranged("A + B = [A] + [B] + [C"), &env).unwrap(),
+            "A + B = 1 + 2 + [C"
         );
     }
 }
