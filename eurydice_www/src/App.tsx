@@ -62,8 +62,8 @@ const language = LRLanguage.define({
 const languageSupport = new LanguageSupport(language);
 
 function App() {
-  const [value, setValueInner] = React.useState("");
-  const [chartData, setChartData] = React.useState(
+  const [editorText, setEditorText] = React.useState("");
+  const [output, setOutput] = React.useState(
     new Map<string, Distribution>()
   );
   const [errors, setErrors] = React.useState<EurydiceError[]>([]);
@@ -75,7 +75,7 @@ function App() {
     setRunLiveInner(val);
     if (val) {
       localStorage.removeItem("eurydice0_run_live");
-      run(value);
+      run(editorText);
     } else {
       localStorage.setItem("eurydice0_run_live", "false");
     }
@@ -101,7 +101,7 @@ function App() {
             });
           }
         }
-        setChartData(chartData);
+        setOutput(chartData);
       }
     });
   }
@@ -115,7 +115,7 @@ function App() {
       attachOnMessage(worker);
     }
     setRunning(true);
-    worker.postMessage(val ?? value);
+    worker.postMessage(val ?? editorText);
   }
 
   useEffect(() => {
@@ -129,7 +129,7 @@ function App() {
     }
     const savedText =
       localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
-    setValueInner(savedText);
+    setEditorText(savedText);
     if (savedRunLive) {
       run(savedText);
     }
@@ -137,7 +137,7 @@ function App() {
 
   const onChange = React.useCallback(
     (val: string, _viewUpdate: ViewUpdate) => {
-      setValueInner(val);
+      setEditorText(val);
       localStorage.setItem("eurydice0_editor_program", val);
       if (runLive) {
         run(val);
@@ -150,14 +150,14 @@ function App() {
     return errors.map((e) => ({
       // Clamp values here - a slightly delayed worker response can cause
       // a crash if the error is now out of bounds.
-      from: Math.min(e.from, value.length),
-      to: Math.min(e.from, value.length),
+      from: Math.min(e.from, editorText.length),
+      to: Math.min(e.from, editorText.length),
       message: e.message,
       severity: "error",
     }));
   });
 
-  const datasets = prepareChartData(chartData, displayMode);
+  const datasets = prepareChartData(output, displayMode);
 
   const runButtonClass = runLive
     ? "border-gray-400 text-gray-400"
@@ -201,7 +201,7 @@ function App() {
                 {running && <Spinner />}
               </div>
               <CodeMirror
-                value={value}
+                value={editorText}
                 onChange={onChange}
                 extensions={[languageSupport, eurydiceLinter]}
                 theme={githubLight}

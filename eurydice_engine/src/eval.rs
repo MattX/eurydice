@@ -641,7 +641,7 @@ impl Evaluator {
     ) -> Result<RuntimeValue, RuntimeError> {
         match &function.value {
             Function::Primitive(primitive) => {
-                primitive.execute(args, arg_ranges, self.explode_depth, function.range)
+                primitive.execute(args, arg_ranges, self.explode_depth, self.lowest_first, function.range)
             }
             Function::UserDefined(user_function) => {
                 let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
@@ -1004,6 +1004,7 @@ impl Primitive {
         args: &[RuntimeValue],
         arg_ranges: &[ast::Range],
         explode_depth: usize,
+        lowest_first: bool,
         function_range: ast::Range,
     ) -> Result<RuntimeValue, RuntimeError> {
         match self {
@@ -1113,7 +1114,11 @@ impl Primitive {
                 // args: sequence
                 if let RuntimeValue::List(lst) = &args[0] {
                     let mut lst = (**lst).clone();
-                    lst.sort_unstable_by_key(|o| -o);
+                    if lowest_first {
+                        lst.sort_unstable();
+                    } else {
+                        lst.sort_unstable_by_key(|o| -o);
+                    }
                     Ok(lst.into())
                 } else {
                     panic!("wrong argument types to [sort]");
@@ -1191,9 +1196,12 @@ fn interpolate_variable_names(
                 }
                 name.push(chr);
             }
-            if !valid_end {
+            if !valid_end || name.is_empty() || name.chars().any(|c| !c.is_ascii_uppercase()) {
                 result.push('[');
                 result.push_str(&name);
+                if valid_end {
+                    result.push(']');
+                }
             } else if let Some(value) = vars.borrow().get(&name) {
                 result.push_str(&value.to_string());
             } else {
