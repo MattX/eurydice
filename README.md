@@ -4,13 +4,15 @@ This is an implementation of the [AnyDice](https://anydice.com/) DSL, which was 
 
 It can run as a command-line utility, or as a web-based tool, with evaluation occurring in real time in the browser.
 
-Eurydice should be somewhat faster than AnyDice, but unlike AnyDice, it runs client side, so performance may vary. Eurydice implements the [Icepool](https://pypi.org/project/icepool/) algorithm developed by Albert Liu. [^1]
+Eurydice should be somewhat faster than AnyDice, but unlike AnyDice, it runs client side, so performance may vary depending on your computer's performance. Eurydice implements the [Icepool](https://pypi.org/project/icepool/) algorithm developed by Albert Liu.[^1] The Eurydice web UI also supports syntax highlighting and inline errors.
 
 [^1]: Liu, A. J. (2022). Icepool: Efficient Computation of Dice Pool Probabilities. *Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital Entertainment, 18*(1), 258-265. <https://doi.org/10.1609/aiide.v18i1.21971>
 
 ## Running
 
 See the web UI at xxx.
+
+https://github.com/user-attachments/assets/42244ce7-ea3f-44d6-9157-c6a0e59d1d36
 
 You can also run a simple CLI locally. [Install cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) if necessary, then:
 
