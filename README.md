@@ -1,6 +1,6 @@
-# Everydice documentation
+# Everydice
 
-This is an implementation of the [AnyDice](https://anydice.com/) DSL, created by [Jasper Flick](https://ko-fi.com/catlikecoding). **This project is not affiliated with AnyDice or Jasper Flick.**
+This is an implementation of the [AnyDice](https://anydice.com/) DSL, which was created by [Jasper Flick](https://ko-fi.com/catlikecoding). **This project is not affiliated with AnyDice or Jasper Flick.**
 
 It can run as a command-line utility, or as a web-based tool, with evaluation occurring in real time in the browser.
 
