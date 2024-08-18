@@ -11,7 +11,7 @@ let worker = new WorkerWrapper(
 
 function App() {
   const [editorText, setEditorText] = React.useState("");
-  const [output, setOutput] = React.useState(new Map<string, Distribution>());
+  const [output, setOutput] = React.useState<[string, Distribution][]>([]);
   const [error, setError] = React.useState<EurydiceError | null>(null);
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
@@ -37,17 +37,17 @@ function App() {
       } else if (event.data.Ok !== undefined) {
         setRunning(false);
         setError(null);
-        const chartData = new Map<string, Distribution>();
+        const chartData = new Array();
         for (const [key, value] of event.data.Ok!) {
           if (value.Distribution !== undefined) {
-            chartData.set(key, value.Distribution);
+            chartData.push([key, value.Distribution]);
           } else if (value.Int !== undefined) {
-            chartData.set(key, { probabilities: [[value.Int, 1]] });
+            chartData.push([key, { probabilities: [[value.Int, 1]] }]);
           } else if (value.List !== undefined) {
             const length = value.List.length;
-            chartData.set(key, {
+            chartData.push([key, {
               probabilities: value.List.map((x) => [x, 1.0 / length]),
-            });
+            }]);
           }
         }
         setOutput(chartData);

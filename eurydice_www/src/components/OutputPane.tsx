@@ -66,7 +66,7 @@ export default function OutputPane(props: OutputPaneProps) {
 }
 
 export interface OutputPaneProps {
-  distributions: Map<string, Distribution>;
+  distributions: [string, Distribution][];
 }
 
 enum DisplayMode {
@@ -90,12 +90,12 @@ function splitmix32(a: number) {
 }
 
 function prepareChartData(
-  chartData: Map<string, Distribution>,
+  chartData: [string, Distribution][],
   mode: DisplayMode
 ): ChartData<"line", number[], number> {
   // Compute the range of outcomes
-  const outcomes = Array.from(chartData.values()).flatMap((dist) => {
-    return dist.probabilities.map(([x, _]) => x);
+  const outcomes = Array.from(chartData).flatMap((nameAndDist) => {
+    return nameAndDist[1].probabilities.map(([x, _]) => x);
   });
   const min_outcome = Math.min(...outcomes);
   const max_outcome = Math.max(...outcomes);
@@ -105,7 +105,7 @@ function prepareChartData(
   );
   let datasets = [];
   const rng = splitmix32(2);
-  for (const nameAndDist of chartData.entries()) {
+  for (const nameAndDist of chartData) {
     const [name, dist] = nameAndDist;
     const distMap = new Map(dist.probabilities);
     let data = range.map((x) => (distMap.get(x) ?? 0) * 100);
