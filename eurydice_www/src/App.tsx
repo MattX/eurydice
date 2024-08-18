@@ -131,8 +131,6 @@ function App() {
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
               <OutputPane
                 distributions={output}
-                error={error?.message}
-                printOutputs={printOutputs}
               />
             </div>
           </div>

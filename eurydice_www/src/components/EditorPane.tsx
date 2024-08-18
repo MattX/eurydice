@@ -1,5 +1,5 @@
 import { githubLight } from "@uiw/codemirror-theme-github";
-import Spinner from "./Spinner";
+import { Information, Spinner, Warning } from "./Icons";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { linter } from "@codemirror/lint";
 import { styleTags, tags as t } from "@lezer/highlight";
@@ -11,6 +11,7 @@ import {
   LanguageSupport,
   LRLanguage,
 } from "@codemirror/language";
+import WithTooltip from "./Tooltip";
 
 export default function EditorPane(props: EditorPaneProps) {
   const runButtonClass = props.runLive
@@ -33,6 +34,47 @@ export default function EditorPane(props: EditorPaneProps) {
     ];
   });
 
+  let error = null;
+  let errorIcon = null;
+  if (props.error) {
+    error = (
+      <div
+        className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
+        role="alert"
+      >
+        {props.error.message}
+      </div>
+    );
+    errorIcon = (
+      <WithTooltip text="This code contains errors. Hover red marks in the editor to see details.">
+        <Warning />
+      </WithTooltip>
+    );
+  }
+
+  let outputs = null;
+  let outputIcon = null;
+  if (props.printOutputs.length > 0) {
+    const outputDivs = props.printOutputs.map(([value, name], index) => {
+      const prefix = name.length > 0 ? name + ": " : "";
+      return (
+        <div key={index} className="flex flex-row font-mono">
+          <div>
+            {prefix}
+            {value}
+          </div>
+        </div>
+      );
+    });
+    outputs = (
+      <div>
+        <h3 className="text-lg font-bold py-2">Print log</h3>
+        {outputDivs}
+      </div>
+    );
+    outputIcon = <WithTooltip text="Print output is available below the code editor."><Information /></WithTooltip>;
+  }
+
   return (
     <>
       <div className="flex flex-row mb-4 px-2">
@@ -53,6 +95,8 @@ export default function EditorPane(props: EditorPaneProps) {
           Run
         </button>
         {props.running && <Spinner />}
+        {outputIcon}
+        {errorIcon}
       </div>
       <CodeMirror
         value={props.editorText}
@@ -60,6 +104,7 @@ export default function EditorPane(props: EditorPaneProps) {
         extensions={[languageSupport, eurydiceLinter]}
         theme={githubLight}
       />
+      {outputs}
     </>
   );
 }

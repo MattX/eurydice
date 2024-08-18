@@ -10,40 +10,6 @@ export default function OutputPane(props: OutputPaneProps) {
   );
 
   const datasets = prepareChartData(props.distributions, displayMode);
-
-  let error = null;
-  if (props.error) {
-    error = (
-      <div
-        className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
-        role="alert"
-      >
-        {props.error}
-      </div>
-    );
-  }
-
-  let outputs = null;
-  if (props.printOutputs.length > 0) {
-    const outputDivs = props.printOutputs.map(([value, name], index) => {
-      const prefix = name.length > 0 ? name + ": " : "";
-      return (
-        <div key={index} className="flex flex-row font-mono">
-          <div>
-            {prefix}
-            {value}
-          </div>
-        </div>
-      );
-    });
-    outputs = (
-      <div>
-        <h3>Print log</h3>
-        {outputDivs}
-      </div>
-    );
-  }
-
   return (
     <>
       <div className="flex flex-row mb-4 px-2">
@@ -75,8 +41,6 @@ export default function OutputPane(props: OutputPaneProps) {
           At most
         </label>
       </div>
-      {error}
-      {outputs}
       <Line
         data={datasets}
         options={{
@@ -103,8 +67,6 @@ export default function OutputPane(props: OutputPaneProps) {
 
 export interface OutputPaneProps {
   distributions: Map<string, Distribution>;
-  error?: String;
-  printOutputs: [string, string][];
 }
 
 enum DisplayMode {
