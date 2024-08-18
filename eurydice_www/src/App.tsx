@@ -5,13 +5,13 @@ import { Distribution } from "./util";
 import OutputPane from "./components/OutputPane";
 import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
-import { ExternalWebsite } from "./components/Icons";
+import { ExternalWebsite, Octocat } from "./components/Icons";
 
 let worker = new WorkerWrapper(
   new Worker(new URL("./worker.js", import.meta.url)),
 );
 
-function App() {
+export default function App() {
   const [editorText, setEditorText] = React.useState("");
   const [output, setOutput] = React.useState<[string, Distribution][]>([]);
   const [error, setError] = React.useState<EurydiceError | null>(null);
@@ -34,7 +34,7 @@ function App() {
 
   function attachOnMessage(
     worker: WorkerWrapper,
-    printOutputs: [string, string][] = [],
+    printOutputs: [string, string][],
   ) {
     // Why take in printOutputs as an argument, instead of using the state?
     // Worker messages may be received in quick successiom, and setting React state
@@ -80,17 +80,17 @@ function App() {
       worker = new WorkerWrapper(
         new Worker(new URL("./worker.js", import.meta.url)),
       );
-      attachOnMessage(worker);
     }
     setRunning(true);
     setPrintOutputs([]);
+    attachOnMessage(worker, []);
     setError(null);
     worker.postMessage(val ?? editorText);
   }
 
   useEffect(() => {
     // Attach the onmessage listener
-    attachOnMessage(worker);
+    attachOnMessage(worker, []);
 
     // Load the saved state from local storage
     const savedRunLive = localStorage.getItem("eurydice0_run_live") !== "false";
@@ -122,6 +122,7 @@ function App() {
 
   return (
     <>
+      <Octocat />
       <div className="flex flex-col min-h-screen">
         <nav className="w-full md:w-1/2 p-4">
           <ul className="flex [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
@@ -130,7 +131,11 @@ function App() {
                 Eurydice
               </a>
             </li>
-            <li>About</li>
+            <li>
+              <a className="hover:underline" href="/about/">
+                About
+              </a>
+            </li>
             <li>
               <a
                 className="hover:underline"
@@ -176,8 +181,6 @@ function App() {
     </>
   );
 }
-
-export default App;
 
 interface EurydiceMessage {
   Ok: [string, DistributionWrapper][] | undefined;

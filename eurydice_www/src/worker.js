@@ -27,7 +27,7 @@ async function init_wasm_in_worker() {
     }
     const end = performance.now();
     self.postMessage(workerResult);
-    console.log(`Worker execution time: ${end - start}ms`);
+    // console.log(`Worker execution time: ${end - start}ms`);
   };
   // Signal to the main thread's WorkerWrapper that the onmessage handler
   // has been attached, and the worker is ready.

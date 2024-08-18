@@ -1,0 +1,57 @@
+import { Octocat, ExternalWebsite } from "./components/Icons";
+
+<Octocat />
+<nav className="w-full md:w-1/2 p-4">
+  <ul className="flex [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
+    <li className="border-none">
+      <a className="hover:underline" href="/">
+        Eurydice
+      </a>
+    </li>
+    <li>
+      <a className="hover:underline" href="#">
+        About
+      </a>
+    </li>
+    <li>
+      <a className="hover:underline" href="https://anydice.com">
+        AnyDice <ExternalWebsite />
+      </a>
+    </li>
+    <li>
+      <a className="hover:underline" href="https://anydice.com/docs">
+        AnyDice Documentation <ExternalWebsite />
+      </a>
+    </li>
+  </ul>
+</nav>
+
+<div className="max-w-2xl m-auto prose">
+This is a reimplementation of the [AnyDice](https://anydice.com) DSL, which was created by
+[Jasper Flick](https://catlikecoding.com/jasper-flick/). It runs in your browser, as you type.
+**This project is not affiliated with AnyDice.**
+
+You can run a short tutorial in the main page, or you can read the [AnyDice documentation](https://anydice.com/docs/);
+Eurydice aims for very high compatibility. You can also read the
+[Eurydice spec](https://github.com/MattX/eurydice/blob/main/spec.md), which is more technical.
+
+## Why use Eurydice?
+
+- A more modern development experience, with live results, better error reporting options, and a
+  [CodeMirror](https://codemirror.net/) editor.
+- Faster: some operations use the [IcePool](https://pypi.org/project/icepool/) algorithm,
+  resulting in a large speedup compared to AnyDice. I've observed typically faster compute times even
+  in other cases, but YMMV!
+- No compute timeout (but you provide the CPU!)
+
+## Why not use Eurydice?
+
+- You want more advanced output options.
+- You're on a low power device and would rather do server-side computation.
+- You don't like JS single page apps, or want to send requests through something other than a web browser.
+
+## Issues and contributing
+
+Please report issues, ideas, or send pull requests [on GitHub](https://github.com/MattX/eurydice)!
+
+</div>
