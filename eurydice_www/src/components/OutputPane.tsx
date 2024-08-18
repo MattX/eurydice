@@ -25,10 +25,10 @@ export default function OutputPane(props: OutputPaneProps) {
 
   let outputs = null;
   if (props.printOutputs.length > 0) {
-    const outputDivs = props.printOutputs.map(([value, name]) => {
+    const outputDivs = props.printOutputs.map(([value, name], index) => {
       const prefix = name.length > 0 ? name + ": " : "";
       return (
-        <div key={name} className="flex flex-row font-mono">
+        <div key={index} className="flex flex-row font-mono">
           <div>
             {prefix}
             {value}

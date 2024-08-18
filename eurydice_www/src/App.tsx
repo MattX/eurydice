@@ -1,73 +1,23 @@
-import CodeMirror, { EditorView, ViewUpdate } from "@uiw/react-codemirror";
 import React, { useEffect } from "react";
-import { parser } from "./grammar/eurydice";
-import {
-  foldNodeProp,
-  foldInside,
-  indentNodeProp,
-  LRLanguage,
-  LanguageSupport,
-} from "@codemirror/language";
-import { githubLight } from "@uiw/codemirror-theme-github";
-import { styleTags, tags as t } from "@lezer/highlight";
 
-// import { printTree } from "./printTree";
 import { WorkerWrapper } from "./worker-wrapper";
-import { linter } from "@codemirror/lint";
-import Spinner from "./components/Spinner";
 import { Distribution } from "./util";
 import OutputPane from "./components/OutputPane";
+import EditorPane from "./components/EditorPane";
 
 let worker = new WorkerWrapper(
   new Worker(new URL("./worker.js", import.meta.url))
 );
 
-const parserWithMetadata = parser.configure({
-  props: [
-    styleTags({
-      Reference: t.variableName,
-      Number: t.number,
-      String: t.string,
-      Comment: t.blockComment,
-      "over output print set named": t.keyword,
-      "if else loop result": t.controlKeyword,
-      function: t.definitionKeyword,
-      "( )": t.paren,
-      "{ }": t.brace,
-      "[ ]": t.squareBracket,
-      // Some of these are missing otherwise I get an error: !, /, *, !=, @
-      "# - ^ + = < <= > >= & |": t.operator,
-      d: t.operatorKeyword,
-      "ty-n ty-s": t.typeName,
-    }),
-    indentNodeProp.add({
-      Block: (context) =>
-        context.column(context.node.parent?.from ?? 0) + context.unit,
-    }),
-    foldNodeProp.add({
-      Block: foldInside,
-    }),
-  ],
-});
-
-const language = LRLanguage.define({
-  parser: parserWithMetadata,
-  languageData: {
-    commentTokens: { block: { open: "\\", close: "\\" } },
-  },
-});
-
-const languageSupport = new LanguageSupport(language);
-
 function App() {
   const [editorText, setEditorText] = React.useState("");
-  const [output, setOutput] = React.useState(
-    new Map<string, Distribution>()
-  );
-  const [error, setError] = React.useState<EurydiceError|null>(null);
+  const [output, setOutput] = React.useState(new Map<string, Distribution>());
+  const [error, setError] = React.useState<EurydiceError | null>(null);
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
-  const [printOutputs, setPrintOutputs] = React.useState<[string, string][]>([]);
+  const [printOutputs, setPrintOutputs] = React.useState<[string, string][]>(
+    []
+  );
 
   function setRunLive(val: boolean) {
     setRunLiveInner(val);
@@ -107,6 +57,10 @@ function App() {
     });
   }
 
+  // This is necessary so that the call to setPrintOutputs in the onmessage handler
+  // contains the correct previous outputs.
+  useEffect(() => { attachOnMessage(worker); }, [printOutputs]);
+
   function run(val?: string) {
     if (running) {
       worker.terminate();
@@ -137,34 +91,13 @@ function App() {
     }
   }, []);
 
-  const onChange = React.useCallback(
-    (val: string, _viewUpdate: ViewUpdate) => {
-      setEditorText(val);
-      localStorage.setItem("eurydice0_editor_program", val);
-      if (runLive) {
-        run(val);
-      }
-    },
-    [runLive, running]
-  );
-
-  const eurydiceLinter = linter((_view: EditorView) => {
-    if (error === null) {
-      return [];
+  function onChange(val: string) {
+    setEditorText(val);
+    localStorage.setItem("eurydice0_editor_program", val);
+    if (runLive) {
+      run(val);
     }
-    return [{
-      // Clamp values here - a slightly delayed worker response can cause
-      // a crash if the error is now out of bounds.
-      from: Math.min(error.from, editorText.length),
-      to: Math.min(error.from, editorText.length),
-      message: error.message,
-      severity: "error",
-    }];
-  });
-
-  const runButtonClass = runLive
-    ? "border-gray-400 text-gray-400"
-    : "border-blue-500 hover:border-blue-700";
+  }
 
   return (
     <>
@@ -184,36 +117,23 @@ function App() {
         <div className="flex flex-grow md:min-h-[400px]">
           <div className="flex flex-col md:flex-row w-full h-full items-stretch">
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
-              <div className="flex flex-row mb-4 px-2">
-                <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
-                  <input
-                    type="checkbox"
-                    name="runLiveCheckbox"
-                    checked={runLive}
-                    onChange={(e) => setRunLive(e.target.checked)}
-                  />{" "}
-                  Run live
-                </label>
-                <button
-                  disabled={runLive}
-                  onClick={() => !runLive && run()}
-                  className={`border-2 ${runButtonClass} py-1 px-2 mx-1 rounded`}
-                >
-                  Run
-                </button>
-                {running && <Spinner />}
-              </div>
-              <CodeMirror
-                value={editorText}
+              <EditorPane
+                editorText={editorText}
                 onChange={onChange}
-                extensions={[languageSupport, eurydiceLinter]}
-                theme={githubLight}
-                height="100%"
-                minHeight="100%"
+                runLive={runLive}
+                setRunLive={setRunLive}
+                running={running}
+                run={() => run()}
+                error={error}
+                printOutputs={printOutputs}
               />
             </div>
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
-              <OutputPane distributions={output} error={error?.message} printOutputs={printOutputs} />
+              <OutputPane
+                distributions={output}
+                error={error?.message}
+                printOutputs={printOutputs}
+              />
             </div>
           </div>
         </div>
