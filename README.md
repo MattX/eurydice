@@ -1,8 +1,12 @@
-# Everydice
+# Eurydice
 
 This is an implementation of the [AnyDice](https://anydice.com/) DSL, which was created by [Jasper Flick](https://ko-fi.com/catlikecoding). **This project is not affiliated with AnyDice or Jasper Flick.**
 
 It can run as a command-line utility, or as a web-based tool, with evaluation occurring in real time in the browser.
+
+Eurydice should be somewhat faster than AnyDice, but unlike AnyDice, it runs client side, so performance may vary. Eurydice implements the [Icepool](https://pypi.org/project/icepool/) algorithm developed by Albert Liu. [^1]
+
+[^1]: Liu, A. J. (2022). Icepool: Efficient Computation of Dice Pool Probabilities. *Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital Entertainment, 18*(1), 258-265. <https://doi.org/10.1609/aiide.v18i1.21971>
 
 ## Running
 
