@@ -13,11 +13,12 @@
     bool @left
 }
 
-@skip { space | Comment }
+@skip { space | Comment | LineComment }
 
 @tokens {
     space { @whitespace+ }
     Comment { "\\" ![\\]* "\\" }
+    LineComment { "\\\\\\"  ![\n]* ("\n" | @eof) }
     VariableIdentifier { $[A-Z_]+ }
     Word { $[a-z]$[a-z_]* }
     Number { $[0-9]+ }

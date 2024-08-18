@@ -1,8 +1,49 @@
 # Everydice documentation
 
-This is an implementation of the AnyDice DSL.
+This is an implementation of the [AnyDice](https://anydice.com/) DSL, created by [Jasper Flick](https://ko-fi.com/catlikecoding). **This project is not affiliated with AnyDice or Jasper Flick.**
 
-## Getting stuff to run
+It can run as a command-line utility, or as a web-based tool, with evaluation occurring in real time in the browser.
+
+## Running
+
+See the web UI at xxx.
+
+You can also run a simple CLI locally. [Install cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) if necessary, then:
+
+```sh
+git clone https://github.com/MattX/eurydice.git
+cd eurydice/eurydice_cli
+cargo run --release
+```
+
+Try:
+
+```
+> output 2d3 + d4
+output 1:
+   3    2.778% |━━━━━━━━
+   4    8.333% |━━━━━━━━━━━━━━━━━━━━━━━━
+   5   16.667% |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   6   22.222% |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   7   22.222% |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   8   16.667% |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   9    8.333% |━━━━━━━━━━━━━━━━━━━━━━━━
+  10    2.778% |━━━━━━━━
+```
+
+## Documentation
+
+See the [language specification](/spec.md), or the [AnyDice docs](https://anydice.com/docs/).
+
+## Contributing
+
+Contributions are more than welcome! Either in the UI or the core language. Some ideas:
+
+* New output options
+* Many performance optimizations could be made
+* More test coverage is always welcome
+
+### Getting stuff to run
 
 The packages in this directory are:
 
@@ -21,41 +62,3 @@ There are two important symlinks in `eurydice_www/src`:
 These allow the compiled wasm to be run in a web worker for Eurydice's web frontend.
 
 See also notes in <https://rustwasm.github.io/wasm-bindgen/examples/wasm-in-web-worker.html>.
-
-## General TODO
-
-1. There are still a bunch of panic cases, most notably integer overflows, both during parsing and during arithmetic op execution. There may also be ones related to empty `Pool`s.
-2. Some of the code in `eurydice_engine/src/dice.rs` and `eurydice_engine/src/eval.rs` can probably be simplified now that we have a working implementation.
-3. LALRPOP error recovery.
-4. Like, the entire web UI.
-
-## Eurydice documentation (todo)
-
-### Types
-
-* Ints are 32-bit signed integers.
-* Sequences are ordered and can have repeated values.
-* Dice are distributions over sequences (possibly of length 1), and possibly weighted.
-
-### Literals
-
-* `123`: generates the number `123`
-* `{a, b..c, d:count}`: sequence literals can contain two types of subexpressions:
-  * subexpressions of type `int` are inserted into the sequence, with repetition
-  * range subexpressions must evaluate to an `int` on either side, and are equivalent to listing every number
-    in the range, both ends included.
-  * subexpressions of type `list` will be flattened into the outer list.
-  * distribution subexpressions will be summed, and a list of their possible outcomes will be flattened into the
-    outer list.
-  * the optional `:count` modifier will cause the item to be repeated `count` times before being inserted.
-* `(expr1)d(expr2)`:
-  * `d(expr2)` creates a base distribution 𝒟
-    * if `expr2` is an int, this expression creates a uniform distribution over `1..expr2`.
-    * if `expr2` is a list, it creates a uniform distribution over the list values.
-    * if `expr2` is a distribution, `d(expr2)` is equivalent to `expr2`.
-  * if `expr1` is present, 𝒟 is modified as follow:
-    * if `expr1` is a list, it is summed and treated as an int.
-    * if `expr1` is an int, a distrbution 𝒟×𝒟×...×𝒟 (`expr1` times) is created. If i is negative, the distribution is negated.
-    * if `expr1` is a distribution, it is summed to a distribution over ints,
-      then each int `i` is mapped to 𝒟×𝒟×...×𝒟 (`i` times). This will result in a distribution with uneven
-      outcome sizes.

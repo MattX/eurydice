@@ -130,7 +130,7 @@ const parserWithMetadata = parser.configure({
       Number: t.number,
       String: t.string,
       Comment: t.blockComment,
-      "over output print set named": t.keyword,
+      "over output print set to named": t.keyword,
       "if else loop result": t.controlKeyword,
       function: t.definitionKeyword,
       "( )": t.paren,
@@ -154,7 +154,7 @@ const parserWithMetadata = parser.configure({
 const language = LRLanguage.define({
   parser: parserWithMetadata,
   languageData: {
-    commentTokens: { block: { open: "\\", close: "\\" } },
+    commentTokens: { block: { open: "\\", close: "\\" }, line: "\\\\\\" },
   },
 });
 
