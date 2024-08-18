@@ -121,6 +121,7 @@ const parserWithMetadata = parser.configure({
       Number: t.number,
       String: t.string,
       Comment: t.blockComment,
+      LineComment: t.lineComment,
       "over output print set to named": t.keyword,
       "if else loop result": t.controlKeyword,
       function: t.definitionKeyword,

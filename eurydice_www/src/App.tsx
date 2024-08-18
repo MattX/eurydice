@@ -4,6 +4,7 @@ import { WorkerWrapper } from "./worker-wrapper";
 import { Distribution } from "./util";
 import OutputPane from "./components/OutputPane";
 import EditorPane from "./components/EditorPane";
+import Tutorial from "./components/Tutorial";
 
 let worker = new WorkerWrapper(
   new Worker(new URL("./worker.js", import.meta.url))
@@ -18,6 +19,7 @@ function App() {
   const [printOutputs, setPrintOutputs] = React.useState<[string, string][]>(
     []
   );
+  const [showTutorial, setShowTutorial] = React.useState(false);
 
   function setRunLive(val: boolean) {
     setRunLiveInner(val);
@@ -29,7 +31,7 @@ function App() {
     }
   }
 
-  function attachOnMessage(worker: WorkerWrapper) {
+  function attachOnMessage(worker: WorkerWrapper, printOutputs: [string, string][] = []) {
     worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
       if (event.data.Err !== undefined) {
         setRunning(false);
@@ -45,21 +47,22 @@ function App() {
             chartData.push([key, { probabilities: [[value.Int, 1]] }]);
           } else if (value.List !== undefined) {
             const length = value.List.length;
-            chartData.push([key, {
-              probabilities: value.List.map((x) => [x, 1.0 / length]),
-            }]);
+            chartData.push([
+              key,
+              {
+                probabilities: value.List.map((x) => [x, 1.0 / length]),
+              },
+            ]);
           }
         }
         setOutput(chartData);
       } else if (event.data.Print !== undefined) {
-        setPrintOutputs([...printOutputs, event.data.Print]);
+        const newPrintOutputs = [...printOutputs, event.data.Print];
+        setPrintOutputs(newPrintOutputs);
+        attachOnMessage(worker, newPrintOutputs);
       }
     });
   }
-
-  // This is necessary so that the call to setPrintOutputs in the onmessage handler
-  // contains the correct previous outputs.
-  useEffect(() => { attachOnMessage(worker); }, [printOutputs]);
 
   function run(val?: string) {
     if (running) {
@@ -71,6 +74,7 @@ function App() {
     }
     setRunning(true);
     setPrintOutputs([]);
+    setError(null);
     worker.postMessage(val ?? editorText);
   }
 
@@ -99,6 +103,13 @@ function App() {
     }
   }
 
+  const tutorial = showTutorial ? (
+    <Tutorial
+      setEditorText={onChange}
+      closeTutorial={() => setShowTutorial(false)}
+    />
+  ) : null;
+
   return (
     <>
       <div className="flex flex-col min-h-screen">
@@ -108,7 +119,11 @@ function App() {
               <a href="#">Eurydice</a>
             </li>
             <li>About</li>
-            <li>Help</li>
+            <li>
+              <a href="#" onClick={() => setShowTutorial(true)}>
+                Tutorial
+              </a>
+            </li>
             <li>
               <a href="https://anydice.com">AnyDice</a>
             </li>
@@ -117,6 +132,7 @@ function App() {
         <div className="flex flex-grow md:min-h-[400px]">
           <div className="flex flex-col md:flex-row w-full h-full items-stretch">
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
+              {tutorial}
               <EditorPane
                 editorText={editorText}
                 onChange={onChange}
@@ -129,9 +145,7 @@ function App() {
               />
             </div>
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
-              <OutputPane
-                distributions={output}
-              />
+              <OutputPane distributions={output} />
             </div>
           </div>
         </div>
