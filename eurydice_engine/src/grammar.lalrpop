@@ -28,7 +28,7 @@ StatementInner: Statement = {
     <id_start: @L> <id:VariableIdentifier> <id_end: @L> ":" <e:Expr> => 
         Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
     <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
-    "output" <e:Expr> <n:OutputName?> => Statement::Output { value: e, named: n },
+    "output" <e:Expr> <n:OutputName?> => Statement::Output { expr: e, named: n },
     "print" <e:Expr> <n:OutputName?> => Statement::Print { expr: e, named: n },
     "result" ":" <e:Expr> => Statement::Return { value: e },
     <s:SetStatement> => s,

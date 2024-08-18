@@ -211,6 +211,7 @@ pub struct Evaluator {
     explode_depth: usize,
     recursion_depth: usize,
     lowest_first: bool,
+    print_callback: Option<Box<dyn Fn(RuntimeValue, String)>>,
 }
 
 impl Default for Evaluator {
@@ -274,7 +275,12 @@ impl Evaluator {
             explode_depth: 2,
             recursion_depth: 10,
             lowest_first: false,
+            print_callback: None,
         }
+    }
+
+    pub fn set_print_callback(&mut self, callback: Box<dyn Fn(RuntimeValue, String)>) {
+        self.print_callback = Some(callback);
     }
 
     pub fn execute(&mut self, statement: &WithRange<Statement>) -> Result<(), RuntimeError> {
@@ -311,27 +317,28 @@ impl Evaluator {
                     Function::UserDefined(Rc::new(fd.clone())),
                 );
             }
-            Statement::Output { value, named } => {
+            Statement::Output { expr, named } => {
                 if eval_context.recursion_depth != 0 {
                     return Err(RuntimeError::OutputNotAtTopLevel {
                         range: statement.range.into(),
                     });
                 }
-                let value = self.evaluate(eval_context, value)?;
-                if let Some(name) = named {
-                    self.outputs.push((
-                        value.clone(),
-                        interpolate_variable_names(name, &eval_context.env)?,
-                    ));
-                } else {
-                    self.outputs
-                        .push((value, format!("output {}", self.outputs.len() + 1)));
-                }
-            }
-            // TODO handle named prints
-            Statement::Print { expr, .. } => {
                 let value = self.evaluate(eval_context, expr)?;
-                println!("{}", value);
+                let name = match named {
+                    Some(name) => interpolate_variable_names(name, &eval_context.env)?,
+                    None => format!("output {}", self.outputs.len() + 1),
+                };
+                self.outputs.push((value, name));
+            }
+            Statement::Print { expr, named } => {
+                let value = self.evaluate(eval_context, expr)?;
+                let name = match named {
+                    Some(name) => interpolate_variable_names(name, &eval_context.env)?,
+                    None => "".to_string(),
+                };
+                if let Some(ref callback) = self.print_callback {
+                    callback(value, name);
+                }
             }
             Statement::Return { value } => {
                 if self.recursion_depth == 0 {

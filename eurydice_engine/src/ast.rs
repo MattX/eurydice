@@ -51,7 +51,7 @@ pub enum Statement {
     },
     FunctionDefinition(FunctionDefinition),
     Output {
-        value: WithRange<Expression>,
+        expr: WithRange<Expression>,
         named: Option<WithRange<String>>,
     },
     Return {

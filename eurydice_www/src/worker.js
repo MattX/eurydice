@@ -18,7 +18,9 @@ async function init_wasm_in_worker() {
         const start = performance.now();
         var workerResult;
         try {
-            workerResult = run(event.data);
+            workerResult = run(event.data, (value, name) => {
+                self.postMessage({ Print: [value, name] });
+            });
         } catch (e) {
             console.error(e);
             workerResult = { Err: { message: "Internal error", from: 0, to: 0} };

@@ -64,9 +64,10 @@ function App() {
   const [output, setOutput] = React.useState(
     new Map<string, Distribution>()
   );
-  const [errors, setErrors] = React.useState<EurydiceError[]>([]);
+  const [error, setError] = React.useState<EurydiceError|null>(null);
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
+  const [printOutputs, setPrintOutputs] = React.useState<[string, string][]>([]);
 
   function setRunLive(val: boolean) {
     setRunLiveInner(val);
@@ -80,11 +81,12 @@ function App() {
 
   function attachOnMessage(worker: WorkerWrapper) {
     worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
-      setRunning(false);
-      if (event.data.Err) {
-        setErrors([event.data.Err]);
-      } else {
-        setErrors([]);
+      if (event.data.Err !== undefined) {
+        setRunning(false);
+        setError(event.data.Err);
+      } else if (event.data.Ok !== undefined) {
+        setRunning(false);
+        setError(null);
         const chartData = new Map<string, Distribution>();
         for (const [key, value] of event.data.Ok!) {
           if (value.Distribution !== undefined) {
@@ -99,6 +101,8 @@ function App() {
           }
         }
         setOutput(chartData);
+      } else if (event.data.Print !== undefined) {
+        setPrintOutputs([...printOutputs, event.data.Print]);
       }
     });
   }
@@ -112,6 +116,7 @@ function App() {
       attachOnMessage(worker);
     }
     setRunning(true);
+    setPrintOutputs([]);
     worker.postMessage(val ?? editorText);
   }
 
@@ -144,14 +149,17 @@ function App() {
   );
 
   const eurydiceLinter = linter((_view: EditorView) => {
-    return errors.map((e) => ({
+    if (error === null) {
+      return [];
+    }
+    return [{
       // Clamp values here - a slightly delayed worker response can cause
       // a crash if the error is now out of bounds.
-      from: Math.min(e.from, editorText.length),
-      to: Math.min(e.from, editorText.length),
-      message: e.message,
+      from: Math.min(error.from, editorText.length),
+      to: Math.min(error.from, editorText.length),
+      message: error.message,
       severity: "error",
-    }));
+    }];
   });
 
   const runButtonClass = runLive
@@ -205,7 +213,7 @@ function App() {
               />
             </div>
             <div className="w-full md:w-1/2 p-4 border-gray-300 border">
-              <OutputPane distributions={output} />
+              <OutputPane distributions={output} error={error?.message} printOutputs={printOutputs} />
             </div>
           </div>
         </div>
@@ -219,6 +227,7 @@ export default App;
 interface EurydiceMessage {
   Ok: [string, DistributionWrapper][] | undefined;
   Err: EurydiceError | undefined;
+  Print: [string, string] | undefined;
 }
 
 interface EurydiceError {
