@@ -27,24 +27,15 @@ export default function EditorPane(props: EditorPaneProps) {
         // Clamp values here - a slightly delayed worker response can cause
         // a crash if the error is now out of bounds.
         from: Math.min(props.error.from, props.editorText.length),
-        to: Math.min(props.error.from, props.editorText.length),
+        to: Math.min(props.error.to, props.editorText.length),
         message: props.error.message,
         severity: "error",
       },
     ];
   });
 
-  let error = null;
   let errorIcon = null;
   if (props.error) {
-    error = (
-      <div
-        className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
-        role="alert"
-      >
-        {props.error.message}
-      </div>
-    );
     errorIcon = (
       <WithTooltip text="This code contains errors. Hover red marks in the editor to see details.">
         <Warning />
