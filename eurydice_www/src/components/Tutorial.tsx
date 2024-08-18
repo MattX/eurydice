@@ -100,7 +100,12 @@ output {1, 3, 5}@5d10 \\\\\\ Sums the lowest, middle, and highest of 5 d10s.`,
 }`,
   },
   {
-    text: <span>You can implement abritrary transformations of dice pools with functions.</span>,
+    text: (
+      <span>
+        You can implement abritrary transformations of dice pools with
+        functions.
+      </span>
+    ),
     editorText: `\\\\\\ This function returns the highest die in ATTACK that
 \\\\\\ does not have an equivalent die in DEFENSE.
 function: cancel ATTACK:s with DEFENSE:s {
@@ -115,5 +120,5 @@ function: cancel ATTACK:s with DEFENSE:s {
 
 output [cancel 4d6 with 2d6]
 output [highest 1 of 4d6]`,
-  }
+  },
 ];

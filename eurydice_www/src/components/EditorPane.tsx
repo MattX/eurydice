@@ -63,7 +63,11 @@ export default function EditorPane(props: EditorPaneProps) {
         {outputDivs}
       </div>
     );
-    outputIcon = <WithTooltip text="Print output is available below the code editor."><Information /></WithTooltip>;
+    outputIcon = (
+      <WithTooltip text="Print output is available below the code editor.">
+        <Information />
+      </WithTooltip>
+    );
   }
 
   return (

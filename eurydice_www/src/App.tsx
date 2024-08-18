@@ -7,7 +7,7 @@ import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
 
 let worker = new WorkerWrapper(
-  new Worker(new URL("./worker.js", import.meta.url))
+  new Worker(new URL("./worker.js", import.meta.url)),
 );
 
 function App() {
@@ -17,7 +17,7 @@ function App() {
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
   const [printOutputs, setPrintOutputs] = React.useState<[string, string][]>(
-    []
+    [],
   );
   const [showTutorial, setShowTutorial] = React.useState(false);
 
@@ -31,7 +31,10 @@ function App() {
     }
   }
 
-  function attachOnMessage(worker: WorkerWrapper, printOutputs: [string, string][] = []) {
+  function attachOnMessage(
+    worker: WorkerWrapper,
+    printOutputs: [string, string][] = [],
+  ) {
     worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
       if (event.data.Err !== undefined) {
         setRunning(false);
@@ -68,7 +71,7 @@ function App() {
     if (running) {
       worker.terminate();
       worker = new WorkerWrapper(
-        new Worker(new URL("./worker.js", import.meta.url))
+        new Worker(new URL("./worker.js", import.meta.url)),
       );
       attachOnMessage(worker);
     }

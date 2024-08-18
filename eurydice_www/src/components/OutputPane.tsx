@@ -6,7 +6,7 @@ Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
   const [displayMode, setDisplayMode] = React.useState(
-    DisplayMode.Distribution
+    DisplayMode.Distribution,
   );
 
   const datasets = prepareChartData(props.distributions, displayMode);
@@ -91,7 +91,7 @@ function splitmix32(a: number) {
 
 function prepareChartData(
   chartData: [string, Distribution][],
-  mode: DisplayMode
+  mode: DisplayMode,
 ): ChartData<"line", number[], number> {
   // Compute the range of outcomes
   const outcomes = Array.from(chartData).flatMap((nameAndDist) => {
@@ -101,7 +101,7 @@ function prepareChartData(
   const max_outcome = Math.max(...outcomes);
   const range = Array.from(
     { length: max_outcome - min_outcome + 1 },
-    (_, i) => i + min_outcome
+    (_, i) => i + min_outcome,
   );
   let datasets = [];
   const rng = splitmix32(2);
@@ -122,7 +122,7 @@ function prepareChartData(
     }
 
     const color = `rgba(${Math.floor(rng() * 256)}, ${Math.floor(
-      rng() * 256
+      rng() * 256,
     )}, ${Math.floor(rng() * 256)}, 1.0)`;
     datasets.push({ label: name, data, borderColor: color });
   }
