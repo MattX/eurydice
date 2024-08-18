@@ -1275,4 +1275,12 @@ mod tests {
         assert!(iter.next().is_none());
         assert!(iter.next().is_none());
     }
+
+    #[test]
+    fn test_display_pool() {
+        let pool = Pool::from_list(2, vec![1, 2, 3]);
+        assert_eq!(format!("{}", pool), "2d3");
+        let pool = Pool::from_list(2, vec![-1, -2, -3]);
+        assert_eq!(format!("{}", pool), "2d{-3, -2, -1}");
+    }
 }

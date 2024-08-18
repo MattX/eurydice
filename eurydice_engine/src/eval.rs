@@ -917,7 +917,15 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
         None => DLeftSide::Int(1),
     };
     let right = match right {
-        RuntimeValue::Int(sides) => DRightSide::List((1..=*sides).collect()),
+        RuntimeValue::Int(sides) => {
+            if *sides > 0 {
+                DRightSide::List((1..=*sides).collect())
+            } else if *sides == 0 {
+                DRightSide::List(vec![0])
+            } else {
+                DRightSide::List((*sides..=-1).collect())
+            }
+        }
         RuntimeValue::List(list) => DRightSide::List(Rc::clone(list).to_vec()),
         RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
     };

@@ -49,7 +49,7 @@ export default function EditorPane(props: EditorPaneProps) {
     const outputDivs = props.printOutputs.map(([value, name], index) => {
       const prefix = name.length > 0 ? name + ": " : "";
       return (
-        <div key={index} className="flex flex-row font-mono">
+        <div key={index} className="flex flex-row font-mono text-sm">
           <div>
             {prefix}
             {value}
@@ -59,7 +59,7 @@ export default function EditorPane(props: EditorPaneProps) {
     });
     outputs = (
       <div>
-        <h3 className="text-lg font-bold py-2">Print log</h3>
+        <h3 className="font-bold py-2">Print log</h3>
         {outputDivs}
       </div>
     );

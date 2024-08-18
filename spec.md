@@ -2,7 +2,7 @@
 
 This specification aims to provide a description of how Everydice should behave. There may be divergences between Everydice and this description - those are bugs, please report them!
 
-If you're looking for an introduction to the AnyDice DSL, this document may be too technical. Consider looking at [AnyDice docs](https://anydice.com/docs/) for a smoother introduction.
+This document is intended mostly as a specification for other AnyDice implementers, or for power users. If you're looking for an introduction to the AnyDice DSL, this document is likely too technical. Consider looking at [AnyDice docs](https://anydice.com/docs/) for a smoother introduction.
 
 **This project is not affiliated with AnyDice or Jasper Flick.**
 
@@ -313,6 +313,7 @@ There are 4 unary operators, which all bind tighter than any binary operator. Th
 * If the argument is a `pool`, the pool is summed, then the [outcomes of the pool are all mapped](#Outcome-mapping) with the operator.
 
 `#` evaluates to the length of its argument:
+
 * If the argument is an `int`, it returns the number of digits.
 * If the argument is a `list`, it returns the number of elements.
 * If the argument is a `pool`, it returns the pool's dimension (count of dice in the pool).
@@ -337,11 +338,13 @@ All operators are left-associative.
 
 The `d` operator is the main way to create a pool.
 
-1. The RHS argument is converted to a pool. If it is an int, it is converted to a pool with a single outcome. If it is a list, it is converted to a pool whose outcomes are the distinct values in the list, and whose probability for each outcome is proportional to the number of occurrences of each value in the list.
-2. The LHS argument is summed if it is a list, resulting in either an int or a pool.
-    a. If it is an int `i`, the count of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
-    b. If it is a pool, then the RHS is [flat mapped](#Flat-mapping) with the operation described in (a).
-
+1. The RHS operand is converted to a pool.
+    1. If it is an `int` `i`, it is converted to a pool with values 1 to `abs(i)` inclusive (if `i` is 0, the pool contains the single outcome 0). If `i` is negative, the pool outcomes then are mapped to their opposite.
+    2. If it is a `list`, it is converted to a pool whose outcomes are the distinct values in the list, and whose probability for each outcome is proportional to the number of occurrences of each value in the list.
+    3. Pools provided as an RHS operand are not transformed.
+2. The LHS operand is summed if it is a `list`, resulting in either an `int` or a `pool`.
+    1. If it is an `int` `i`, the count of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
+    2. If it is a `pool`, then the RHS is [flat mapped](#Flat-mapping) with the operation described in (a).
 
 #### `@` operator
 
@@ -350,13 +353,13 @@ The `@` operator selects the (LHS)-th element from its RHS.
 First, if the LHS argument is an int, it is converted to a singleton list. It is an error if the LHS argument is a pool.
 
 * If the RHS is an `int` or `list`, for each value `i` in the resulting list:
-    * If the RHS is an `int` `j`, the base-10 digit of `abs(j)` at index `i` is selected. If `j` is negative, this digit is multiplied by -1. If the `"position order"` [global setting](#Global-settings) is set to `"highest first"`, index 1 corresponds to the most significant digit; otherwise, to the least significant. Valid indices start at 1.
-    * If the RHS is a `list`, its element at position `i` is selected. The first element of the list has index 1. This is not affected by the `"position order"` setting.
-    * In both of these cases, if `i` is invalid (negative or greater than list length), the expression evaluates to 0.
-    * Finally, all selected elements are summed to produce an `int`.
+  * If the RHS is an `int` `j`, the base-10 digit of `abs(j)` at index `i` is selected. If `j` is negative, this digit is multiplied by -1. If the `"position order"` [global setting](#Global-settings) is set to `"highest first"`, index 1 corresponds to the most significant digit; otherwise, to the least significant. Valid indices start at 1.
+  * If the RHS is a `list`, its element at position `i` is selected. The first element of the list has index 1. This is not affected by the `"position order"` setting.
+  * In both of these cases, if `i` is invalid (negative or greater than list length), the expression evaluates to 0.
+  * Finally, all selected elements are summed to produce an `int`.
 * If the RHS argument is a `pool`, then, each outcome multiset is flat mapped with the following function:
-    * The multiset is sorted according to the `"position order"` [global setting](#Global-settings).
-    * Elements are selected from the multiset and summed as if using the `@` operator from a list.
+  * The multiset is sorted according to the `"position order"` [global setting](#Global-settings).
+  * Elements are selected from the multiset and summed as if using the `@` operator from a list.
 
 #### Mathematical operators
 
@@ -399,14 +402,14 @@ From then, function calls proceed in several steps.
 
 The actual types of the argument expressions are compared to the expected argument types, and each is transformed in the following way:
 
- * If the expected argument type is unspecified, or if the expected type matches the actual type, the value is not transformed.
- * If the actual argument is a `list`:
-     * If an `int` is requested, the `list` is summed to an `int`.
-     * If a `pool` is requested, a `pool` is created, with equally likely outcomes from the `list`.
- * If the actual argument type is an `int`:
-     * If a `list` is requested, a singleton list is created.
-     * if a `pool` is requested, a single-outcome `pool` is created.
- * If the actual argument type is a `pool`, and an `int` is requested, the pool is summed, creating a new `pool`.
+* If the expected argument type is unspecified, or if the expected type matches the actual type, the value is not transformed.
+* If the actual argument is a `list`:
+  * If an `int` is requested, the `list` is summed to an `int`.
+  * If a `pool` is requested, a `pool` is created, with equally likely outcomes from the `list`.
+* If the actual argument type is an `int`:
+  * If a `list` is requested, a singleton list is created.
+  * if a `pool` is requested, a single-outcome `pool` is created.
+* If the actual argument type is a `pool`, and an `int` is requested, the pool is summed, creating a new `pool`.
 
 After this process, some values of type `pool` may still correspond to `int` or `list` type arguments. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#Function-evaluation).
 
@@ -491,7 +494,6 @@ SetStatement = 'set' '"maximum function depth"' 'to' Int.
 
 > [!IMPORTANT]
 > Eurydice does not allow arbitrary expressions in set statements. Arguments must be int literals.
-
 
 ### Assignment
 
