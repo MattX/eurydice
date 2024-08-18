@@ -8,11 +8,54 @@ export default function OutputPane(props: OutputPaneProps) {
   const [displayMode, setDisplayMode] = React.useState(
     DisplayMode.Distribution,
   );
+  const [tableMode, setTableMode] = React.useState(false);
 
-  const datasets = prepareChartData(props.distributions, displayMode);
+  let display;
+  if (tableMode) {
+    display = props.distributions.map(([name, dist], index) => (
+      <ProbabilityTable
+        key={index}
+        name={name}
+        distribution={dist}
+        mode={displayMode}
+      />
+    ));
+  } else {
+    const datasets = prepareChartData(props.distributions, displayMode);
+    display = (
+      <Line
+        data={datasets}
+        options={{
+          interaction: {
+            intersect: false,
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                callback: (value) => `${value}%`,
+              },
+            },
+          },
+          animation: false,
+        }}
+        width="100%"
+        height="100%"
+      />
+    );
+  }
+
   return (
     <>
       <div className="flex flex-row mb-4 px-2">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+          <input
+            type="checkbox"
+            checked={tableMode}
+            onChange={() => setTableMode(!tableMode)}
+          />{" "}
+          Table
+        </label>
         <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
           <input
             type="radio"
@@ -41,32 +84,95 @@ export default function OutputPane(props: OutputPaneProps) {
           At most
         </label>
       </div>
-      <Line
-        data={datasets}
-        options={{
-          interaction: {
-            // mode: "index",
-            intersect: false,
-          },
-          scales: {
-            y: {
-              beginAtZero: true,
-              ticks: {
-                callback: (value) => `${value}%`,
-              },
-            },
-          },
-          animation: false,
-        }}
-        width="100%"
-        height="100%"
-      />
+      {display}
     </>
   );
 }
 
 export interface OutputPaneProps {
   distributions: [string, Distribution][];
+}
+
+interface ProbabilityTableProps {
+  name: string;
+  distribution: Distribution;
+  mode: DisplayMode;
+}
+
+function ProbabilityTable({ name, distribution, mode }: ProbabilityTableProps) {
+  const data = distribution.probabilities;
+  const outcomes = data.map(([outcome]) => outcome);
+  const probabilities = data.map(([, probability]) => probability);
+
+  const mean = outcomes.reduce(
+    (sum, val, i) => sum + val * probabilities[i],
+    0,
+  );
+  const variance = outcomes.reduce(
+    (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
+    0,
+  );
+  const stdDev = Math.sqrt(variance);
+  const min = Math.min(...outcomes);
+  const max = Math.max(...outcomes);
+
+  let probs = data.map(([_outcome, probability]) => probability * 100);
+  switch (mode) {
+    case DisplayMode.AtMost: {
+      probs = partialSums(probs, false);
+      break;
+    }
+    case DisplayMode.AtLeast: {
+      probs = partialSums(probs, true);
+      break;
+    }
+  }
+  const outData = [];
+  for (let i = outData.length; i < outcomes.length; i++) {
+    outData[i] = [data[i][0], probs[i]];
+  }
+
+  const baseClassName = "border border-gray-300 px-1";
+
+  return (
+    <div className="inline-block m-2 align-top">
+      <table className="border-collapse border border-gray-300">
+        <thead>
+          <tr>
+            <th colSpan={2} className="bg-blue-500 text-white p-2 text-center">
+              {name}
+            </th>
+          </tr>
+        </thead>
+        <tbody className="text-sm">
+          <tr>
+            <td className={`${baseClassName} font-semibold`}>Mean</td>
+            <td className={baseClassName}>{mean.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td className={`${baseClassName} font-semibold`}>StdDev</td>
+            <td className={baseClassName}>{stdDev.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td className={`${baseClassName} font-semibold`}>Min</td>
+            <td className={baseClassName}>{min}</td>
+          </tr>
+          <tr>
+            <td className={`${baseClassName} font-semibold`}>Max</td>
+            <td className={baseClassName}>{max}</td>
+          </tr>
+          {outData.map(([outcome, probability], index) => (
+            <tr key={index}>
+              <td className={baseClassName}>{outcome}</td>
+              <td className={`${baseClassName} text-right`}>
+                {probability.toFixed(2)}%
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 enum DisplayMode {

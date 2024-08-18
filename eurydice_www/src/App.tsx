@@ -36,6 +36,12 @@ function App() {
     worker: WorkerWrapper,
     printOutputs: [string, string][] = [],
   ) {
+    // Why take in printOutputs as an argument, instead of using the state?
+    // Worker messages may be received in quick successiom, and setting React state
+    // is asynchronous. This means that the state may not be updated when the next
+    // message comes, leading to random messages being dropped.
+    // This also means we need to reattach the onmessage listener every time the
+    // printOutputs state is updated.
     worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
       if (event.data.Err !== undefined) {
         setRunning(false);
@@ -120,19 +126,29 @@ function App() {
         <nav className="w-full md:w-1/2 p-4">
           <ul className="flex [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
             <li className="border-none">
-              <a className="hover:underline" href="#">Eurydice</a>
+              <a className="hover:underline" href="#">
+                Eurydice
+              </a>
             </li>
             <li>About</li>
             <li>
-              <a className="hover:underline" href="#" onClick={() => setShowTutorial(true)}>
+              <a
+                className="hover:underline"
+                href="#"
+                onClick={() => setShowTutorial(true)}
+              >
                 Tutorial
               </a>
             </li>
             <li>
-              <a className="hover:underline" href="https://anydice.com">AnyDice <ExternalWebsite /></a>
+              <a className="hover:underline" href="https://anydice.com">
+                AnyDice <ExternalWebsite />
+              </a>
             </li>
             <li>
-              <a className="hover:underline" href="https://anydice.com/docs">AnyDice Documentation <ExternalWebsite /></a>
+              <a className="hover:underline" href="https://anydice.com/docs">
+                AnyDice Documentation <ExternalWebsite />
+              </a>
             </li>
           </ul>
         </nav>
