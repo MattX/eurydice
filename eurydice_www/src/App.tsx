@@ -5,6 +5,7 @@ import { Distribution } from "./util";
 import OutputPane from "./components/OutputPane";
 import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
+import { ExternalWebsite } from "./components/Icons";
 
 let worker = new WorkerWrapper(
   new Worker(new URL("./worker.js", import.meta.url)),
@@ -119,16 +120,19 @@ function App() {
         <nav className="w-full md:w-1/2 p-4">
           <ul className="flex [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
             <li className="border-none">
-              <a href="#">Eurydice</a>
+              <a className="hover:underline" href="#">Eurydice</a>
             </li>
             <li>About</li>
             <li>
-              <a href="#" onClick={() => setShowTutorial(true)}>
+              <a className="hover:underline" href="#" onClick={() => setShowTutorial(true)}>
                 Tutorial
               </a>
             </li>
             <li>
-              <a href="https://anydice.com">AnyDice</a>
+              <a className="hover:underline" href="https://anydice.com">AnyDice <ExternalWebsite /></a>
+            </li>
+            <li>
+              <a className="hover:underline" href="https://anydice.com/docs">AnyDice Documentation <ExternalWebsite /></a>
             </li>
           </ul>
         </nav>
