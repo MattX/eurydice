@@ -12,12 +12,15 @@ export default function OutputPane(props: OutputPaneProps) {
 
   let display;
   if (tableMode) {
+    const colorGenerator = new ColorGenerator();
+    const colors = props.distributions.map(() => colorGenerator.nextColor());
     display = props.distributions.map(([name, dist], index) => (
       <ProbabilityTable
         key={index}
         name={name}
         distribution={dist}
         mode={displayMode}
+        color={colors[index]}
       />
     ));
   } else {
@@ -97,9 +100,15 @@ interface ProbabilityTableProps {
   name: string;
   distribution: Distribution;
   mode: DisplayMode;
+  color: string;
 }
 
-function ProbabilityTable({ name, distribution, mode }: ProbabilityTableProps) {
+function ProbabilityTable({
+  name,
+  distribution,
+  mode,
+  color,
+}: ProbabilityTableProps) {
   const data = distribution.probabilities;
   const outcomes = data.map(([outcome]) => outcome);
   const probabilities = data.map(([, probability]) => probability);
@@ -139,7 +148,11 @@ function ProbabilityTable({ name, distribution, mode }: ProbabilityTableProps) {
       <table className="border-collapse border border-gray-300">
         <thead>
           <tr>
-            <th colSpan={2} className="bg-blue-500 text-white p-2 text-center">
+            <th
+              colSpan={2}
+              className="text-white p-2 text-center"
+              style={{ backgroundColor: color }}
+            >
               {name}
             </th>
           </tr>
@@ -210,7 +223,7 @@ function prepareChartData(
     (_, i) => i + min_outcome,
   );
   let datasets = [];
-  const rng = splitmix32(2);
+  const colorGenerator = new ColorGenerator();
   for (const nameAndDist of chartData) {
     const [name, dist] = nameAndDist;
     const distMap = new Map(dist.probabilities);
@@ -227,9 +240,7 @@ function prepareChartData(
       }
     }
 
-    const color = `rgba(${Math.floor(rng() * 256)}, ${Math.floor(
-      rng() * 256,
-    )}, ${Math.floor(rng() * 256)}, 1.0)`;
+    const color = colorGenerator.nextColor();
     datasets.push({ label: name, data, borderColor: color });
   }
   return {
@@ -255,4 +266,16 @@ function partialSums(array: number[], backwards: boolean): number[] {
     sums.reverse();
   }
   return sums;
+}
+
+class ColorGenerator {
+  private rng: () => number;
+
+  constructor() {
+    this.rng = splitmix32(2);
+  }
+
+  nextColor(): string {
+    return `rgba(${Math.floor(this.rng() * 256)}, ${Math.floor(this.rng() * 256)}, ${Math.floor(this.rng() * 256)}, 1.0)`;
+  }
 }
