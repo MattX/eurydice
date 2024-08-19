@@ -1,8 +1,7 @@
-importScripts("/eurydice_wasm.js");
-const { run } = wasm_bindgen;
-
-async function init_wasm_in_worker() {
-  await wasm_bindgen("/eurydice_wasm_bg.wasm");
+async function init_wasm_in_worker(baseUrl) {
+  importScripts(new URL("./eurydice_wasm.js", baseUrl).href);
+  const { run } = wasm_bindgen;
+  await wasm_bindgen(new URL("./eurydice_wasm_bg.wasm", baseUrl).href);
 
   self.onmessage = async (event) => {
     const start = performance.now();
@@ -24,4 +23,6 @@ async function init_wasm_in_worker() {
   self.postMessage("ready");
 }
 
-init_wasm_in_worker();
+self.onmessage = async (event) => {
+  init_wasm_in_worker(event.data);
+};

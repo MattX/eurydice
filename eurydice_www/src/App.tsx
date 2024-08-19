@@ -132,7 +132,7 @@ export default function App() {
               </a>
             </li>
             <li>
-              <a className="hover:underline" href="/about/">
+              <a className="hover:underline" href="about/">
                 About
               </a>
             </li>
