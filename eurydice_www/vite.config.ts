@@ -8,4 +8,13 @@ export default defineConfig({
     { enforce: "pre", ...mdx() },
     react({ include: /\.(jsx|js|mdx|md|tsx|ts)$/ }),
   ],
+  assetsInclude: ["src/assets/**"],
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        about: "about/index.html",
+      },
+    }
+  }
 });
