@@ -1,5 +1,7 @@
 # Eurydice
 
+<https://eurydice.pages.dev>
+
 This is an implementation of the [AnyDice](https://anydice.com/) DSL, which was created by [Jasper Flick](https://ko-fi.com/catlikecoding). **This project is not affiliated with AnyDice or Jasper Flick.**
 
 It can run as a command-line utility, or as a web-based tool, with evaluation occurring in real time in the browser.
@@ -10,7 +12,7 @@ Eurydice should be somewhat faster than AnyDice, but unlike AnyDice, it runs cli
 
 ## Running
 
-See the web UI at xxx.
+See the web UI at <https://eurydice.pages.dev>.
 
 https://github.com/user-attachments/assets/42244ce7-ea3f-44d6-9157-c6a0e59d1d36
 
