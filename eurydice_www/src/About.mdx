@@ -1,8 +1,8 @@
 import { Octocat, ExternalWebsite } from "./components/Icons";
 
 <Octocat />
-<nav className="w-full md:w-1/2 p-4">
-  <ul className="flex [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
+<nav className="w-[calc(100%-60px)] p-4">
+  <ul className="flex flex-row flex-wrap [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
     <li className="border-none">
       <a className="hover:underline" href="../">
         Eurydice
@@ -26,7 +26,7 @@ import { Octocat, ExternalWebsite } from "./components/Icons";
   </ul>
 </nav>
 
-<div className="max-w-2xl m-auto prose">
+<div className="mx-4 md:max-w-2xl md:m-auto prose">
 This is a reimplementation of the [AnyDice](https://anydice.com) DSL, which was created by
 [Jasper Flick](https://catlikecoding.com/jasper-flick/). It runs in your browser, as you type.
 **This project is not affiliated with AnyDice.**

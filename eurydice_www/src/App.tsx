@@ -124,8 +124,8 @@ export default function App() {
     <>
       <Octocat />
       <div className="flex flex-col min-h-screen">
-        <nav className="w-full md:w-1/2 p-4">
-          <ul className="flex [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
+        <nav className="w-[calc(100%-60px)] p-4">
+          <ul className="flex flex-row flex-wrap [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
             <li className="border-none">
               <a className="hover:underline" href="#">
                 Eurydice
