@@ -6,12 +6,24 @@ import OutputPane from "./components/OutputPane";
 import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
 import { ExternalWebsite, Octocat } from "./components/Icons";
+import {
+  DarkModeContext,
+  DarkModeSwitcher,
+} from "./components/DarkModeSwitcher";
 
 let worker = new WorkerWrapper(
   new Worker(new URL("./worker.js", import.meta.url)),
 );
 
 export default function App() {
+  return (
+    <DarkModeSwitcher>
+      <AppInner />
+    </DarkModeSwitcher>
+  );
+}
+
+function AppInner() {
   const [editorText, setEditorText] = React.useState("");
   const [output, setOutput] = React.useState<[string, Distribution][]>([]);
   const [error, setError] = React.useState<EurydiceError | null>(null);
@@ -21,6 +33,10 @@ export default function App() {
     [],
   );
   const [showTutorial, setShowTutorial] = React.useState(false);
+
+  const borderColor = React.useContext(DarkModeContext)
+    ? "border-gray-700"
+    : "border-gray-300";
 
   function setRunLive(val: boolean) {
     setRunLiveInner(val);
@@ -159,7 +175,7 @@ export default function App() {
         </nav>
         <div className="flex flex-grow md:min-h-[400px]">
           <div className="flex flex-col md:flex-row w-full h-full items-stretch">
-            <div className="w-full md:w-1/2 p-4 border-gray-300 border">
+            <div className={`w-full md:w-1/2 p-4 ${borderColor} border`}>
               {tutorial}
               <EditorPane
                 editorText={editorText}
@@ -172,7 +188,7 @@ export default function App() {
                 printOutputs={printOutputs}
               />
             </div>
-            <div className="w-full md:w-1/2 p-4 border-gray-300 border">
+            <div className={`w-full md:w-1/2 p-4 ${borderColor} border`}>
               <OutputPane distributions={output} />
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { githubLight } from "@uiw/codemirror-theme-github";
+import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import { Information, Spinner, Warning } from "./Icons";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { linter } from "@codemirror/lint";
@@ -12,8 +12,12 @@ import {
   LRLanguage,
 } from "@codemirror/language";
 import WithTooltip from "./Tooltip";
+import { DarkModeContext } from "./DarkModeSwitcher";
+import React from "react";
 
 export default function EditorPane(props: EditorPaneProps) {
+  const isDarkMode = React.useContext(DarkModeContext);
+
   const runButtonClass = props.runLive
     ? "border-gray-400 text-gray-400"
     : "border-blue-500 hover:border-blue-700";
@@ -72,7 +76,7 @@ export default function EditorPane(props: EditorPaneProps) {
 
   return (
     <>
-      <div className="flex flex-row mb-4 px-2">
+      <div className="flex flex-row mb-4 px-2 pt-2 clear-both">
         <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
           <input
             type="checkbox"
@@ -97,7 +101,7 @@ export default function EditorPane(props: EditorPaneProps) {
         value={props.editorText}
         onChange={props.onChange}
         extensions={[languageSupport, eurydiceLinter]}
-        theme={githubLight}
+        theme={isDarkMode ? githubDark : githubLight}
       />
       {outputs}
     </>

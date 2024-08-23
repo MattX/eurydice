@@ -15,6 +15,6 @@ export default defineConfig({
         main: "index.html",
         about: "about/index.html",
       },
-    }
-  }
+    },
+  },
 });

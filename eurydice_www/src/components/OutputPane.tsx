@@ -2,6 +2,7 @@ import React from "react";
 import { Line } from "react-chartjs-2";
 import { Distribution } from "../util";
 import { Chart, ChartData, registerables } from "chart.js";
+import { DarkModeContext } from "./DarkModeSwitcher";
 Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
@@ -9,6 +10,11 @@ export default function OutputPane(props: OutputPaneProps) {
     DisplayMode.Distribution,
   );
   const [tableMode, setTableMode] = React.useState(false);
+
+  const isDarkMode = React.useContext(DarkModeContext);
+  const tickColor = isDarkMode ? "gray" : "lightgray";
+  const gridColor = isDarkMode ? "gray" : "lightgray";
+  const textColor = isDarkMode ? "white" : "lightgray";
 
   let display;
   if (tableMode) {
@@ -25,6 +31,10 @@ export default function OutputPane(props: OutputPaneProps) {
     ));
   } else {
     const datasets = prepareChartData(props.distributions, displayMode);
+    const grid = {
+      color: gridColor,
+      tickColor,
+    };
     display = (
       <Line
         data={datasets}
@@ -37,7 +47,15 @@ export default function OutputPane(props: OutputPaneProps) {
               beginAtZero: true,
               ticks: {
                 callback: (value) => `${value}%`,
+                color: textColor,
               },
+              grid,
+            },
+            x: {
+              ticks: {
+                color: textColor,
+              },
+              grid,
             },
           },
           animation: false,

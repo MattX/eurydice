@@ -18,7 +18,9 @@ export class WorkerWrapper {
   constructor(worker: Worker) {
     this.worker = worker;
     // Set the worker the base URL, so the worker can rewrite its own imports.
-    this.worker.postMessage(new URL(import.meta.env.BASE_URL, window.location.href).href);
+    this.worker.postMessage(
+      new URL(import.meta.env.BASE_URL, window.location.href).href,
+    );
     this.worker.onmessage = () => {
       if (this.pendingCallback) {
         this.worker.onmessage = this.pendingCallback;

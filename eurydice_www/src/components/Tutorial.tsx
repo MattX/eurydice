@@ -35,7 +35,7 @@ export default function Tutorial(props: TutorialProps) {
   return (
     <div className="p-1">
       <div className="p-2">{steps[step].text}</div>
-      <div className="float-end">
+      <div className="float-right">
         {prevButton}
         {nextButton}
         <button
