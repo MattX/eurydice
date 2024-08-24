@@ -1,5 +1,5 @@
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
-import { Information, Spinner, Warning } from "./Icons";
+import { Information, Share, Spinner, Warning } from "./Icons";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { linter } from "@codemirror/lint";
 import { styleTags, tags as t } from "@lezer/highlight";
@@ -74,9 +74,18 @@ export default function EditorPane(props: EditorPaneProps) {
     );
   }
 
+  function share() {
+    const url = new URL(window.location.href);
+    url.hash = `#p=${encodeURIComponent(props.editorText)}`;
+    navigator.clipboard.writeText(url.toString());
+  }
+
   return (
     <>
       <div className="flex flex-row mb-4 px-2 pt-2 clear-both">
+        <button className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded" onClick={share}>
+          <Share />
+        </button>
         <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
           <input
             type="checkbox"

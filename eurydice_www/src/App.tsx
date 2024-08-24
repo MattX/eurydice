@@ -113,8 +113,15 @@ function AppInner() {
     if (!savedRunLive) {
       setRunLiveInner(false);
     }
-    const savedText =
-      localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
+
+    // If there is a hash (shared link), use that
+    const hash = window.location.hash;
+    let savedText: string | null = null;
+    if (hash.startsWith("#p=")) {
+      savedText = decodeURIComponent(hash.slice(3));
+    } else {
+      savedText = localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
+    }
     setEditorText(savedText);
     if (savedRunLive) {
       run(savedText);
