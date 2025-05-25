@@ -6,6 +6,9 @@ fn main() {
     let parser = eurydice_engine::grammar::BodyParser::new();
     let mut rl = rustyline::DefaultEditor::new().unwrap();
     let mut evaluator = eurydice_engine::eval::Evaluator::new();
+    evaluator.set_print_callback(Box::new(|value, name| {
+        println!("{}: {}", name, value);
+    }));
     let mut code = String::new();
     while let Ok(line) = rl.readline(if code.is_empty() { "> " } else { ". " }) {
         code.push_str(&line);

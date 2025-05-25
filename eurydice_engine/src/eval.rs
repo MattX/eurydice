@@ -679,7 +679,7 @@ fn apply_unary_op(op: UnaryOp, operand: &RuntimeValue) -> RuntimeValue {
         UnaryOp::Negate => operand.map_outcomes(|o| -o),
         UnaryOp::Invert => operand.map_outcomes(|o| if o == 0 { 1 } else { 0 }),
         UnaryOp::Length => match operand {
-            RuntimeValue::Int(i) => i32::try_from(i.to_string().len())
+            RuntimeValue::Int(i) => i32::try_from(i.abs().to_string().len())
                 .expect("vector length fits in i32")
                 .into(),
             RuntimeValue::List(list) => i32::try_from(list.len())
