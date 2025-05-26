@@ -6,10 +6,10 @@ use std::{
     rc::Rc,
 };
 
-use malachite::num::arithmetic::traits::Lcm;
+use malachite::base::num::arithmetic::traits::Lcm;
 use malachite::{
-    num::basic::traits::{One, Zero},
-    Natural, Rational,
+    base::num::basic::traits::{One, Zero},
+    Natural, rational::Rational,
 };
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;

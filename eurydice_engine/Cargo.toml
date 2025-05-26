@@ -20,25 +20,25 @@ cast_sign_loss = "warn"
 [dependencies]
 # Used to report errors nicely.
 miette = "7.2.0"
-thiserror = "1.0.63"
+thiserror = "2.0.12"
 
 # Serde derive is used for testing only, but we need it here to derive
 # the traits.
 serde = { version = "1.0.204", features = ["derive", "rc"] }
 
 # Parser stuff
-lalrpop-util = { version = "0.20.2", features = ["lexer", "unicode"] }
+lalrpop-util = { version = "0.22.2", features = ["lexer", "unicode"] }
 
 # Used for bigints
-malachite = "0.4.14"
+malachite = "0.6.0"
 
 # Random utility stuff
 lazy_static = "1.5.0"
 
 [build-dependencies]
 cc="*"
-lalrpop = "0.20.2"
+lalrpop = "0.22.2"
 
 [dev-dependencies]
-criterion = { version = "0.5.1", features = ["html_reports"] }
+criterion = { version = "0.6.0", features = ["html_reports"] }
 serde-lexpr = "0.1.3"

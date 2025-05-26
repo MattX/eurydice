@@ -14,9 +14,9 @@
 // TODO some functions in this file take ownership (or a mutable reference), but don't really need to.
 
 use lazy_static::lazy_static;
-use malachite::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
-use malachite::num::basic::traits::{One, Zero};
-use malachite::{Natural, Rational};
+use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
+use malachite::base::num::basic::traits::{One, Zero};
+use malachite::{Natural, rational::Rational};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
