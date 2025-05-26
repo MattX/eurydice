@@ -1,5 +1,5 @@
 use malachite::base::num::conversion::traits::RoundingFrom;
-use malachite::{base::rounding_modes::RoundingMode, Natural, rational::Rational};
+use malachite::{base::rounding_modes::RoundingMode, rational::Rational, Natural};
 use serde::Serialize;
 use std::fmt::Write;
 

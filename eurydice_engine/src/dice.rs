@@ -16,7 +16,7 @@
 use lazy_static::lazy_static;
 use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::base::num::basic::traits::{One, Zero};
-use malachite::{Natural, rational::Rational};
+use malachite::{rational::Rational, Natural};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
@@ -418,9 +418,7 @@ impl<'a> MultisetCrossProductIterator<'a> {
         let values: Option<Vec<_>> = result
             .sub_iterators
             .iter_mut()
-            .map(|iter| iter.next().map(
-                |(outcome, ways)| (Rc::new(outcome), ways),
-            ))
+            .map(|iter| iter.next().map(|(outcome, ways)| (Rc::new(outcome), ways)))
             .collect();
         let values = match values {
             Some(values) => values,
@@ -1196,7 +1194,10 @@ mod tests {
             pools.iter().map(|pool| pool.multiset_iterator()).collect(),
         );
         let values = iter.collect::<Vec<_>>();
-        let values_only = values.iter().map(|(v, _)| v.iter().map(|o| (**o).clone()).collect::<Vec<_>>()).collect::<Vec<_>>();
+        let values_only = values
+            .iter()
+            .map(|(v, _)| v.iter().map(|o| (**o).clone()).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
         assert_eq!(
             values_only,
             vec![
@@ -1225,7 +1226,10 @@ mod tests {
             pools.iter().map(|pool| pool.multiset_iterator()).collect(),
         );
         let values = iter.collect::<Vec<_>>();
-        let values_only = values.iter().map(|(v, _)| v.iter().map(|o| (**o).clone()).collect::<Vec<_>>()).collect::<Vec<_>>();
+        let values_only = values
+            .iter()
+            .map(|(v, _)| v.iter().map(|o| (**o).clone()).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
         assert_eq!(
             values_only,
             vec![

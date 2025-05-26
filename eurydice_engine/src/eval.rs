@@ -9,7 +9,8 @@ use std::{
 use malachite::base::num::arithmetic::traits::Lcm;
 use malachite::{
     base::num::basic::traits::{One, Zero},
-    Natural, rational::Rational,
+    rational::Rational,
+    Natural,
 };
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -647,9 +648,13 @@ impl Evaluator {
         arg_ranges: &[ast::Range],
     ) -> Result<RuntimeValue, RuntimeError> {
         match &function.value {
-            Function::Primitive(primitive) => {
-                primitive.execute(args, arg_ranges, self.explode_depth, self.lowest_first, function.range)
-            }
+            Function::Primitive(primitive) => primitive.execute(
+                args,
+                arg_ranges,
+                self.explode_depth,
+                self.lowest_first,
+                function.range,
+            ),
             Function::UserDefined(user_function) => {
                 let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
                 for (arg, formal) in args.iter().zip(user_function.args.iter()) {
