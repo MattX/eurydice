@@ -20,7 +20,7 @@ Eurydice is reproducible and hermetic: programs can't interact with the environm
 This report frequently uses the following notations to describe pools:
 
 * `<n>d<k>`: represents a pool of `n` die with `k` faces labeled 1..k
-* `<n>d{<k1>:<count1>,...,<kn>:<countn>}`: represents a pool of `n` die with `count1` faces showing `k1`, `count2` faces showing `k2`, etc., and `countn` faces showing `kn`. If `:<count>` is omitted for any `k`, the count is assumed to be `.
+* `<n>d{<k1>:<count1>,...,<kn>:<countn>}`: represents a pool of `n` die with `count1` faces showing `k1`, `count2` faces showing `k2`, etc., and `countn` faces showing `kn`. If `:<count>` is omitted for any `k`, the count is assumed to be 1.
 
 This is exactly compatible with Eurydice expressions using the `d` operator.
 
@@ -55,7 +55,7 @@ _Punctuation_: the following characters or sequences of characters are tokens:
     >=
 ```
 
-_Integer literals_: Integer literals are base-10 representations of an unsigned 31-bit integer. It is an error if an integer literal represents a number greater than 2^31-1 (2147483647). Examples include `0`, `123`.
+_Integer literals_: Integer literals are base-10 representations of an unsigned 31-bit integer. It is an error if an integer literal represents a number greater than 2^31-1 (2147483647). This is a subset of the values of the underlying `int` type, which can represent 32-bit signed integers (negative values can be obtained by using the unary minus operator). Examples include `0`, `123`.
 
 _String literals_: String literal can only occur in a few places. They are enclosed by double quotes (`"`). A string literal can contain escaped double quotes: `"message: \"hello\""`. No other escape sequences are supported.
 
@@ -84,7 +84,7 @@ There are no first-class functions.
 
 It is not possible to create a pool value representing a pool of different types of dice. For instance, `3d6` is a pool of three d6s, but there is no way to represent a pool of one d6 and one d8.
 
-Pools may have a dimension of 0, or an empty mapping.
+Pools may have no possible outcomes (for instance, such a pool is created with expression `d{}`). Such a pool has dimension 0.
 
 The following operations are frequently referred to in this document:
 
@@ -111,7 +111,7 @@ multiset              probability
 {3, 3, 3}:                       (1/2)^3 * 6
 ```
 
-The probability associated with each multiset element is equal to the product of each element's probability, multiplied by the multinomial coefficient for the outcome (in the rightmost column above).
+The probability associated with each multiset element is equal to the product of each element's probability, multiplied by the multiplicity factor for the outcome (which is $\frac{(\mathrm{size\ of\ set})!}{\mathrm{multinomial\ coefficient}}$).
 
 If there is a single die in the pool, this is the same as iterating over the die's outcomes.
 
@@ -218,7 +218,7 @@ There are three named global settings:
 
 * `explode depth`: set to a non-negative number, default 2.
 * `maximum function depth`: set to a non-negative number, default 10. An attempt to call a function when the current recursion depth is already equal to the maximum function depth will result in the function call not actually executing, and returning an empty list.
-* `position order`: set to `"lowest first"` or `"highest first"` (default `"highest first"`). This setting affects two things:
+* `position order`: set to `"lowest first"` or `"highest first"` (default `"highest first"`). This setting affects three things:
   * the behavior of the [`@` operator](#-operator),
   * the behavior of the [sort function](#sort-SEQUENCEs),
   * the behavior of [calling a function over pools](#Pool-based-evaluation)
@@ -299,7 +299,7 @@ List flattening transforms values in the following way:
 
 * `int` values are flattened by enclosing them in a single-element list.
 * `list` values are unchanged by flattening.
-* `pool` values are flattened first by [summing](#Summing), then by discarding the probabilities and creating a list containing each outcome. Outcomes with nonzero probability appear once regardless of their probabilities.
+* `pool` values are flattened first by [summing](#Summing), then by discarding the probabilities and creating a list containing each outcome in ascending order. Outcomes with nonzero probability appear once regardless of their probabilities.
 
 #### Examples
 
@@ -331,7 +331,7 @@ There are 4 unary operators, which all bind tighter than any binary operator. Th
 
 `#` evaluates to the length of its argument:
 
-* If the argument is an `int`, it returns the number of digits.
+* If the argument is an `int`, it returns the number of digits in the base-10 representation. `#0` evaluates to `1`. A leading `-` is not counted as a digit.
 * If the argument is a `list`, it returns the number of elements.
 * If the argument is a `pool`, it returns the pool's dimension (count of dice in the pool).
 
@@ -355,13 +355,13 @@ All operators are left-associative.
 
 The `d` operator is the main way to create a pool.
 
-1. The RHS operand is converted to a pool.
+1. The RHS operand is converted to a pool with the following operation.
    1. If it is an `int` `i`, it is converted to a pool with values 1 to `abs(i)` inclusive (if `i` is 0, the pool contains the single outcome 0). If `i` is negative, the pool outcomes then are mapped to their opposite. For instance, `d(-3)` evaluates to `d{-1, -2, -3}`.
    2. If it is a `list`, it is converted to a pool whose outcomes are the distinct values in the list, and whose probability for each outcome is proportional to the number of occurrences of each value in the list.
    3. Pools provided as an RHS operand are not transformed.
 2. The LHS operand is summed if it is a `list`, resulting in either an `int` or a `pool`.
    1. If it is an `int` `i`, the dimension of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
-   2. If it is a `pool`, then the RHS is [flat mapped](#Flat-mapping) with the operation described in (a).
+   2. If it is a `pool`, then the RHS is [flat mapped](#Flat-mapping) with the operation described in (a). (Recall that flat-mapping takes a pool and an `int -> pool` function; the operation described in (a) is such a function).
 
 #### `@` operator
 
@@ -411,9 +411,19 @@ FinalFunctionCallItem = Expr SafeExpr {SafeExpr}.
 FunctionCall = '[' {FunctionCallItem} [FinalFunctionCallItem] ']'.
 ```
 
-`SafeExpr` is any expression that does not start with the tokens `-` or `d`. Because expressions can immediately follow each other, it would otherwise not be possible to know if a call like `[f 1 -2]` should be parsed as `[f (1) (-2)]` or as `[f (1-2)]`.
+A technical trick is needed in the grammar because arguments are allowed to follow each other with no word in between: `SafeExpr` is any expression that does not start with the tokens `-` or `d`. Because expressions can immediately follow each other, it would otherwise not be possible to know if a call like `[f 1 -2]` should be parsed as `[f (1) (-2)]` or as `[f (1-2)]`. An `Expr` in the function call must be followed by either a `Word`, which clearly separates the two arguments, or a `SafeExpr`, which cannot be a suffix of an `Expr`, and is thus necessarily a new argument.
 
-To evaluate a function call, the function identifier is resolved first. A function is identified by the sequence of words and argument locations in its name, and it is an error if the function's identifier is not in scope in the current environment.
+To evaluate a function call, the function identifier is resolved first. A function is identified by the sequence of words and argument locations in its name, and it is an error if the function's identifier is not in scope in the current environment. Here are some examples:
+
+```
+function: add A:n B:n { A + B }
+output [add 1 2]  \\\ outputs 3
+output [add 1 - 2]  \\\ error
+
+function: add A:n and B:n { A + B }
+output [add 1 and 2]  \\\ outputs 3
+output [add 1 and -2]   \\\ outputs -1
+```
 
 From then, function calls proceed in several steps.
 
@@ -428,20 +438,48 @@ The actual types of the argument expressions are compared to the expected argume
 * If the actual argument type is an `int`:
   * If a `list` is requested, a singleton list is created.
   * if a `pool` is requested, a single-outcome `pool` is created.
-* If the actual argument type is a `pool`, and an `int` is requested, the pool is summed, creating a new `pool`.
+* If the actual argument type is a `pool`, and an `int` is requested, the pool is summed, creating a new `pool` (see note below: `pool`-typed values can be passed to `int`-typed arguments).
 
-After this process, some values of type `pool` may still correspond to arguments where `int` or `list` types are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#Function-evaluation).
+After this process, some values of type `pool` may still correspond to arguments where `int` or `list` types are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#Function-evaluation). If it is the case, evaluation proceeds as described in the next section.
 
 #### Pool-based evaluation
 
-If there are `pool` values corresponding to `int` or `list` type arguments. As mentioned above, any `pool`s corresponding to an `int` argument is summed to dimension 1. Then, the [multiset cross product](#Multiset-cross-product) of the pools is generated. The order in which elements inside each multiset are ordered follows the `"position order"` [global setting](#Global-settings).
+This section applies if any `pool` values are being passed to `int` or `list` typed arguments. As mentioned above, any `pool`s corresponding to an `int` argument is summed to dimension 1. Then, the [multiset cross product](#Multiset-cross-product) of the pools is generated. The order in which elements inside each multiset are ordered follows the `"position order"` [global setting](#Global-settings).
 
 The function is then evaluated once for each value in the multiset cross product (this may be 0 times if the cross product is empty). In each invocation, the argument values are:
 
-* For any argument whose actual type correspond to its declared type, the actual value
+* For any argument whose actual type correspond to its declared type, the actual value.
 * For arguments where a `pool` was provided but a `list` or `int` was requested, that pool's multiset value in the current element of the multiset cross product iterator.
 
-All results are collected, together with the probability associated with the list of multisets that produced it.
+Each invocation's result is converted to a `pool` through the standard conversions. The final result of the function call is a `pool` created by iterating through every possible outcome of the intermediate pools, and summing the probability of that outcome in each of the intermediate pools, multiplied by the probability of the value that generated this intermediate pool.
+
+For instance, suppose the following call needs to be evaluated:
+
+```
+function: one or N:n th die from FACES:s {
+  result: d{1, N@FACES}
+}
+output [one or d3 th die from 3d2]
+```
+
+The cross-product multisets and their corresponding intermediate pools are:
+
+| Multiset for `N` | Multiset for `FACES` | Weight | Outcome | Weight for `1` | Weight for `2` |
+|------------------|----------------------|--------|---------|----------------|----------------|
+| [1]              | [1, 1, 1]            | 1      | d{1}    | 1              |                |
+| [2]              | [1, 1, 1]            | 1      | d{1}    | 1              |                |
+| [3]              | [1, 1, 1]            | 1      | d{1}    | 1              |                |
+| [1]              | [1, 1, 2]            | 3      | d{1}    | 3              |                |
+| [2]              | [1, 1, 2]            | 3      | d{1}    | 3              |                |
+| [3]              | [1, 1, 2]            | 3      | d{1, 2} | 3/2            | 3/2            |
+| [1]              | [1, 2, 2]            | 3      | d{1}    | 3              |                |
+| [2]              | [1, 2, 2]            | 3      | d{1, 2} | 3/2            | 3/2            |
+| [3]              | [1, 2, 2]            | 3      | d{1, 2} | 3/2            | 3/2            |
+| [1]              | [2, 2, 2]            | 1      | d{1, 2} | 1/2            | 1/2            |
+| [2]              | [2, 2, 2]            | 1      | d{1, 2} | 1/2            | 1/2            |
+| [3]              | [2, 2, 2]            | 1      | d{1, 2} | 1/2            | 1/2            |
+
+The final result has outcome 1 with weight 18, and outcome 2 with weight 6.
 
 #### Function evaluation
 
@@ -450,6 +488,13 @@ A [new environment frame](#Values-variables-and-bindings) is created, binding th
 If no return statement is encountered, the function returns an empty list.
 
 ## Statements
+
+```
+Statement = IfStatement | LoopStatement | PrintStatement | OutputStatement
+          | FunctionDefinitionStatement | ResultStatement | AssignmentStatement
+          | SetStatement.
+Block = '{' Statement* '}'.
+```
 
 ### Conditionals
 
@@ -473,7 +518,7 @@ LoopStatement = `loop` VariableName `over` Expr Block.
 
 The loop expression is evaluated. It is an error if it does not evaluate to a list (in particular, pools cannot be iterated over). A binding for `VariableName` is created in the current environment. For each value in the list, the loop variable is bound to that value, then all statements in the body are executed in succession.
 
-If there are no values in the list, the loop does not execute.
+If there are no values in the list, the loop does not execute. If the loop executes at least one, the loop variable remains bound to the last value after the end of the loop.
 
 ### Print and output
 
@@ -490,8 +535,6 @@ OutputStatement = 'output' Expr ['named' Str].
 It is an error if an `output` statement occurs inside a function. No such restriction exists for the `print` statement.
 
 In both cases, the expression is evaluated. If present, the name string is then interpolated: any pair of square brackets containing a _variable name_ will be replaced by the named variable's value. Square brackets containing any other data will not be replaced. To be replaced, a variable name must correspond to an actually defined variable; otherwise, the bracketed string is left as-is.
-
-It is an error for an undefined variable name to occur within square brackets.
 
 > [!IMPORTANT]
 > Eurydice is a little more explicit than AnyDice in replaced variables for lists and pools, using strings like `{1, 3, 4}` instead of `{?}`.
@@ -537,7 +580,7 @@ Type = 'n' | 's' | 'd'.
 
 The function's identifier is the sequence of words and argument positions in the name. It is valid for a function identifier to contain no words, or to contain no argument positions.
 
-Each argument name can optionally be annotated with a type.
+Each argument name can optionally be annotated with a type. `n`, `s`, and `d` correspond to `int`, `list` (sequence), and `pool` (dice) argument types. Specifying types explicitly causes special behavior if the actual arguments passed are of different types from the specification, as explained above.
 
 ### Return from function
 
@@ -563,7 +606,7 @@ Returns `1` if `SEQ` contains `N`, or `0` otherwise.
 
 ### `[count NEEDLES:s in HAYSTACK:s]`
 
-Returns the number of occurrences of each element of `NEEDLES` in `HAYSTACK`.
+Counts the number of occurrences of each element of `NEEDLES` in `HAYSTACK`. Returns the sum of these counts.
 
 Examples:
 
@@ -578,7 +621,7 @@ This transforms a die to match an [explosion rule](https://nethackwiki.com/wiki/
 
 The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
 
-If the argument is a pool with dimension >= 1, it is summed first. The return value's dimension is always 0 or 1.
+If the argument is a pool with dimension >= 1, it is summed first. The return value's dimension is always 1, or 0 if the input pool has dimension 0.
 
 ```
 output [explode d{}]  \ Outputs d{} \
@@ -590,7 +633,7 @@ output [explode d{1, 2, 3}]
 Here's a worked out example for `[explode 2d2]` with `explode depth` set to 1:
 
 1. The pool is summed to `d{2, 3:2, 4}`
-2. The outcome `4` is mapped to `d{2+4, (3+4):2, 4+4}`. Other outcomes are left as-is.
+2. The outcome `4` is mapped to `d{2+4, (3+4):2, 4+4}`, which is the same as the summed die with each value incremented by its largest value. This is equivalent to keeping the 4 and adding the original die again. Other outcomes are left as-is.
 3. The final probabilities for each value are:
    * 2: 1/4
    * 3: 1/2
@@ -604,7 +647,7 @@ Here's a worked out example for `[explode 2d2]` with `explode depth` set to 1:
 
 These functions return pools of dimension 1 whose distribution is the sum of the highest `COUNT`, lowest `COUNT`, or middle `COUNT` values in the possible outcomes of `POOL`.
 
-`[middle COUNT:n of POOL:d]` returns indices between ((length-COUNT) / 2) inclusive and ((length-COUNT) / 2 + COUNT) exclusive, rounding the division down, and indexing from 0. For instance, `[middle 1 of 4d2]` will return the second-lowest value for each multiset (index `(4-1)/2=1`, 0-based).
+`[middle COUNT:n of POOL:d]` returns indices between ((length-COUNT) / 2) inclusive and ((length-COUNT) / 2 + COUNT) exclusive, rounding the division down, and indexing from 0. For instance, `[middle 2 of 5d2]` will return a pool corresponding to the 2nd and 3rd lowest dice, excluding the 1st, 4th and 5th.
 
 ### `[highest of FIRST:n and SECOND:n]`, `[lowest of FIRST:n and SECOND:n]`
 
@@ -612,7 +655,7 @@ These functions return the max and min of their two arguments, respectively.
 
 ### `[maximum POOL:d]`
 
-Sums `POOL`, then returns its largest possible outcome.
+Sums `POOL`, then returns its largest possible outcome as an int.
 
 ### `[reverse SEQUENCE:s]`
 
