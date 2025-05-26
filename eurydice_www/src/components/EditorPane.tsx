@@ -83,10 +83,10 @@ export default function EditorPane(props: EditorPaneProps) {
   return (
     <>
       <div className="flex flex-row mb-4 px-2 pt-2 clear-both">
-        <button className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded" onClick={share}>
+        <button className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm" onClick={share}>
           <Share />
         </button>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
           <input
             type="checkbox"
             name="runLiveCheckbox"
@@ -98,7 +98,7 @@ export default function EditorPane(props: EditorPaneProps) {
         <button
           disabled={props.runLive}
           onClick={() => !props.runLive && props.run()}
-          className={`border-2 ${runButtonClass} py-1 px-2 mx-1 rounded`}
+          className={`border-2 ${runButtonClass} py-1 px-2 mx-1 rounded-sm`}
         >
           Run
         </button>

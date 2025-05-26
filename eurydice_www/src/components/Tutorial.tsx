@@ -10,7 +10,7 @@ export default function Tutorial(props: TutorialProps) {
   const prevButton =
     step > 0 ? (
       <button
-        className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded"
+        className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded-sm"
         onClick={() => {
           props.setEditorText(steps[step - 1].editorText);
           setStep(step - 1);
@@ -22,7 +22,7 @@ export default function Tutorial(props: TutorialProps) {
   const nextButton =
     step < steps.length - 1 ? (
       <button
-        className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded"
+        className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded-sm"
         onClick={() => {
           props.setEditorText(steps[step + 1].editorText);
           setStep(step + 1);
@@ -39,7 +39,7 @@ export default function Tutorial(props: TutorialProps) {
         {prevButton}
         {nextButton}
         <button
-          className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded"
+          className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded-sm"
           onClick={props.closeTutorial}
         >
           Close tutorial

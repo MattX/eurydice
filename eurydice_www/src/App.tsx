@@ -148,7 +148,7 @@ function AppInner() {
       <Octocat />
       <div className="flex flex-col min-h-screen">
         <nav className="w-[calc(100%-60px)] p-4">
-          <ul className="flex flex-row flex-wrap [&>*]:border-l [&>*]:border-gray-500 [&>*]:px-4">
+          <ul className="flex flex-row flex-wrap *:border-l *:border-gray-500 *:px-4">
             <li className="border-none">
               <a className="hover:underline" href="#">
                 Eurydice
@@ -180,7 +180,7 @@ function AppInner() {
             </li>
           </ul>
         </nav>
-        <div className="flex flex-grow md:min-h-[400px]">
+        <div className="flex grow md:min-h-[400px]">
           <div className="flex flex-col md:flex-row w-full h-full items-stretch">
             <div className={`w-full md:w-1/2 p-4 ${borderColor} border`}>
               {tutorial}

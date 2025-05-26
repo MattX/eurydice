@@ -69,7 +69,7 @@ export default function OutputPane(props: OutputPaneProps) {
   return (
     <>
       <div className="flex flex-row mb-4 px-2">
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
           <input
             type="checkbox"
             checked={tableMode}
@@ -77,7 +77,7 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           Table
         </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
           <input
             type="radio"
             name="displayMode"
@@ -86,7 +86,7 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           Distribution
         </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
           <input
             type="radio"
             name="displayMode"
@@ -95,7 +95,7 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           At least
         </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
           <input
             type="radio"
             name="displayMode"
