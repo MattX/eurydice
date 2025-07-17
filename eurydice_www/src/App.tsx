@@ -10,10 +10,9 @@ import {
   DarkModeContext,
   DarkModeSwitcher,
 } from "./components/DarkModeSwitcher";
+import EurydiceWorker from "./worker?worker";
 
-let worker = new WorkerWrapper(
-  new Worker(new URL("./worker.js", import.meta.url)),
-);
+let worker = new WorkerWrapper(new EurydiceWorker());
 
 export default function App() {
   return (
@@ -65,7 +64,7 @@ function AppInner() {
       } else if (event.data.Ok !== undefined) {
         setRunning(false);
         setError(null);
-        const chartData = new Array();
+        const chartData: [string, Distribution][] = [];
         for (const [key, value] of event.data.Ok!) {
           if (value.Distribution !== undefined) {
             chartData.push([key, value.Distribution]);
@@ -93,9 +92,7 @@ function AppInner() {
   function run(val?: string) {
     if (running) {
       worker.terminate();
-      worker = new WorkerWrapper(
-        new Worker(new URL("./worker.js", import.meta.url)),
-      );
+      worker = new WorkerWrapper(new EurydiceWorker());
     }
     setRunning(true);
     setPrintOutputs([]);
@@ -163,7 +160,11 @@ function AppInner() {
               <a
                 className="hover:underline"
                 href="#"
-                onClick={() => setShowTutorial(true)}
+                onClick={() => {
+                  if (confirm("Opening the tutorial will clear the current code. Continue?")) {
+                    setShowTutorial(true);
+                  }
+                }}
               >
                 Tutorial
               </a>

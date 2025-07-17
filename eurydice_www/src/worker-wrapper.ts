@@ -11,16 +11,13 @@ export class WorkerWrapper {
   private worker: Worker;
   private workerReady: boolean = false;
 
-  private pendingMessage: any = undefined;
+  private pendingMessage: unknown = undefined;
   private pendingCallback: ((event: MessageEvent) => void) | undefined =
     undefined;
 
   constructor(worker: Worker) {
+    console.log("WorkerWrapper constructor");
     this.worker = worker;
-    // Set the worker the base URL, so the worker can rewrite its own imports.
-    this.worker.postMessage(
-      new URL(import.meta.env.BASE_URL, window.location.href).href,
-    );
     this.worker.onmessage = () => {
       if (this.pendingCallback) {
         this.worker.onmessage = this.pendingCallback;
@@ -34,7 +31,7 @@ export class WorkerWrapper {
     };
   }
 
-  postMessage(message: any) {
+  postMessage(message: unknown) {
     if (this.workerReady) {
       this.worker.postMessage(message);
     } else {

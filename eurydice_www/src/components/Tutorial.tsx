@@ -2,10 +2,11 @@ import React, { ReactElement, useEffect } from "react";
 
 export default function Tutorial(props: TutorialProps) {
   const [step, setStep] = React.useState(0);
+  const setEditorText = props.setEditorText;
 
   useEffect(() => {
-    props.setEditorText(steps[step].editorText);
-  }, []);
+    setEditorText(steps[step].editorText);
+  }, [setEditorText, step]);
 
   const prevButton =
     step > 0 ? (
