@@ -62,7 +62,7 @@ export function Information() {
 
 export function Share() {
   return (
-    <span className="grid place-content-center">
+    <span className="inline-block align-middle -translate-y-0.5">
       <svg
         xmlns="http://www.w3.org/2000/svg"
         fill="none"

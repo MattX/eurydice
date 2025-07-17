@@ -14,6 +14,7 @@ import {
 import WithTooltip from "./Tooltip";
 import { DarkModeContext } from "./DarkModeSwitcher";
 import React from "react";
+import { toast } from "react-hot-toast";
 
 export default function EditorPane(props: EditorPaneProps) {
   const isDarkMode = React.useContext(DarkModeContext);
@@ -22,7 +23,7 @@ export default function EditorPane(props: EditorPaneProps) {
     ? "border-gray-400 text-gray-400"
     : "border-blue-500 hover:border-blue-700";
 
-  const eurydiceLinter = linter((_view: EditorView) => {
+  const eurydiceLinter = linter(() => {
     if (props.error === null) {
       return [];
     }
@@ -78,13 +79,14 @@ export default function EditorPane(props: EditorPaneProps) {
     const url = new URL(window.location.href);
     url.hash = `#p=${encodeURIComponent(props.editorText)}`;
     navigator.clipboard.writeText(url.toString());
+    toast.success("Link copied to clipboard");
   }
 
   return (
     <>
       <div className="flex flex-row mb-4 px-2 pt-2 clear-both">
         <button className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm" onClick={share}>
-          <Share />
+          <Share /> Share
         </button>
         <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
           <input

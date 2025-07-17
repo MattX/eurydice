@@ -11,6 +11,7 @@ import {
   DarkModeSwitcher,
 } from "./components/DarkModeSwitcher";
 import EurydiceWorker from "./worker?worker";
+import { Toaster } from "react-hot-toast";
 
 let worker = new WorkerWrapper(new EurydiceWorker());
 
@@ -143,6 +144,7 @@ function AppInner() {
   return (
     <>
       <Octocat />
+      <div><Toaster /></div>
       <div className="flex flex-col min-h-screen">
         <nav className="w-[calc(100%-60px)] p-4">
           <ul className="flex flex-row flex-wrap *:border-l *:border-gray-500 *:px-4">

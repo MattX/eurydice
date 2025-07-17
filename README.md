@@ -60,13 +60,6 @@ The packages in this directory are:
 - `eurydice_wasm`: WASM wrapper for `eurydice_engine`
 - `eurydice_www`: A Vite + React + TS app to serve as a frontend.
 
-Build the wasm (from this directory) with `wasm-pack build ./eurydice_wasm --target no-modules`.
-
-There are two important symlinks in `eurydice_www/src`:
-
-- `eurydice_wasm_bg.wasm -> ../../eurydice_wasm/pkg/eurydice_wasm_bg.wasm`
-- `eurydice_wasm.js -> ../../eurydice_wasm/pkg/eurydice_wasm.js`
-
-These allow the compiled wasm to be run in a web worker for Eurydice's web frontend.
+Build the wasm (from this directory) with `wasm-pack build ./eurydice_wasm`. Then `cd` to `eurydice_www`, run `npm i` and `npm run dev`.
 
 See also notes in <https://rustwasm.github.io/wasm-bindgen/examples/wasm-in-web-worker.html>.
