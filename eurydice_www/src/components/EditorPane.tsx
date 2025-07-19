@@ -1,6 +1,6 @@
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import { Information, Share, Spinner, Warning } from "./Icons";
-import CodeMirror, { EditorView } from "@uiw/react-codemirror";
+import CodeMirror from "@uiw/react-codemirror";
 import { linter } from "@codemirror/lint";
 import { styleTags, tags as t } from "@lezer/highlight";
 import { parser } from "../grammar/eurydice";

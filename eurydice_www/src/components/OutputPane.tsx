@@ -3,6 +3,7 @@ import { Line } from "react-chartjs-2";
 import { Distribution } from "../util";
 import { Chart, ChartData, registerables } from "chart.js";
 import { DarkModeContext } from "./DarkModeSwitcher";
+import { generateValuesOnlyCSV, generateAnyDiceFormatCSV, downloadCSV, DistributionData } from "../utils/csvExport";
 Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
@@ -10,11 +11,22 @@ export default function OutputPane(props: OutputPaneProps) {
     DisplayMode.Distribution,
   );
   const [tableMode, setTableMode] = React.useState(false);
+  const [showExportMenu, setShowExportMenu] = React.useState(false);
 
   const isDarkMode = React.useContext(DarkModeContext);
   const tickColor = isDarkMode ? "gray" : "lightgray";
   const gridColor = isDarkMode ? "gray" : "lightgray";
   const textColor = isDarkMode ? "white" : "lightgray";
+
+  const handleExport = (generate: (distributions: DistributionData[]) => string) => {
+    const distributionData = props.distributions.map(([name, distribution]) => ({
+      name,
+      distribution
+    }));
+    const csv = generate(distributionData);
+    downloadCSV(csv, 'distributions_values.csv');
+    setShowExportMenu(false);
+  };
 
   let display;
   if (tableMode) {
@@ -104,6 +116,30 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           At most
         </label>
+        <div className="relative ml-auto">
+          <button
+            onClick={() => setShowExportMenu(!showExportMenu)}
+            className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded-sm"
+          >
+            Export ▼
+          </button>
+          {showExportMenu && (
+            <div className="absolute right-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-10 min-w-48">
+              <button
+                onClick={() => handleExport(generateValuesOnlyCSV)}
+                className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-black"
+              >
+                CSV (Values Only)
+              </button>
+              <button
+                onClick={() => handleExport(generateAnyDiceFormatCSV)}
+                className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-black"
+              >
+                CSV (AnyDice Format)
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       {display}
     </>
@@ -240,7 +276,7 @@ function prepareChartData(
     { length: max_outcome - min_outcome + 1 },
     (_, i) => i + min_outcome,
   );
-  let datasets = [];
+  const datasets = [];
   const colorGenerator = new ColorGenerator();
   for (const nameAndDist of chartData) {
     const [name, dist] = nameAndDist;
