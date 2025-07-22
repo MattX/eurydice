@@ -4,6 +4,7 @@ import { Distribution } from "../util";
 import { Chart, ChartData, registerables } from "chart.js";
 import { DarkModeContext } from "./DarkModeSwitcher";
 import { generateValuesOnlyCSV, generateAnyDiceFormatCSV, downloadCSV, DistributionData } from "../utils/csvExport";
+import { ChartJsRangeSelect, makeChartJsRangeSelect } from "../utils/chartJsRangeSelect";
 Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
@@ -12,6 +13,16 @@ export default function OutputPane(props: OutputPaneProps) {
   );
   const [tableMode, setTableMode] = React.useState(false);
   const [showExportMenu, setShowExportMenu] = React.useState(false);
+  const [showBracketing, setShowBracketing] = React.useState(false);
+  const [lowerBound, setLowerBound] = React.useState(0);
+  const [upperBound, setUpperBound] = React.useState(0);
+  const plugin = React.useRef<ChartJsRangeSelect>(makeChartJsRangeSelect({
+    onRangeChange: (startValue, endValue) => {
+      setShowBracketing(true);
+      setLowerBound(startValue < endValue ? startValue : endValue);
+      setUpperBound(startValue > endValue ? startValue : endValue);
+    }
+  }));
 
   const isDarkMode = React.useContext(DarkModeContext);
   const tickColor = isDarkMode ? "gray" : "lightgray";
@@ -72,6 +83,7 @@ export default function OutputPane(props: OutputPaneProps) {
           },
           animation: false,
         }}
+        plugins={[plugin.current.plugin]}
         width="100%"
         height="100%"
       />
@@ -118,6 +130,15 @@ export default function OutputPane(props: OutputPaneProps) {
         </label>
         <div className="relative ml-auto">
           <button
+            onClick={() => {
+              setShowBracketing(!showBracketing);
+              plugin.current.setEnabled(!showBracketing);
+            }}
+            className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded-sm"
+          >
+            Bracket {showBracketing ? "▲" : "▼"}
+          </button>
+          <button
             onClick={() => setShowExportMenu(!showExportMenu)}
             className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded-sm"
           >
@@ -141,7 +162,41 @@ export default function OutputPane(props: OutputPaneProps) {
           )}
         </div>
       </div>
-      {display}
+      <div>
+        {showBracketing && (
+            <span>
+              <label className="mr-1">
+                Lower:
+                <input
+                  type="number"
+                  value={lowerBound}
+                  onChange={e => {
+                    setLowerBound(Number(e.target.value));
+                    plugin.current.setRange(Number(e.target.value), upperBound);
+                  }}
+                  className="w-20 border rounded px-2 py-1 mx-2"
+                  style={{ width: "5em" }}
+                />
+              </label>
+              <label className="ml-2">
+                Upper:
+                <input
+                  type="number"
+                  value={upperBound}
+                  onChange={e => {
+                    setUpperBound(Number(e.target.value));
+                    plugin.current.setRange(lowerBound, Number(e.target.value));
+                  }}
+                  className="w-20 border rounded px-2 py-1 mx-2"
+                  style={{ width: "5em" }}
+                />
+              </label>
+            </span>
+        )}
+      </div>
+      <div className="relative">
+        {display}
+      </div>
     </>
   );
 }
