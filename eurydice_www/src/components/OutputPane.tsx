@@ -3,39 +3,66 @@ import { Line } from "react-chartjs-2";
 import { Distribution } from "../util";
 import { Chart, ChartData, registerables } from "chart.js";
 import { DarkModeContext } from "./DarkModeSwitcher";
-import { generateValuesOnlyCSV, generateAnyDiceFormatCSV, downloadCSV, DistributionData } from "../utils/csvExport";
-import { ChartJsRangeSelect, makeChartJsRangeSelect } from "../utils/chartJsRangeSelect";
+import {
+  generateValuesOnlyCSV,
+  generateAnyDiceFormatCSV,
+  downloadCSV,
+  DistributionData,
+} from "../utils/csvExport";
+import {
+  ChartJsRangeSelect,
+  makeChartJsRangeSelect,
+} from "../utils/chartJsRangeSelect";
 Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
   const [displayMode, setDisplayMode] = React.useState(
-    DisplayMode.Distribution,
+    DisplayMode.Distribution
   );
   const [tableMode, setTableMode] = React.useState(false);
   const [showExportMenu, setShowExportMenu] = React.useState(false);
   const [showBracketing, setShowBracketing] = React.useState(false);
   const [lowerBound, setLowerBound] = React.useState(0);
   const [upperBound, setUpperBound] = React.useState(0);
-  const plugin = React.useRef<ChartJsRangeSelect>(makeChartJsRangeSelect({
-    onRangeChange: (startValue, endValue) => {
-      setShowBracketing(true);
-      setLowerBound(startValue < endValue ? startValue : endValue);
-      setUpperBound(startValue > endValue ? startValue : endValue);
-    }
-  }));
+
+  // The plugin is a ref because we can't recreate it every time the distributions change.
+  const plugin = React.useRef<ChartJsRangeSelect>(
+    makeChartJsRangeSelect({
+      onRangeChange: (startValue, endValue) => {
+        setShowBracketing(true);
+        setLowerBound(startValue < endValue ? startValue : endValue);
+        setUpperBound(startValue > endValue ? startValue : endValue);
+      },
+    })
+  );
+
+  // Keep the range selection plugin's offset in sync with the minimum outcome.
+  React.useEffect(() => {
+    plugin.current.setOffset(Math.min(
+      ...Array.from(props.distributions)
+        .map(([_name, distribution]) =>
+          distribution.probabilities.map(([x]) => x)
+        )
+        .flat()
+    ));
+  }, [props.distributions]);
 
   const isDarkMode = React.useContext(DarkModeContext);
   const tickColor = isDarkMode ? "gray" : "lightgray";
   const gridColor = isDarkMode ? "gray" : "lightgray";
   const textColor = isDarkMode ? "white" : "lightgray";
 
-  const handleExport = (generate: (distributions: DistributionData[]) => string) => {
-    const distributionData = props.distributions.map(([name, distribution]) => ({
-      name,
-      distribution
-    }));
+  const handleExport = (
+    generate: (distributions: DistributionData[]) => string
+  ) => {
+    const distributionData = props.distributions.map(
+      ([name, distribution]) => ({
+        name,
+        distribution,
+      })
+    );
     const csv = generate(distributionData);
-    downloadCSV(csv, 'distributions_values.csv');
+    downloadCSV(csv, "distributions_values.csv");
     setShowExportMenu(false);
   };
 
@@ -133,6 +160,7 @@ export default function OutputPane(props: OutputPaneProps) {
             onClick={() => {
               setShowBracketing(!showBracketing);
               plugin.current.setEnabled(!showBracketing);
+              plugin.current.setRange(lowerBound, upperBound);
             }}
             className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded-sm"
           >
@@ -164,13 +192,14 @@ export default function OutputPane(props: OutputPaneProps) {
       </div>
       <div>
         {showBracketing && (
-            <span>
+          <div>
+            <div className="mb-4">
               <label className="mr-1">
                 Lower:
                 <input
                   type="number"
                   value={lowerBound}
-                  onChange={e => {
+                  onChange={(e) => {
                     setLowerBound(Number(e.target.value));
                     plugin.current.setRange(Number(e.target.value), upperBound);
                   }}
@@ -183,7 +212,7 @@ export default function OutputPane(props: OutputPaneProps) {
                 <input
                   type="number"
                   value={upperBound}
-                  onChange={e => {
+                  onChange={(e) => {
                     setUpperBound(Number(e.target.value));
                     plugin.current.setRange(lowerBound, Number(e.target.value));
                   }}
@@ -191,12 +220,16 @@ export default function OutputPane(props: OutputPaneProps) {
                   style={{ width: "5em" }}
                 />
               </label>
-            </span>
+            </div>
+            <BracketingTable
+              distributions={props.distributions}
+              lowerBound={lowerBound}
+              upperBound={upperBound}
+            />
+          </div>
         )}
       </div>
-      <div className="relative">
-        {display}
-      </div>
+      <div className="relative">{display}</div>
     </>
   );
 }
@@ -212,6 +245,12 @@ interface ProbabilityTableProps {
   color: string;
 }
 
+interface BracketingTableProps {
+  distributions: [string, Distribution][];
+  lowerBound: number;
+  upperBound: number;
+}
+
 function ProbabilityTable({
   name,
   distribution,
@@ -224,11 +263,11 @@ function ProbabilityTable({
 
   const mean = outcomes.reduce(
     (sum, val, i) => sum + val * probabilities[i],
-    0,
+    0
   );
   const variance = outcomes.reduce(
     (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
-    0,
+    0
   );
   const stdDev = Math.sqrt(variance);
   const min = Math.min(...outcomes);
@@ -297,6 +336,83 @@ function ProbabilityTable({
   );
 }
 
+function BracketingTable({
+  distributions,
+  lowerBound,
+  upperBound,
+}: BracketingTableProps) {
+  const calculateProbabilities = (
+    distribution: Distribution,
+    lower: number,
+    upper: number
+  ) => {
+    let pLower = 0; // P(X < Lower)
+    let pBetween = 0; // P(Lower <= X <= Upper)
+    let pUpper = 0; // P(X > Upper)
+
+    for (const [outcome, probability] of distribution.probabilities) {
+      if (outcome < lower) {
+        pLower += probability;
+      } else if (outcome >= lower && outcome <= upper) {
+        pBetween += probability;
+      } else if (outcome > upper) {
+        pUpper += probability;
+      }
+    }
+
+    return {
+      pLower: pLower * 100,
+      pBetween: pBetween * 100,
+      pUpper: pUpper * 100,
+    };
+  };
+
+  const baseClassName = "border border-gray-300 px-2 py-1 text-center";
+  const headerClassName =
+    "border border-gray-300 px-2 py-1 text-center font-semibold bg-gray-100";
+  const colorGenerator = new ColorGenerator();
+  const colors = distributions.map(() => colorGenerator.nextColor());
+
+  return (
+    <div className="mb-4">
+      <table className="border-collapse border border-gray-300 w-full">
+        <thead>
+          <tr>
+            <th className={headerClassName}>Distribution</th>
+            <th className={headerClassName}>P(X &lt; {lowerBound})</th>
+            <th className={headerClassName}>
+              P({lowerBound} ≤ X ≤ {upperBound})
+            </th>
+            <th className={headerClassName}>P(X &gt; {upperBound})</th>
+          </tr>
+        </thead>
+        <tbody>
+          {distributions.map(([name, distribution], index) => {
+            const { pLower, pBetween, pUpper } = calculateProbabilities(
+              distribution,
+              lowerBound,
+              upperBound
+            );
+            return (
+              <tr key={index}>
+                <td
+                  className="border border-gray-300 px-2 py-1 font-medium text-left text-white"
+                  style={{ backgroundColor: colors[index] }}
+                >
+                  {name}
+                </td>
+                <td className={baseClassName}>{pLower.toFixed(2)}%</td>
+                <td className={baseClassName}>{pBetween.toFixed(2)}%</td>
+                <td className={baseClassName}>{pUpper.toFixed(2)}%</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 enum DisplayMode {
   Distribution,
   AtMost,
@@ -319,17 +435,17 @@ function splitmix32(a: number) {
 
 function prepareChartData(
   chartData: [string, Distribution][],
-  mode: DisplayMode,
+  mode: DisplayMode
 ): ChartData<"line", number[], number> {
   // Compute the range of outcomes
   const outcomes = Array.from(chartData).flatMap((nameAndDist) => {
-    return nameAndDist[1].probabilities.map(([x, _]) => x);
+    return nameAndDist[1].probabilities.map(([x]) => x);
   });
   const min_outcome = Math.min(...outcomes);
   const max_outcome = Math.max(...outcomes);
   const range = Array.from(
     { length: max_outcome - min_outcome + 1 },
-    (_, i) => i + min_outcome,
+    (_, i) => i + min_outcome
   );
   const datasets = [];
   const colorGenerator = new ColorGenerator();
@@ -385,6 +501,8 @@ class ColorGenerator {
   }
 
   nextColor(): string {
-    return `rgba(${Math.floor(this.rng() * 256)}, ${Math.floor(this.rng() * 256)}, ${Math.floor(this.rng() * 256)}, 1.0)`;
+    return `rgba(${Math.floor(this.rng() * 256)}, ${Math.floor(
+      this.rng() * 256
+    )}, ${Math.floor(this.rng() * 256)}, 1.0)`;
   }
 }
