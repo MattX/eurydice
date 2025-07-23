@@ -1,0 +1,5 @@
+\\\ Computes the probability of each type of tile to produce N times over a 60 round game
+loop X over {2..7} {
+  COMPLEMENT: 14 - X
+  output 60d(2d6 = X) named "tile with [X] or [COMPLEMENT]"
+}
