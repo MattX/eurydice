@@ -162,15 +162,15 @@ export default function OutputPane(props: OutputPaneProps) {
               plugin.current.setEnabled(!showBracketing);
               plugin.current.setRange(lowerBound, upperBound);
             }}
-            className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded-sm"
+            className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 py-1 px-3 rounded-sm"
           >
             Bracket {showBracketing ? "▲" : "▼"}
-          </button>
+          </button>{" "}
           <button
             onClick={() => setShowExportMenu(!showExportMenu)}
-            className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded-sm"
+            className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 py-1 px-3 rounded-sm"
           >
-            Export ▼
+            Export {showExportMenu ? "▲" : "▼"}
           </button>
           {showExportMenu && (
             <div className="absolute right-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-10 min-w-48">
@@ -369,7 +369,7 @@ function BracketingTable({
 
   const baseClassName = "border border-gray-300 px-2 py-1 text-center";
   const headerClassName =
-    "border border-gray-300 px-2 py-1 text-center font-semibold bg-gray-100";
+    "border border-gray-300 px-2 py-1 text-center font-semibold";
   const colorGenerator = new ColorGenerator();
   const colors = distributions.map(() => colorGenerator.nextColor());
 
@@ -396,7 +396,7 @@ function BracketingTable({
             return (
               <tr key={index}>
                 <td
-                  className="border border-gray-300 px-2 py-1 font-medium text-left text-white"
+                  className="border border-gray-300 px-2 py-1"
                   style={{ backgroundColor: colors[index] }}
                 >
                   {name}

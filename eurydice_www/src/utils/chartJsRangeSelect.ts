@@ -87,12 +87,14 @@ export function makeChartJsRangeSelect(
       chart = newChart;
       chart.canvas.addEventListener("mousedown", mouseDown);
       chart.canvas.addEventListener("mouseup", mouseUp);
+      chart.canvas.addEventListener("mouseleave", mouseUp);
       chart.canvas.addEventListener("mousemove", mouseMove);
     },
 
     stop: (chart) => {
       chart.canvas?.removeEventListener("mousedown", mouseDown);
       chart.canvas?.removeEventListener("mouseup", mouseUp);
+      chart.canvas?.removeEventListener("mouseleave", mouseUp);
       chart.canvas?.removeEventListener("mousemove", mouseMove);
     },
 
