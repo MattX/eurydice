@@ -6,8 +6,10 @@ export interface ChartJsRangeSelectOptions {
 }
 
 export interface ChartJsRangeSelect {
-  // Clear the range and stop showing the range selection.
+  // Toggle whether user can interact with the plugin.
   setEnabled: (enabled: boolean) => void;
+  // Clear the range and stop showing the range selection.
+  setActive: (active: boolean) => void;
   // Set the range to be shown.
   setRange: (startValue: number, endValue: number) => void;
   // Set the value associated with tick 0.
@@ -19,7 +21,8 @@ export interface ChartJsRangeSelect {
 export function makeChartJsRangeSelect(
   options: ChartJsRangeSelectOptions
 ): ChartJsRangeSelect {
-  let enabled = false;
+  let enabled = true; // Controls interaction
+  let active = false; // Controls visual display
   let startValue = 0;
   let endValue = 0;
   let offset = 0;
@@ -28,11 +31,15 @@ export function makeChartJsRangeSelect(
   let isDragging = false;
 
   const setEnabled = (newEnabled: boolean) => {
+    enabled = newEnabled;
+  };
+
+  const setActive = (newActive: boolean) => {
     if (isDragging) {
       return;
     }
 
-    enabled = newEnabled;
+    active = newActive;
     chart?.update();
   };
 
@@ -50,12 +57,12 @@ export function makeChartJsRangeSelect(
   };
 
   const mouseDown = (event: MouseEvent) => {
-    if (chart === null) {
+    if (chart === null || !enabled) {
       return;
     }
 
     isDragging = true;
-    enabled = true;
+    active = true;
     startValue = chart.scales["x"].getValueForPixel(event.offsetX) ?? 0;
     endValue = startValue;
     options.onRangeChange?.(
@@ -69,7 +76,7 @@ export function makeChartJsRangeSelect(
   };
 
   const mouseMove = (event: MouseEvent) => {
-    if (chart === null || !isDragging) {
+    if (chart === null || !enabled || !isDragging) {
       return;
     }
 
@@ -99,7 +106,7 @@ export function makeChartJsRangeSelect(
     },
 
     beforeDraw: (chart) => {
-      if (!enabled) {
+      if (!active) {
         return;
       }
 
@@ -118,6 +125,7 @@ export function makeChartJsRangeSelect(
 
   return {
     setEnabled,
+    setActive,
     setRange,
     setOffset,
     plugin,
