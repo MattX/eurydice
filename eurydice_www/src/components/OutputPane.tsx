@@ -119,8 +119,8 @@ export default function OutputPane(props: OutputPaneProps) {
 
   return (
     <>
-      <div className="flex flex-row mb-4 px-2">
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
+      <div className="flex flex-wrap items-center gap-1 mb-4 px-2">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
           <input
             type="checkbox"
             checked={tableMode}
@@ -128,7 +128,7 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           Table
         </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
           <input
             type="radio"
             name="displayMode"
@@ -137,7 +137,7 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           Distribution
         </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
           <input
             type="radio"
             name="displayMode"
@@ -146,7 +146,7 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           At least
         </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
+        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
           <input
             type="radio"
             name="displayMode"
@@ -155,7 +155,7 @@ export default function OutputPane(props: OutputPaneProps) {
           />{" "}
           At most
         </label>
-        <div className="relative ml-auto">
+        <div className="relative flex gap-1 ml-auto">
           <button
             onClick={() => {
               setShowBracketing(!showBracketing);
@@ -165,7 +165,7 @@ export default function OutputPane(props: OutputPaneProps) {
             className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 py-1 px-3 rounded-sm"
           >
             Bracket {showBracketing ? "▲" : "▼"}
-          </button>{" "}
+          </button>
           <button
             onClick={() => setShowExportMenu(!showExportMenu)}
             className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 py-1 px-3 rounded-sm"
@@ -173,7 +173,7 @@ export default function OutputPane(props: OutputPaneProps) {
             Export {showExportMenu ? "▲" : "▼"}
           </button>
           {showExportMenu && (
-            <div className="absolute right-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-10 min-w-48">
+            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded shadow-lg z-10 min-w-48">
               <button
                 onClick={() => handleExport(generateValuesOnlyCSV)}
                 className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-black"
