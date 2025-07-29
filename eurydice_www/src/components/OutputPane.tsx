@@ -3,12 +3,7 @@ import { Line } from "react-chartjs-2";
 import { Distribution } from "../util";
 import { Chart, registerables } from "chart.js";
 import { DarkModeContext } from "./DarkModeSwitcher";
-import {
-  generateValuesOnlyCSV,
-  generateAnyDiceFormatCSV,
-  downloadCSV,
-  DistributionData,
-} from "../utils/csvExport";
+import ExportModal from "./ExportModal";
 import {
   ChartJsRangeSelect,
   makeChartJsRangeSelect,
@@ -26,10 +21,10 @@ export default function OutputPane(props: OutputPaneProps) {
     DisplayMode.Distribution
   );
   const [tableMode, setTableMode] = React.useState(false);
-  const [showExportMenu, setShowExportMenu] = React.useState(false);
   const [showBracketing, setShowBracketing] = React.useState(false);
   const [lowerBound, setLowerBound] = React.useState(0);
   const [upperBound, setUpperBound] = React.useState(0);
+  const [showExportModal, setShowExportModal] = React.useState(false);
 
   // The plugin is a ref because we can't recreate it every time the distributions change.
   const plugin = React.useRef<ChartJsRangeSelect>(
@@ -63,24 +58,11 @@ export default function OutputPane(props: OutputPaneProps) {
     plugin.current.setEnabled(displayMode !== DisplayMode.Transposed);
   }, [displayMode]);
 
+
   const isDarkMode = React.useContext(DarkModeContext);
   const tickColor = isDarkMode ? "gray" : "lightgray";
   const gridColor = isDarkMode ? "gray" : "lightgray";
   const textColor = isDarkMode ? "white" : "lightgray";
-
-  const handleExport = (
-    generate: (distributions: DistributionData[]) => string
-  ) => {
-    const distributionData = props.distributions.map(
-      ([name, distribution]) => ({
-        name,
-        distribution,
-      })
-    );
-    const csv = generate(distributionData);
-    downloadCSV(csv, "distributions_values.csv");
-    setShowExportMenu(false);
-  };
 
   let display;
   if (tableMode) {
@@ -211,27 +193,11 @@ export default function OutputPane(props: OutputPaneProps) {
             Bracket {showBracketing ? "▲" : "▼"}
           </button>
           <button
-            onClick={() => setShowExportMenu(!showExportMenu)}
+            onClick={() => setShowExportModal(true)}
             className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 py-1 px-3 rounded-sm"
           >
-            Export {showExportMenu ? "▲" : "▼"}
+            Export
           </button>
-          {showExportMenu && (
-            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded shadow-lg z-10 min-w-48">
-              <button
-                onClick={() => handleExport(generateValuesOnlyCSV)}
-                className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-black"
-              >
-                CSV (Values Only)
-              </button>
-              <button
-                onClick={() => handleExport(generateAnyDiceFormatCSV)}
-                className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-black"
-              >
-                CSV (AnyDice Format)
-              </button>
-            </div>
-          )}
         </div>
       </div>
       <div>
@@ -287,6 +253,12 @@ export default function OutputPane(props: OutputPaneProps) {
         )}
       </div>
       <div className="relative" style={{aspectRatio: "1/1"}}>{display}</div>
+      
+      <ExportModal 
+        distributions={props.distributions.map(([name, distribution]) => ({ name, distribution }))}
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+      />
     </>
   );
 }
