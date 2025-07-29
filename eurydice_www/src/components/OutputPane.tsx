@@ -12,8 +12,13 @@ import {
   DisplayMode,
   prepareChartData,
   ColorGenerator,
-  partialSums,
 } from "../utils/chartData";
+import {
+  getAllUniqueOutcomes,
+  computeTableData,
+  computeDistributionStatistics,
+  calculateBracketingProbabilities,
+} from "../utils/tableData";
 Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
@@ -285,75 +290,9 @@ function CombinedProbabilityTable({
   const colorGenerator = new ColorGenerator();
   const colors = distributions.map(() => colorGenerator.nextColor());
 
-  // Get all unique outcomes across all distributions
-  const allOutcomes = new Set<number>();
-  distributions.forEach(([, distribution]) => {
-    distribution.probabilities.forEach(([outcome]) => {
-      allOutcomes.add(outcome);
-    });
-  });
-  const sortedOutcomes = Array.from(allOutcomes).sort((a, b) => a - b);
-
-  // Pre-compute all probability values for each outcome and distribution
-  const tableData = sortedOutcomes.map((outcome) => {
-    const row = { outcome, values: [] as string[] };
-    distributions.forEach(([, distribution]) => {
-      const probabilityEntry = distribution.probabilities.find(
-        ([outcomeValue]) => outcomeValue === outcome
-      );
-      
-      let probability = probabilityEntry ? probabilityEntry[1] * 100 : 0;
-      
-      // Apply mode transformations
-      if (probability > 0) {
-        const allProbs = distribution.probabilities.map(([, p]) => p * 100);
-        const outcomes = distribution.probabilities.map(([o]) => o);
-        const outcomeIndex = outcomes.indexOf(outcome);
-        
-        if (outcomeIndex !== -1) {
-          switch (mode) {
-            case DisplayMode.AtMost: {
-              probability = partialSums(allProbs, false)[outcomeIndex];
-              break;
-            }
-            case DisplayMode.AtLeast: {
-              probability = partialSums(allProbs, true)[outcomeIndex];
-              break;
-            }
-          }
-        }
-      }
-      
-      row.values.push(probability > 0 ? `${probability.toFixed(2)}%` : '-');
-    });
-    return row;
-  });
-
-  // Pre-compute statistics for each distribution
-  const statisticsData = distributions.map(([, distribution]) => {
-    const data = distribution.probabilities;
-    const outcomes = data.map(([outcome]) => outcome);
-    const probabilities = data.map(([, probability]) => probability);
-
-    const mean = outcomes.reduce(
-      (sum, val, i) => sum + val * probabilities[i],
-      0
-    );
-    const variance = outcomes.reduce(
-      (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
-      0
-    );
-    const stdDev = Math.sqrt(variance);
-    const min = Math.min(...outcomes);
-    const max = Math.max(...outcomes);
-
-    return {
-      mean: mean.toFixed(2),
-      stdDev: stdDev.toFixed(2),
-      min: min.toString(),
-      max: max.toString(),
-    };
-  });
+  const sortedOutcomes = getAllUniqueOutcomes(distributions);
+  const tableData = computeTableData(distributions, mode, sortedOutcomes);
+  const statisticsData = computeDistributionStatistics(distributions);
 
   const baseClassName = "border px-2 py-1 text-center";
   const headerClassName = "border px-2 py-1 text-center font-semibold sticky top-0 left-0 z-20";
@@ -430,31 +369,6 @@ function BracketingTable({
   lowerBound,
   upperBound,
 }: BracketingTableProps) {
-  const calculateProbabilities = (
-    distribution: Distribution,
-    lower: number,
-    upper: number
-  ) => {
-    let pLower = 0; // P(X < Lower)
-    let pBetween = 0; // P(Lower <= X <= Upper)
-    let pUpper = 0; // P(X > Upper)
-
-    for (const [outcome, probability] of distribution.probabilities) {
-      if (outcome < lower) {
-        pLower += probability;
-      } else if (outcome >= lower && outcome <= upper) {
-        pBetween += probability;
-      } else if (outcome > upper) {
-        pUpper += probability;
-      }
-    }
-
-    return {
-      pLower: pLower * 100,
-      pBetween: pBetween * 100,
-      pUpper: pUpper * 100,
-    };
-  };
 
   const baseClassName = "border border-gray-300 px-2 py-1 text-center";
   const headerClassName =
@@ -477,7 +391,7 @@ function BracketingTable({
         </thead>
         <tbody>
           {distributions.map(([name, distribution], index) => {
-            const { pLower, pBetween, pUpper } = calculateProbabilities(
+            const { pLower, pBetween, pUpper } = calculateBracketingProbabilities(
               distribution,
               lowerBound,
               upperBound
