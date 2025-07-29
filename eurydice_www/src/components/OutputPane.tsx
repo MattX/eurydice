@@ -35,9 +35,14 @@ export default function OutputPane(props: OutputPaneProps) {
   const plugin = React.useRef<ChartJsRangeSelect>(
     makeChartJsRangeSelect({
       onRangeChange: (startValue, endValue) => {
-        setShowBracketing(true);
         setLowerBound(startValue < endValue ? startValue : endValue);
         setUpperBound(startValue > endValue ? startValue : endValue);
+      },
+      onDragEnd: (startValue, endValue) => {
+        if (startValue !== endValue) {
+          // Avoid showing bracketing when the user has just made one click instead of a drag.
+          setShowBracketing(true);
+        }
       },
     })
   );
@@ -102,6 +107,7 @@ export default function OutputPane(props: OutputPaneProps) {
         options={{
           interaction: {
             intersect: false,
+            mode: "index",
           },
           scales: {
             y: {
@@ -120,10 +126,22 @@ export default function OutputPane(props: OutputPaneProps) {
             },
           },
           animation: false,
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const value = context.parsed.y;
+                  return `${context.dataset.label}: ${value.toFixed(3)}%`;
+                },
+              },
+            },
+          },
         }}
         plugins={[plugin.current.plugin]}
         width="100%"
         height="100%"
+        // Prevent the canvas from being dragged when the user clicks and drags for bracketing.
+        style={{userSelect: "none"}}
       />
     );
   }
@@ -232,7 +250,15 @@ export default function OutputPane(props: OutputPaneProps) {
                   value={lowerBound}
                   onChange={(e) => {
                     setLowerBound(Number(e.target.value));
-                    plugin.current.setRange(Number(e.target.value), upperBound);
+                    const newUpperBound = Math.max(
+                      Number(e.target.value),
+                      upperBound
+                    );
+                    setUpperBound(newUpperBound);
+                    plugin.current.setRange(
+                      Number(e.target.value),
+                      newUpperBound
+                    );
                   }}
                   className="w-20 border rounded px-2 py-1 mx-2"
                   style={{ width: "5em" }}
@@ -245,7 +271,12 @@ export default function OutputPane(props: OutputPaneProps) {
                   value={upperBound}
                   onChange={(e) => {
                     setUpperBound(Number(e.target.value));
-                    plugin.current.setRange(lowerBound, Number(e.target.value));
+                    const newLowerBound = Math.min(
+                      Number(e.target.value),
+                      lowerBound
+                    );
+                    setLowerBound(newLowerBound);
+                    plugin.current.setRange(newLowerBound, Number(e.target.value));
                   }}
                   className="w-20 border rounded px-2 py-1 mx-2"
                   style={{ width: "5em" }}

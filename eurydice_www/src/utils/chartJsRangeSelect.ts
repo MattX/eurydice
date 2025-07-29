@@ -3,6 +3,8 @@ import { Chart, Plugin } from "chart.js";
 export interface ChartJsRangeSelectOptions {
   // Called when the range is changed.
   onRangeChange?: (startValue: number, endValue: number) => void;
+  // Called when the user releases the mouse button.
+  onDragEnd?: (startValue: number, endValue: number) => void;
 }
 
 export interface ChartJsRangeSelect {
@@ -72,6 +74,9 @@ export function makeChartJsRangeSelect(
   };
 
   const mouseUp = () => {
+    if (isDragging) {
+      options.onDragEnd?.(startValue + offset, endValue + offset);
+    }
     isDragging = false;
   };
 
