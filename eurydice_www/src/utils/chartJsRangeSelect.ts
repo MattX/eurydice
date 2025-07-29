@@ -55,7 +55,12 @@ export function makeChartJsRangeSelect(
     startValue = startValue + offset - newOffset;
     endValue = endValue + offset - newOffset;
     offset = newOffset;
-    chart?.update();
+    try {
+      chart?.update();
+    } catch (error) {
+      // This can happen if the chart has changed I guess
+      console.error("Error updating chart:", error);
+    }
   };
 
   const mouseDown = (event: MouseEvent) => {

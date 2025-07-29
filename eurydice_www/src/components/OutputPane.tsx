@@ -84,17 +84,12 @@ export default function OutputPane(props: OutputPaneProps) {
 
   let display;
   if (tableMode) {
-    const colorGenerator = new ColorGenerator();
-    const colors = props.distributions.map(() => colorGenerator.nextColor());
-    display = props.distributions.map(([name, dist], index) => (
-      <ProbabilityTable
-        key={index}
-        name={name}
-        distribution={dist}
+    display = (
+      <CombinedProbabilityTable
+        distributions={props.distributions}
         mode={displayMode}
-        color={colors[index]}
       />
-    ));
+    );
   } else {
     const datasets = prepareChartData(props.distributions, displayMode);
     const grid = {
@@ -291,7 +286,7 @@ export default function OutputPane(props: OutputPaneProps) {
           </div>
         )}
       </div>
-      <div className="relative">{display}</div>
+      <div className="relative" style={{aspectRatio: "1/1"}}>{display}</div>
     </>
   );
 }
@@ -300,11 +295,9 @@ export interface OutputPaneProps {
   distributions: [string, Distribution][];
 }
 
-interface ProbabilityTableProps {
-  name: string;
-  distribution: Distribution;
+interface CombinedProbabilityTableProps {
+  distributions: [string, Distribution][];
   mode: DisplayMode;
-  color: string;
 }
 
 interface BracketingTableProps {
@@ -313,87 +306,149 @@ interface BracketingTableProps {
   upperBound: number;
 }
 
-function ProbabilityTable({
-  name,
-  distribution,
+function CombinedProbabilityTable({
+  distributions,
   mode,
-  color,
-}: ProbabilityTableProps) {
-  const data = distribution.probabilities;
-  const outcomes = data.map(([outcome]) => outcome);
-  const probabilities = data.map(([, probability]) => probability);
+}: CombinedProbabilityTableProps) {
+  const colorGenerator = new ColorGenerator();
+  const colors = distributions.map(() => colorGenerator.nextColor());
 
-  const mean = outcomes.reduce(
-    (sum, val, i) => sum + val * probabilities[i],
-    0
-  );
-  const variance = outcomes.reduce(
-    (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
-    0
-  );
-  const stdDev = Math.sqrt(variance);
-  const min = Math.min(...outcomes);
-  const max = Math.max(...outcomes);
+  // Get all unique outcomes across all distributions
+  const allOutcomes = new Set<number>();
+  distributions.forEach(([, distribution]) => {
+    distribution.probabilities.forEach(([outcome]) => {
+      allOutcomes.add(outcome);
+    });
+  });
+  const sortedOutcomes = Array.from(allOutcomes).sort((a, b) => a - b);
 
-  let probs = data.map(([, probability]) => probability * 100);
-  switch (mode) {
-    case DisplayMode.AtMost: {
-      probs = partialSums(probs, false);
-      break;
-    }
-    case DisplayMode.AtLeast: {
-      probs = partialSums(probs, true);
-      break;
-    }
-  }
-  const outData = [];
-  for (let i = outData.length; i < outcomes.length; i++) {
-    outData[i] = [data[i][0], probs[i]];
-  }
+  // Pre-compute all probability values for each outcome and distribution
+  const tableData = sortedOutcomes.map((outcome) => {
+    const row = { outcome, values: [] as string[] };
+    distributions.forEach(([, distribution]) => {
+      const probabilityEntry = distribution.probabilities.find(
+        ([outcomeValue]) => outcomeValue === outcome
+      );
+      
+      let probability = probabilityEntry ? probabilityEntry[1] * 100 : 0;
+      
+      // Apply mode transformations
+      if (probability > 0) {
+        const allProbs = distribution.probabilities.map(([, p]) => p * 100);
+        const outcomes = distribution.probabilities.map(([o]) => o);
+        const outcomeIndex = outcomes.indexOf(outcome);
+        
+        if (outcomeIndex !== -1) {
+          switch (mode) {
+            case DisplayMode.AtMost: {
+              probability = partialSums(allProbs, false)[outcomeIndex];
+              break;
+            }
+            case DisplayMode.AtLeast: {
+              probability = partialSums(allProbs, true)[outcomeIndex];
+              break;
+            }
+          }
+        }
+      }
+      
+      row.values.push(probability > 0 ? `${probability.toFixed(2)}%` : '-');
+    });
+    return row;
+  });
 
-  const baseClassName = "border border-gray-300 px-1";
+  // Pre-compute statistics for each distribution
+  const statisticsData = distributions.map(([, distribution]) => {
+    const data = distribution.probabilities;
+    const outcomes = data.map(([outcome]) => outcome);
+    const probabilities = data.map(([, probability]) => probability);
+
+    const mean = outcomes.reduce(
+      (sum, val, i) => sum + val * probabilities[i],
+      0
+    );
+    const variance = outcomes.reduce(
+      (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
+      0
+    );
+    const stdDev = Math.sqrt(variance);
+    const min = Math.min(...outcomes);
+    const max = Math.max(...outcomes);
+
+    return {
+      mean: mean.toFixed(2),
+      stdDev: stdDev.toFixed(2),
+      min: min.toString(),
+      max: max.toString(),
+    };
+  });
+
+  const baseClassName = "border px-2 py-1 text-center";
+  const headerClassName = "border px-2 py-1 text-center font-semibold sticky top-0 left-0 z-20";
+  const leftColumnClassName = "border px-2 py-1 text-center font-semibold sticky left-0 z-10";
 
   return (
-    <div className="inline-block m-2 align-top">
-      <table className="border-collapse border border-gray-300">
+    <div className="overflow-x-auto">
+      <table className="border-collapse border w-full">
         <thead>
           <tr>
-            <th
-              colSpan={2}
-              className="text-white p-2 text-center"
-              style={{ backgroundColor: color }}
-            >
-              {name}
-            </th>
+            <th className={headerClassName}>Outcome</th>
+            {distributions.map(([name], index) => (
+              <th
+                key={index}
+                className="border px-2 py-1 text-center font-semibold"
+                style={{ backgroundColor: colors[index] }}
+              >
+                {name}
+              </th>
+            ))}
           </tr>
         </thead>
-        <tbody className="text-sm">
-          <tr>
-            <td className={`${baseClassName} font-semibold`}>Mean</td>
-            <td className={baseClassName}>{mean.toFixed(2)}</td>
-          </tr>
-          <tr>
-            <td className={`${baseClassName} font-semibold`}>StdDev</td>
-            <td className={baseClassName}>{stdDev.toFixed(2)}</td>
-          </tr>
-          <tr>
-            <td className={`${baseClassName} font-semibold`}>Min</td>
-            <td className={baseClassName}>{min}</td>
-          </tr>
-          <tr>
-            <td className={`${baseClassName} font-semibold`}>Max</td>
-            <td className={baseClassName}>{max}</td>
-          </tr>
-          {outData.map(([outcome, probability], index) => (
-            <tr key={index}>
-              <td className={baseClassName}>{outcome}</td>
-              <td className={`${baseClassName} text-right`}>
-                {probability.toFixed(2)}%
-              </td>
+        <tbody>
+          {tableData.map((row) => (
+            <tr key={row.outcome}>
+              <td className={leftColumnClassName}>{row.outcome}</td>
+              {row.values.map((value, index) => (
+                <td key={index} className={`${baseClassName} text-right`}>
+                  {value}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
       </table>
+      
+      {/* Statistics table */}
+      <div className="mt-4">
+        <table className="border-collapse border w-full">
+          <thead>
+            <tr>
+              <th className={headerClassName}>Statistic</th>
+              {distributions.map(([name], index) => (
+                <th
+                  key={index}
+                  className="border px-2 py-1 text-center font-semibold text-white"
+                  style={{ backgroundColor: colors[index] }}
+                >
+                  {name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {['Mean', 'StdDev', 'Min', 'Max'].map((stat) => (
+              <tr key={stat}>
+                <td className={leftColumnClassName}>{stat}</td>
+                {statisticsData.map((stats, index) => (
+                  <td key={index} className={`${baseClassName} text-right`}>
+                    {stats[stat.toLowerCase() as keyof typeof stats]}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
