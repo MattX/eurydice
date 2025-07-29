@@ -18,6 +18,7 @@ import {
   computeTableData,
   computeDistributionStatistics,
   calculateBracketingProbabilities,
+  DistributionStatistics,
 } from "../utils/tableData";
 Chart.register(...registerables);
 
@@ -300,7 +301,7 @@ function CombinedProbabilityTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="border-collapse border w-full">
+      <table className="border-collapse border w-full table-fixed">
         <thead>
           <tr>
             <th className={headerClassName}>Outcome</th>
@@ -331,7 +332,7 @@ function CombinedProbabilityTable({
       
       {/* Statistics table */}
       <div className="mt-4">
-        <table className="border-collapse border w-full">
+        <table className="border-collapse border w-full table-fixed">
           <thead>
             <tr>
               <th className={headerClassName}>Statistic</th>
@@ -347,12 +348,12 @@ function CombinedProbabilityTable({
             </tr>
           </thead>
           <tbody>
-            {['Mean', 'StdDev', 'Min', 'Max'].map((stat) => (
+            {[['Mean', 'mean'], ['StdDev', 'stdDev'], ['Min', 'min'], ['Max', 'max']].map(([stat, key]) => (
               <tr key={stat}>
                 <td className={leftColumnClassName}>{stat}</td>
                 {statisticsData.map((stats, index) => (
                   <td key={index} className={`${baseClassName} text-right`}>
-                    {stats[stat.toLowerCase() as keyof typeof stats]}
+                    {stats[key as keyof DistributionStatistics]}
                   </td>
                 ))}
               </tr>

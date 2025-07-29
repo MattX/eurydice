@@ -13,26 +13,30 @@ describe('tableData', () => {
     [
       'output 1',
       {
+        // Mean = 4.2, Stddev = 1.249
         probabilities: [
-          [2, 0.111111111111],
-          [3, 0.222222222222],
-          [4, 0.333333333333],
-          [5, 0.222222222222],
-          [6, 0.111111111111]
+          //           At least At most
+          [2, 0.1], // 0.1   1
+          [3, 0.2], // 0.3   0.9
+          [4, 0.3], // 0.6   0.7
+          [5, 0.2], // 0.8   0.4
+          [6, 0.2]  // 1.0   0.2
         ]
       }
     ],
     [
       'output 2',
       {
+        // Mean = 6.543, stddev = 1.770
         probabilities: [
-          [3, 0.037037037037],
-          [4, 0.111111111111],
-          [5, 0.222222222222],
-          [6, 0.259259259259],
-          [7, 0.222222222222],
-          [8, 0.111111111111],
-          [9, 0.037037037037]
+          //           At least At most
+          [3, 0.037], // 0.037 1
+          [4, 0.111], // 0.148 0.963
+          [5, 0.222], // 0.370 0.852
+          [6, 0.013], // 0.383 0.630
+          [7, 0.321], // 0.704 0.617
+          [8, 0.111], // 0.815 0.296
+          [9, 0.185]  // 1.000 0.185
         ]
       }
     ]
@@ -84,15 +88,15 @@ describe('tableData', () => {
       
       // Check outcome 2 (exists only in output 1)
       const outcome2Row = result.find(row => row.outcome === 2);
-      expect(outcome2Row?.values).toEqual(['11.11%', '-']);
+      expect(outcome2Row?.values).toEqual(['10.00%', '-']);
       
       // Check outcome 3 (exists in both distributions)
       const outcome3Row = result.find(row => row.outcome === 3);
-      expect(outcome3Row?.values).toEqual(['22.22%', '3.70%']);
+      expect(outcome3Row?.values).toEqual(['20.00%', '3.70%']);
       
       // Check outcome 9 (exists only in output 2)
       const outcome9Row = result.find(row => row.outcome === 9);
-      expect(outcome9Row?.values).toEqual(['-', '3.70%']);
+      expect(outcome9Row?.values).toEqual(['-', '18.50%']);
     });
 
     it('should compute table data for AtMost mode', () => {
@@ -101,8 +105,8 @@ describe('tableData', () => {
 
       // Check that cumulative probabilities are calculated correctly
       const outcome4Row = result.find(row => row.outcome === 4);
-      // For output 1: outcomes 2,3,4 = 11.11% + 22.22% + 33.33% = 66.66%
-      expect(outcome4Row?.values[0]).toBe('66.67%');
+      // For output 1: at most 4 = 60%
+      expect(outcome4Row?.values[0]).toBe('60.00%');
     });
 
     it('should compute table data for AtLeast mode', () => {
@@ -111,8 +115,8 @@ describe('tableData', () => {
 
       // Check that reverse cumulative probabilities are calculated correctly
       const outcome5Row = result.find(row => row.outcome === 5);
-      // For output 1: outcomes 5,6 = 22.22% + 11.11% = 33.33%
-      expect(outcome5Row?.values[0]).toBe('33.33%');
+      // For output 1: at least 5 = 40%
+      expect(outcome5Row?.values[0]).toBe('40.00%');
     });
 
     it('should handle empty outcomes array', () => {
@@ -147,17 +151,15 @@ describe('tableData', () => {
       const stats1 = result[0];
       expect(stats1.min).toBe('2');
       expect(stats1.max).toBe('6');
-      // Mean: 2*0.111 + 3*0.222 + 4*0.333 + 5*0.222 + 6*0.111 = 4.0
-      expect(parseFloat(stats1.mean)).toBeCloseTo(4.0, 1);
-      // Standard deviation calculation
-      expect(parseFloat(stats1.stdDev)).toBeGreaterThan(0);
+      expect(parseFloat(stats1.mean)).toBeCloseTo(4.2, 2);
+      expect(parseFloat(stats1.stdDev)).toBeCloseTo(1.249, 2);
       
       // Check output 2 statistics
       const stats2 = result[1];
       expect(stats2.min).toBe('3');
       expect(stats2.max).toBe('9');
-      expect(parseFloat(stats2.mean)).toBeGreaterThan(5);
-      expect(parseFloat(stats2.mean)).toBeLessThan(7);
+      expect(parseFloat(stats2.mean)).toBeCloseTo(6.543, 2);
+      expect(parseFloat(stats2.stdDev)).toBeCloseTo(1.770, 2);
     });
 
     it('should handle single outcome distribution', () => {
@@ -207,14 +209,14 @@ describe('tableData', () => {
       const distribution = testDistributions[0][1]; // output 1
       const result = calculateBracketingProbabilities(distribution, 3, 5);
 
-      // P(X < 3): outcome 2 = 11.11%
-      expect(result.pLower).toBeCloseTo(11.11, 2);
+      // P(X < 3): outcome 2 = 10%
+      expect(result.pLower).toBeCloseTo(10, 2);
       
-      // P(3 <= X <= 5): outcomes 3,4,5 = 22.22% + 33.33% + 22.22% = 77.77%
-      expect(result.pBetween).toBeCloseTo(77.77, 1);
+      // P(3 <= X <= 5): outcomes 3,4,5 = 20% + 30% + 20% = 70%
+      expect(result.pBetween).toBeCloseTo(70, 1);
       
-      // P(X > 5): outcome 6 = 11.11%
-      expect(result.pUpper).toBeCloseTo(11.11, 2);
+      // P(X > 5): outcome 6 = 20%
+      expect(result.pUpper).toBeCloseTo(20, 2);
     });
 
     it('should handle bounds that include all outcomes', () => {
@@ -239,28 +241,28 @@ describe('tableData', () => {
       const distribution = testDistributions[0][1]; // output 1
       const result = calculateBracketingProbabilities(distribution, 4, 4);
 
-      // P(X < 4): outcomes 2,3 = 11.11% + 22.22% = 33.33%
-      expect(result.pLower).toBeCloseTo(33.33, 2);
+      // P(X < 4): outcomes 2,3 = 10% + 20% = 30%
+      expect(result.pLower).toBeCloseTo(30, 2);
       
-      // P(4 <= X <= 4): outcome 4 = 33.33%
-      expect(result.pBetween).toBeCloseTo(33.33, 2);
+      // P(4 <= X <= 4): outcome 4 = 30%
+      expect(result.pBetween).toBeCloseTo(30, 2);
       
-      // P(X > 4): outcomes 5,6 = 22.22% + 11.11% = 33.33%
-      expect(result.pUpper).toBeCloseTo(33.33, 2);
+      // P(X > 4): outcomes 5,6 = 20% + 20% = 40%
+      expect(result.pUpper).toBeCloseTo(40, 2);
     });
 
     it('should handle bounds between existing outcomes', () => {
       const distribution = testDistributions[0][1]; // output 1
       const result = calculateBracketingProbabilities(distribution, 2.5, 4.5);
 
-      // P(X < 2.5): outcome 2 = 11.11%
-      expect(result.pLower).toBeCloseTo(11.11, 2);
+      // P(X < 2.5): outcome 2 = 10%
+      expect(result.pLower).toBeCloseTo(10, 2);
       
-      // P(2.5 <= X <= 4.5): outcomes 3,4 = 22.22% + 33.33% = 55.55%
-      expect(result.pBetween).toBeCloseTo(55.55, 1);
+      // P(2.5 <= X <= 4.5): outcomes 3,4 = 20% + 30% = 50%
+      expect(result.pBetween).toBeCloseTo(50, 2);
       
-      // P(X > 4.5): outcomes 5,6 = 22.22% + 11.11% = 33.33%
-      expect(result.pUpper).toBeCloseTo(33.33, 2);
+      // P(X > 4.5): outcomes 5,6 = 20% + 20% = 40%
+      expect(result.pUpper).toBeCloseTo(40, 2);
     });
 
     it('should handle reversed bounds (lower > upper)', () => {
