@@ -2,6 +2,7 @@ pub mod ast;
 pub mod dice;
 pub mod eval;
 pub mod output;
+pub mod primitives;
 
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(

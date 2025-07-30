@@ -22,7 +22,7 @@ use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
 /// Represents a pool of identical independent dice.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Pool {
     dimension: u32,
     // Outcomes are ordered by their face value. The tuple represents (value, weight / count).

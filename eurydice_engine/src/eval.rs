@@ -6,6 +6,7 @@ use std::{
     rc::Rc,
 };
 
+
 use malachite::base::num::arithmetic::traits::Lcm;
 use malachite::{
     base::num::basic::traits::{One, Zero},
@@ -20,10 +21,11 @@ use crate::{
         self, BareListItem, BinaryOp, Expression, FunctionDefinition, ListItem, PositionOrder,
         SetParam, Statement, StaticType, UnaryOp, WithRange,
     },
-    dice::{explode, MultisetCrossProductIterator, Pool},
+    dice::{MultisetCrossProductIterator, Pool},
+    primitives::{Primitive, register_primitives},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeValue {
     Int(i32),
     List(Rc<Vec<i32>>),
@@ -69,7 +71,7 @@ impl RuntimeValue {
         }
     }
 
-    fn map_outcomes(&self, f: impl Fn(i32) -> i32) -> Self {
+    pub fn map_outcomes(&self, f: impl Fn(i32) -> i32) -> Self {
         match self {
             RuntimeValue::Int(i) => f(*i).into(),
             RuntimeValue::List(list) => f(list.iter().sum()).into(),
@@ -153,39 +155,14 @@ impl ValEnv {
 
 #[derive(Debug, Clone)]
 pub enum Function {
-    Primitive(Primitive),
+    Primitive(&'static Primitive),
     UserDefined(Rc<FunctionDefinition>),
 }
 
 impl Function {
     fn get_arg_types(&self) -> Vec<Option<StaticType>> {
         match self {
-            Function::Primitive(Primitive::Absolute) => vec![Some(StaticType::Int)],
-            Function::Primitive(Primitive::Contains) => {
-                vec![Some(StaticType::List), Some(StaticType::Int)]
-            }
-            Function::Primitive(Primitive::Count) => {
-                vec![Some(StaticType::List), Some(StaticType::List)]
-            }
-            Function::Primitive(Primitive::Explode) => vec![Some(StaticType::Pool)],
-            Function::Primitive(Primitive::Highest) => {
-                vec![Some(StaticType::Int), Some(StaticType::Pool)]
-            }
-            Function::Primitive(Primitive::Lowest) => {
-                vec![Some(StaticType::Int), Some(StaticType::Pool)]
-            }
-            Function::Primitive(Primitive::Middle) => {
-                vec![Some(StaticType::Int), Some(StaticType::Pool)]
-            }
-            Function::Primitive(Primitive::HighestOf) => {
-                vec![Some(StaticType::Int), Some(StaticType::Int)]
-            }
-            Function::Primitive(Primitive::LowestOf) => {
-                vec![Some(StaticType::Int), Some(StaticType::Int)]
-            }
-            Function::Primitive(Primitive::Maximum) => vec![Some(StaticType::Pool)],
-            Function::Primitive(Primitive::Reverse) => vec![Some(StaticType::List)],
-            Function::Primitive(Primitive::Sort) => vec![Some(StaticType::List)],
+            Function::Primitive(primitive) => primitive.arg_types.clone(),
             Function::UserDefined(fd) => fd.args.iter().map(|arg| arg.value.ty).collect(),
         }
     }
@@ -224,51 +201,7 @@ impl Default for Evaluator {
 impl Evaluator {
     pub fn new() -> Self {
         let mut functions = HashMap::new();
-        functions.insert(
-            "absolute {}".to_string(),
-            Function::Primitive(Primitive::Absolute),
-        );
-        functions.insert(
-            "{} contains {}".to_string(),
-            Function::Primitive(Primitive::Contains),
-        );
-        functions.insert(
-            "count {} in {}".to_string(),
-            Function::Primitive(Primitive::Count),
-        );
-        functions.insert(
-            "explode {}".to_string(),
-            Function::Primitive(Primitive::Explode),
-        );
-        functions.insert(
-            "highest {} of {}".to_string(),
-            Function::Primitive(Primitive::Highest),
-        );
-        functions.insert(
-            "lowest {} of {}".to_string(),
-            Function::Primitive(Primitive::Lowest),
-        );
-        functions.insert(
-            "middle {} of {}".to_string(),
-            Function::Primitive(Primitive::Middle),
-        );
-        functions.insert(
-            "highest of {} and {}".to_string(),
-            Function::Primitive(Primitive::HighestOf),
-        );
-        functions.insert(
-            "lowest of {} and {}".to_string(),
-            Function::Primitive(Primitive::LowestOf),
-        );
-        functions.insert(
-            "maximum of {}".to_string(),
-            Function::Primitive(Primitive::Maximum),
-        );
-        functions.insert(
-            "reverse {}".to_string(),
-            Function::Primitive(Primitive::Reverse),
-        );
-        functions.insert("sort {}".to_string(), Function::Primitive(Primitive::Sort));
+        register_primitives(&mut functions);
         Self {
             global_env: Rc::new(RefCell::new(ValEnv::new())),
             outputs: Vec::new(),
@@ -648,7 +581,7 @@ impl Evaluator {
         arg_ranges: &[ast::Range],
     ) -> Result<RuntimeValue, RuntimeError> {
         match &function.value {
-            Function::Primitive(primitive) => primitive.execute(
+            Function::Primitive(primitive) => (primitive.execute)(
                 args,
                 arg_ranges,
                 self.explode_depth,
@@ -1002,196 +935,6 @@ fn coerce_arg(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Primitive {
-    Absolute,
-    Contains,
-    Count,
-    Explode,
-    Highest,
-    Lowest,
-    Middle,
-    HighestOf,
-    LowestOf,
-    Maximum,
-    Reverse,
-    Sort,
-}
-
-impl Primitive {
-    fn execute(
-        self,
-        args: &[RuntimeValue],
-        arg_ranges: &[ast::Range],
-        explode_depth: usize,
-        lowest_first: bool,
-        function_range: ast::Range,
-    ) -> Result<RuntimeValue, RuntimeError> {
-        match self {
-            Primitive::Absolute => {
-                // arg: int
-                let arg = &args[0];
-                Ok(arg.map_outcomes(|o| o.abs()))
-            }
-            Primitive::Contains => {
-                // args: list, int
-                if let (RuntimeValue::List(haystack), RuntimeValue::Int(needle)) =
-                    (&args[0], &args[1])
-                {
-                    Ok(if haystack.iter().any(|h| h == needle) {
-                        1.into()
-                    } else {
-                        0.into()
-                    })
-                } else {
-                    panic!("wrong argument types to [contains]");
-                }
-            }
-            Primitive::Count => {
-                // args: list, list
-                if let (RuntimeValue::List(needle), RuntimeValue::List(haystack)) =
-                    (&args[0], &args[1])
-                {
-                    let mut needle_map = HashMap::new();
-                    for n in needle.iter() {
-                        *needle_map.entry(n).or_insert(0) += 1;
-                    }
-                    Ok(haystack
-                        .iter()
-                        .map(|item| needle_map.get(item).copied().unwrap_or(0))
-                        .sum::<i32>()
-                        .into())
-                } else {
-                    panic!("wrong argument types to [count]");
-                }
-            }
-            Primitive::Explode => {
-                // args: pool
-                if let RuntimeValue::Pool(d) = &args[0] {
-                    if d.is_empty() {
-                        return Ok(Pool::from_list(1, vec![]).into());
-                    }
-                    let die: Vec<_> = d.sum().into_die_iter().collect();
-                    let highest_value = die.last().unwrap().0;
-                    Ok(Pool::from(explode(die, &[highest_value], explode_depth)).into())
-                } else {
-                    panic!("wrong argument types to [explode]");
-                }
-            }
-            Primitive::Highest | Primitive::Middle | Primitive::Lowest => {
-                // args: int, pool
-                if let (RuntimeValue::Int(i), RuntimeValue::Pool(d)) = (&args[0], &args[1]) {
-                    let keep_list = keep_list_for_primitive(
-                        self,
-                        *i,
-                        arg_ranges[0],
-                        d.dimension() as usize,
-                        function_range,
-                    )?;
-                    Ok(d.sum_with_keep_list(&keep_list).into())
-                } else {
-                    panic!("wrong argument types to [highest/lowest/middle]");
-                }
-            }
-            Primitive::HighestOf => {
-                // args: int, int
-                if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
-                    Ok((*(i.max(j))).into())
-                } else {
-                    panic!("wrong argument types to [highest of]");
-                }
-            }
-            Primitive::LowestOf => {
-                // args: int, int
-                if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
-                    Ok((*(i.min(j))).into())
-                } else {
-                    panic!("wrong argument types to [lowest of]");
-                }
-            }
-            Primitive::Maximum => {
-                // args: pool
-                if let RuntimeValue::Pool(d) = &args[0] {
-                    Ok(d.sum()
-                        .ordered_outcomes()
-                        .last()
-                        .map(|(o, _)| *o)
-                        .unwrap_or(0)
-                        .into())
-                } else {
-                    panic!("wrong argument types to [maximum]");
-                }
-            }
-            Primitive::Reverse => {
-                // args: sequence
-                if let RuntimeValue::List(lst) = &args[0] {
-                    Ok(lst.iter().rev().copied().collect::<Vec<_>>().into())
-                } else {
-                    panic!("wrong argument types to [reverse]");
-                }
-            }
-            Primitive::Sort => {
-                // args: sequence
-                if let RuntimeValue::List(lst) = &args[0] {
-                    let mut lst = (**lst).clone();
-                    if lowest_first {
-                        lst.sort_unstable();
-                    } else {
-                        lst.sort_unstable_by_key(|o| -o);
-                    }
-                    Ok(lst.into())
-                } else {
-                    panic!("wrong argument types to [sort]");
-                }
-            }
-        }
-    }
-}
-
-fn keep_list_for_primitive(
-    primitive: Primitive,
-    keep: i32,
-    keep_range: ast::Range,
-    outcomes_size: usize,
-    function_range: ast::Range,
-) -> Result<Vec<bool>, RuntimeError> {
-    if keep < 0 {
-        return Err(RuntimeError::NegativeArgumentToFunction {
-            range: function_range.into(),
-            name: match primitive {
-                Primitive::Highest => "highest".to_string(),
-                Primitive::Lowest => "lowest".to_string(),
-                Primitive::Middle => "middle".to_string(),
-                _ => unreachable!(),
-            },
-            found_range: keep_range.into(),
-            value: keep,
-        });
-    }
-    let keep = usize::try_from(keep).expect("keep is positive");
-    if keep >= outcomes_size {
-        return Ok(vec![true; outcomes_size]);
-    }
-    let mut keep_list = vec![false; outcomes_size];
-    if keep == 0 {
-        return Ok(keep_list);
-    }
-    match primitive {
-        Primitive::Highest => {
-            keep_list[outcomes_size - keep..].fill(true);
-        }
-        Primitive::Lowest => {
-            keep_list[..keep].fill(true);
-        }
-        Primitive::Middle => {
-            // This is rounding down
-            let start = (outcomes_size - keep).div_ceil(2);
-            keep_list[start..start + keep].fill(true);
-        }
-        _ => unreachable!(),
-    }
-    Ok(keep_list)
-}
 
 impl From<ast::Range> for SourceSpan {
     fn from(range: ast::Range) -> Self {
