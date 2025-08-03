@@ -82,7 +82,28 @@ function AppInner() {
             ]);
           }
         }
-        setOutput(chartData);
+
+        // Check if range is too large
+        let minValue = Infinity;
+        let maxValue = -Infinity;
+        for (const [_, distribution] of chartData) {
+          for (const [value] of distribution.probabilities) {
+            minValue = Math.min(minValue, value);
+            maxValue = Math.max(maxValue, value);
+          }
+        }
+
+        const range = maxValue - minValue;
+        if (range >= 5000) {
+          setOutput([]);
+          setError({
+            message: `Range of outcomes (${range}) is too large to display. Maximum range is 5000.`,
+            from: 0,
+            to: 0
+          });
+        } else {
+          setOutput(chartData);
+        }
       } else if (event.data.Print !== undefined) {
         const newPrintOutputs = [...printOutputs, event.data.Print];
         setPrintOutputs(newPrintOutputs);

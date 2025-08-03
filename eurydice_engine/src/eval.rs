@@ -6,7 +6,6 @@ use std::{
     rc::Rc,
 };
 
-
 use malachite::base::num::arithmetic::traits::Lcm;
 use malachite::{
     base::num::basic::traits::{One, Zero},
@@ -22,7 +21,7 @@ use crate::{
         SetParam, Statement, StaticType, UnaryOp, WithRange,
     },
     dice::{MultisetCrossProductIterator, Pool},
-    primitives::{Primitive, register_primitives},
+    primitives::{register_primitives, Primitive},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -372,7 +371,13 @@ impl Evaluator {
             Expression::BinaryOp { op, left, right } => {
                 let left_value = self.evaluate(eval_context, left)?;
                 let right_value = self.evaluate(eval_context, right)?;
-                apply_binary_op(op, &left_value, left.range, &right_value, self.lowest_first)
+                Ok(apply_binary_op(
+                    op,
+                    &left_value,
+                    left.range,
+                    &right_value,
+                    self.lowest_first,
+                )?)
             }
             Expression::List(list) => {
                 let elems = list
@@ -673,12 +678,53 @@ fn apply_binary_op(
                 }
             }
         }
-        // TODO should report an error if b < 0
-        BinaryOp::Pow => Ok(math_binary_op(left, right, |a, b| a.pow(b.unsigned_abs()))),
-        BinaryOp::Add => Ok(math_binary_op(left, right, |a, b| a + b)),
-        BinaryOp::Sub => Ok(math_binary_op(left, right, |a, b| a - b)),
-        BinaryOp::Mul => Ok(math_binary_op(left, right, |a, b| a * b)),
-        BinaryOp::Div => Ok(math_binary_op(left, right, |a, b| a / b)),
+        BinaryOp::Pow => math_binary_op(left, right, |a, b| {
+            if b < 0 {
+                Err(format!("Cannot raise {} to negative power {}", a, b))
+            } else {
+                a.checked_pow(b.unsigned_abs())
+                    .ok_or_else(|| format!("Power overflow: {} ^ {}", a, b))
+            }
+        })
+        .map_err(|msg| RuntimeError::MathError {
+            range: op.range.into(),
+            message: msg,
+        }),
+        BinaryOp::Add => math_binary_op(left, right, |a, b| {
+            a.checked_add(b)
+                .ok_or_else(|| format!("Addition overflow: {} + {}", a, b))
+        })
+        .map_err(|msg| RuntimeError::MathError {
+            range: op.range.into(),
+            message: msg,
+        }),
+        BinaryOp::Sub => math_binary_op(left, right, |a, b| {
+            a.checked_sub(b)
+                .ok_or_else(|| format!("Subtraction overflow: {} - {}", a, b))
+        })
+        .map_err(|msg| RuntimeError::MathError {
+            range: op.range.into(),
+            message: msg,
+        }),
+        BinaryOp::Mul => math_binary_op(left, right, |a, b| {
+            a.checked_mul(b)
+                .ok_or_else(|| format!("Multiplication overflow: {} * {}", a, b))
+        })
+        .map_err(|msg| RuntimeError::MathError {
+            range: op.range.into(),
+            message: msg,
+        }),
+        BinaryOp::Div => math_binary_op(left, right, |a, b| {
+            if b == 0 {
+                Err(format!("Cannot divide {} by zero", a))
+            } else {
+                Ok(a / b)
+            }
+        })
+        .map_err(|msg| RuntimeError::MathError {
+            range: op.range.into(),
+            message: msg,
+        }),
         BinaryOp::Eq => Ok(comp_binary_op(
             left,
             right,
@@ -715,20 +761,22 @@ fn apply_binary_op(
             |a, b| if a >= b { 1 } else { 0 },
             |a, b| if a >= b { 1 } else { 0 },
         )),
-        BinaryOp::Or => Ok(math_binary_op(left, right, |a, b| {
-            if a != 0 || b != 0 {
-                1
-            } else {
-                0
-            }
-        })),
-        BinaryOp::And => Ok(math_binary_op(left, right, |a, b| {
-            if a != 0 && b != 0 {
-                1
-            } else {
-                0
-            }
-        })),
+        BinaryOp::Or => {
+            math_binary_op(left, right, |a, b| Ok(if a != 0 || b != 0 { 1 } else { 0 })).map_err(
+                |msg| RuntimeError::MathError {
+                    range: op.range.into(),
+                    message: msg,
+                },
+            )
+        }
+        BinaryOp::And => {
+            math_binary_op(left, right, |a, b| Ok(if a != 0 && b != 0 { 1 } else { 0 })).map_err(
+                |msg| RuntimeError::MathError {
+                    range: op.range.into(),
+                    message: msg,
+                },
+            )
+        }
     }
 }
 
@@ -765,22 +813,32 @@ fn select_in_dice(indices: &[i32], pool: Pool, lowest_first: bool) -> Pool {
 fn math_binary_op(
     left: &RuntimeValue,
     right: &RuntimeValue,
-    f: impl Fn(i32, i32) -> i32,
-) -> RuntimeValue {
+    f: impl Fn(i32, i32) -> Result<i32, String>,
+) -> Result<RuntimeValue, String> {
     let left = flatten_list(left);
     let right = flatten_list(right);
     let (left_pool, right_pool) = match (left, right) {
-        (DLeftSide::Int(a), DLeftSide::Int(b)) => return f(a, b).into(),
+        (DLeftSide::Int(a), DLeftSide::Int(b)) => return Ok(f(a, b)?.into()),
         (left, right) => (left.to_pool().sum(), right.to_pool().sum()),
     };
-    left_pool
-        .flat_map(|left_outcome| {
-            right_pool
-                .clone()
-                .map_outcomes(|right_outcome| f(left_outcome[0], right_outcome))
-                .into()
-        })
-        .into()
+
+    // For pool operations, we need to handle errors during mapping
+    let mut results = Vec::new();
+    for (left_outcome, left_weight) in left_pool.ordered_outcomes() {
+        for (right_outcome, right_weight) in right_pool.ordered_outcomes() {
+            match f(*left_outcome, *right_outcome) {
+                Ok(result) => results.push((result, left_weight * right_weight)),
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    let mut pool_map = std::collections::BTreeMap::new();
+    for (outcome, weight) in results {
+        *pool_map.entry(outcome).or_insert(Natural::ZERO) += weight;
+    }
+
+    Ok(Pool::from(pool_map.into_iter().collect::<Vec<_>>()).into())
 }
 
 /// Binary ops behave differently depending on the types of their arguments.
@@ -935,7 +993,6 @@ fn coerce_arg(
     }
 }
 
-
 impl From<ast::Range> for SourceSpan {
     fn from(range: ast::Range) -> Self {
         SourceSpan::new(range.start.into(), range.end - range.start)
@@ -1047,13 +1104,6 @@ pub enum RuntimeError {
         found: StaticType,
     },
 
-    #[error("Not yet implemented")]
-    #[diagnostic(help("The developer is a lazy bum."))]
-    NotYetImplemented {
-        #[label = "Not yet implemented"]
-        range: SourceSpan,
-    },
-
     #[error("Invalid argument to operator")]
     InvalidArgumentToOperator {
         #[label = "Operator {op} expects {expected}."]
@@ -1086,6 +1136,13 @@ pub enum RuntimeError {
         found: StaticType,
         value: RuntimeValue,
     },
+
+    #[error("A mathematical error occurred.")]
+    MathError {
+        #[label = "{message}"]
+        range: SourceSpan,
+        message: String,
+    },
 }
 
 impl RuntimeError {
@@ -1099,10 +1156,10 @@ impl RuntimeError {
             RuntimeError::UndefinedFunction { range, .. } => range.into(),
             RuntimeError::InvalidCondition { range, .. } => range.into(),
             RuntimeError::RangeHasNonSequenceEndpoints { range, .. } => range.into(),
-            RuntimeError::NotYetImplemented { range } => range.into(),
             RuntimeError::InvalidArgumentToOperator { operator_range, .. } => operator_range.into(),
             RuntimeError::NegativeArgumentToFunction { range, .. } => range.into(),
             RuntimeError::InvalidRepeatExpression { range, .. } => range.into(),
+            RuntimeError::MathError { range, .. } => range.into(),
         }
     }
 }
@@ -1142,5 +1199,162 @@ mod tests {
             interpolate_variable_names(&ranged("A + B = [A] + [B] + [C"), &env).unwrap(),
             "A + B = 1 + 2 + [C"
         );
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        use crate::ast::{BinaryOp, Range};
+
+        let left = RuntimeValue::Int(5);
+        let right = RuntimeValue::Int(0);
+        let op = WithRange {
+            value: BinaryOp::Div,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Err(RuntimeError::MathError { message, .. }) => {
+                assert!(message.contains("Cannot divide 5 by zero"));
+            }
+            _ => panic!("Expected MathError for division by zero"),
+        }
+    }
+
+    #[test]
+    fn test_negative_exponentiation() {
+        use crate::ast::{BinaryOp, Range};
+
+        let left = RuntimeValue::Int(2);
+        let right = RuntimeValue::Int(-3);
+        let op = WithRange {
+            value: BinaryOp::Pow,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Err(RuntimeError::MathError { message, .. }) => {
+                assert!(message.contains("Cannot raise 2 to negative power -3"));
+            }
+            _ => panic!("Expected MathError for negative exponentiation"),
+        }
+    }
+
+    #[test]
+    fn test_valid_math_operations() {
+        use crate::ast::{BinaryOp, Range};
+
+        // Test valid division
+        let left = RuntimeValue::Int(10);
+        let right = RuntimeValue::Int(2);
+        let op = WithRange {
+            value: BinaryOp::Div,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Ok(RuntimeValue::Int(5)) => {}
+            _ => panic!("Expected successful division result of 5"),
+        }
+
+        // Test valid exponentiation
+        let left = RuntimeValue::Int(2);
+        let right = RuntimeValue::Int(3);
+        let op = WithRange {
+            value: BinaryOp::Pow,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Ok(RuntimeValue::Int(8)) => {}
+            _ => panic!("Expected successful exponentiation result of 8"),
+        }
+    }
+
+    #[test]
+    fn test_addition_overflow() {
+        use crate::ast::{BinaryOp, Range};
+
+        let left = RuntimeValue::Int(i32::MAX);
+        let right = RuntimeValue::Int(1);
+        let op = WithRange {
+            value: BinaryOp::Add,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Err(RuntimeError::MathError { message, .. }) => {
+                assert!(message.contains("Addition overflow"));
+                assert!(message.contains(&format!("{}", i32::MAX)));
+            }
+            _ => panic!("Expected MathError for addition overflow"),
+        }
+    }
+
+    #[test]
+    fn test_subtraction_overflow() {
+        use crate::ast::{BinaryOp, Range};
+
+        let left = RuntimeValue::Int(i32::MIN);
+        let right = RuntimeValue::Int(1);
+        let op = WithRange {
+            value: BinaryOp::Sub,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Err(RuntimeError::MathError { message, .. }) => {
+                assert!(message.contains("Subtraction overflow"));
+                assert!(message.contains(&format!("{}", i32::MIN)));
+            }
+            _ => panic!("Expected MathError for subtraction overflow"),
+        }
+    }
+
+    #[test]
+    fn test_multiplication_overflow() {
+        use crate::ast::{BinaryOp, Range};
+
+        let left = RuntimeValue::Int(i32::MAX);
+        let right = RuntimeValue::Int(2);
+        let op = WithRange {
+            value: BinaryOp::Mul,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Err(RuntimeError::MathError { message, .. }) => {
+                assert!(message.contains("Multiplication overflow"));
+                assert!(message.contains(&format!("{}", i32::MAX)));
+            }
+            _ => panic!("Expected MathError for multiplication overflow"),
+        }
+    }
+
+    #[test]
+    fn test_power_overflow() {
+        use crate::ast::{BinaryOp, Range};
+
+        let left = RuntimeValue::Int(2);
+        let right = RuntimeValue::Int(32); // 2^32 overflows i32
+        let op = WithRange {
+            value: BinaryOp::Pow,
+            range: Range { start: 0, end: 1 },
+        };
+
+        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        match result {
+            Err(RuntimeError::MathError { message, .. }) => {
+                assert!(message.contains("Power overflow"));
+                assert!(message.contains("2 ^ 32"));
+            }
+            _ => panic!("Expected MathError for power overflow"),
+        }
     }
 }

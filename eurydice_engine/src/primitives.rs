@@ -496,7 +496,19 @@ mod tests {
         if let RuntimeValue::Pool(result_pool) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
-                [(2, 16), (3, 27), (4, 34), (5, 36), (6, 34), (7, 27), (8, 19), (9, 12), (10, 7), (11, 3), (12, 1)]
+                [
+                    (2, 16),
+                    (3, 27),
+                    (4, 34),
+                    (5, 36),
+                    (6, 34),
+                    (7, 27),
+                    (8, 19),
+                    (9, 12),
+                    (10, 7),
+                    (11, 3),
+                    (12, 1)
+                ]
             );
         } else {
             panic!("Expected pool result");
