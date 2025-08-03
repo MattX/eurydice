@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 
 use crate::{
     ast::{self, StaticType},
-    dice::{explode, Pool},
+    dice::{explode, reroll, Pool},
     eval::{Function, RuntimeValue},
 };
 
@@ -94,6 +94,61 @@ fn explode_execute(
         Ok(Pool::from(explode(die, &[highest_value], explode_depth)).into())
     } else {
         panic!("wrong argument types to [explode]");
+    }
+}
+
+fn explode_on_execute(
+    args: &[RuntimeValue],
+    _arg_ranges: &[ast::Range],
+    explode_depth: usize,
+    _lowest_first: bool,
+    _function_range: ast::Range,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    if let (RuntimeValue::Pool(d), RuntimeValue::List(cond)) = (&args[0], &args[1]) {
+        if d.is_empty() {
+            return Ok(Pool::from_list(1, vec![]).into());
+        }
+        let die: Vec<_> = d.sum().into_die_iter().collect();
+        Ok(Pool::from(explode(die, cond, explode_depth)).into())
+    } else {
+        panic!("wrong argument types to [explode on]");
+    }
+}
+
+fn reroll_execute(
+    args: &[RuntimeValue],
+    _arg_ranges: &[ast::Range],
+    explode_depth: usize,
+    _lowest_first: bool,
+    _function_range: ast::Range,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    if let RuntimeValue::Pool(d) = &args[0] {
+        if d.is_empty() {
+            return Ok(Pool::from_list(1, vec![]).into());
+        }
+        let die: Vec<_> = d.sum().into_die_iter().collect();
+        let highest_value = die.last().unwrap().0;
+        Ok(Pool::from(reroll(die, &[highest_value], explode_depth)).into())
+    } else {
+        panic!("wrong argument types to [reroll]");
+    }
+}
+
+fn reroll_on_execute(
+    args: &[RuntimeValue],
+    _arg_ranges: &[ast::Range],
+    explode_depth: usize,
+    _lowest_first: bool,
+    _function_range: ast::Range,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    if let (RuntimeValue::Pool(d), RuntimeValue::List(cond)) = (&args[0], &args[1]) {
+        if d.is_empty() {
+            return Ok(Pool::from_list(1, vec![]).into());
+        }
+        let die: Vec<_> = d.sum().into_die_iter().collect();
+        Ok(Pool::from(reroll(die, cond, explode_depth)).into())
+    } else {
+        panic!("wrong argument types to [reroll on]");
     }
 }
 
@@ -290,6 +345,18 @@ lazy_static! {
         arg_types: vec![Some(StaticType::List)],
         execute: sort_execute,
     };
+    pub static ref EXPLODE_ON_PRIMITIVE: Primitive = Primitive {
+        arg_types: vec![Some(StaticType::Pool), Some(StaticType::List)],
+        execute: explode_on_execute,
+    };
+    pub static ref REROLL_PRIMITIVE: Primitive = Primitive {
+        arg_types: vec![Some(StaticType::Pool)],
+        execute: reroll_execute,
+    };
+    pub static ref REROLL_ON_PRIMITIVE: Primitive = Primitive {
+        arg_types: vec![Some(StaticType::Pool), Some(StaticType::List)],
+        execute: reroll_on_execute,
+    };
 }
 
 fn keep_list_for_primitive(
@@ -383,6 +450,18 @@ pub fn register_primitives(functions: &mut HashMap<String, Function>) {
         Function::Primitive(&REVERSE_PRIMITIVE),
     );
     functions.insert("sort {}".to_string(), Function::Primitive(&SORT_PRIMITIVE));
+    functions.insert(
+        "explode {} on {}".to_string(),
+        Function::Primitive(&EXPLODE_ON_PRIMITIVE),
+    );
+    functions.insert(
+        "reroll {}".to_string(),
+        Function::Primitive(&REROLL_PRIMITIVE),
+    );
+    functions.insert(
+        "reroll {} on {}".to_string(),
+        Function::Primitive(&REROLL_ON_PRIMITIVE),
+    );
 }
 
 #[cfg(test)]
@@ -605,6 +684,63 @@ mod tests {
     }
 
     #[test]
+    fn test_explode_on_execute() {
+        let pool = Pool::from_list(1, vec![1, 2, 3]);
+        let condition = vec![2, 3];
+        let args = vec![
+            RuntimeValue::Pool(Rc::new(pool)),
+            RuntimeValue::List(Rc::new(condition)),
+        ];
+        let result = explode_on_execute(&args, &[], 2, false, dummy_range()).unwrap();
+        // Should return a pool where 2s and 3s explode
+        if let RuntimeValue::Pool(result_pool) = result {
+            // 1 stays as 1, 2 explodes to 2+reroll, 3 explodes to 3+reroll
+            assert_eq!(
+                to_nat_list(result_pool.ordered_outcomes()),
+                [(1, 9), (3, 3), (4, 3), (5, 1), (6, 3), (7, 4), (8, 3), (9, 1)]
+            );
+        } else {
+            panic!("Expected pool result");
+        }
+    }
+
+    #[test]
+    fn test_reroll_execute() {
+        let pool = Pool::from_list(1, vec![1, 2, 3]);
+        let args = vec![RuntimeValue::Pool(Rc::new(pool))];
+        let result = reroll_execute(&args, &[], 2, false, dummy_range()).unwrap();
+        // Should return a pool where 3s reroll (without keeping the original value)
+        if let RuntimeValue::Pool(result_pool) = result {
+            assert_eq!(
+                to_nat_list(result_pool.ordered_outcomes()),
+                [(1, 13), (2, 13), (3, 1)]
+            );
+        } else {
+            panic!("Expected pool result");
+        }
+    }
+
+    #[test]
+    fn test_reroll_on_execute() {
+        let pool = Pool::from_list(1, vec![1, 2, 3, 4]);
+        let condition = vec![1, 4];
+        let args = vec![
+            RuntimeValue::Pool(Rc::new(pool)),
+            RuntimeValue::List(Rc::new(condition)),
+        ];
+        let result = reroll_on_execute(&args, &[], 2, false, dummy_range()).unwrap();
+        // Should return a pool where 1s and 4s reroll
+        if let RuntimeValue::Pool(result_pool) = result {
+            assert_eq!(
+                to_nat_list(result_pool.ordered_outcomes()),
+                [(1, 4), (2, 28), (3, 28), (4, 4)]
+            );
+        } else {
+            panic!("Expected pool result");
+        }
+    }
+
+    #[test]
     fn test_register_primitives() {
         use std::collections::HashMap;
         let mut functions = HashMap::new();
@@ -615,6 +751,9 @@ mod tests {
         assert!(functions.contains_key("{} contains {}"));
         assert!(functions.contains_key("count {} in {}"));
         assert!(functions.contains_key("explode {}"));
+        assert!(functions.contains_key("explode {} on {}"));
+        assert!(functions.contains_key("reroll {}"));
+        assert!(functions.contains_key("reroll {} on {}"));
         assert!(functions.contains_key("highest {} of {}"));
         assert!(functions.contains_key("lowest {} of {}"));
         assert!(functions.contains_key("middle {} of {}"));
@@ -624,7 +763,7 @@ mod tests {
         assert!(functions.contains_key("reverse {}"));
         assert!(functions.contains_key("sort {}"));
 
-        // Should have registered exactly 12 functions
-        assert_eq!(functions.len(), 12);
+        // Should have registered exactly 15 functions
+        assert_eq!(functions.len(), 15);
     }
 }

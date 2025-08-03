@@ -542,6 +542,23 @@ pub fn explode(die: Vec<(i32, Natural)>, on: &[i32], depth: usize) -> Vec<(i32, 
     die_dist.ordered_outcomes
 }
 
+pub fn reroll(die: Vec<(i32, Natural)>, on: &[i32], depth: usize) -> Vec<(i32, Natural)> {
+    if depth == 0 {
+        return die;
+    }
+
+    let inner_reroll: Pool = reroll(die.clone(), on, depth - 1).into();
+    let die_dist: Pool = die.into_iter().collect::<Pool>().flat_map(|outcome| {
+        let roller = outcome[0];
+        if on.contains(&roller) {
+            inner_reroll.clone().into()
+        } else {
+            vec![(roller, Natural::ONE)].into_iter().collect()
+        }
+    });
+    die_dist.ordered_outcomes
+}
+
 pub struct StateMapper<S, F>
 where
     S: Clone + Hash + Eq,
@@ -1286,5 +1303,31 @@ mod tests {
         assert_eq!(format!("{}", pool), "2d3");
         let pool = Pool::from_list(2, vec![-1, -2, -3]);
         assert_eq!(format!("{}", pool), "2d{-3, -2, -1}");
+    }
+
+    #[test]
+    fn test_reroll_d3_on_3() {
+        let die = vec![(1, Natural::ONE), (2, Natural::ONE), (3, Natural::ONE)];
+
+        let result = reroll(die, &[3], 2);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(
+            result,
+            vec![(1, 13u32.into()), (2, 13u32.into()), (3, Natural::ONE)]
+        );
+    }
+
+    #[test]
+    fn test_reroll_d4_on_1_and_4() {
+        let die = vec![(1, Natural::ONE), (2, Natural::ONE), (3, Natural::ONE), (4, Natural::ONE)];
+
+        let result = reroll(die, &[1, 4], 2);
+
+        assert_eq!(result.len(), 4);
+        assert_eq!(
+            result,
+            vec![(1, 4u32.into()), (2, 28u32.into()), (3, 28u32.into()), (4, 4u32.into())]
+        );
     }
 }

@@ -643,6 +643,38 @@ Here's a worked out example for `[explode 2d2]` with `explode depth` set to 1:
    * 8: 1/16 (same as 6)
 4. This is equivalent to `d{2: 4, 3: 8, 6, 7: 2, 8: 4}`
 
+### `[explode POOL:d on COND:s]`
+
+This is similar to `[explode POOL:d]`, but instead of exploding on the highest face value, it explodes on any value contained in the `COND` list.
+
+The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
+
+```
+output [explode d6 on {1, 6}]  \ Explodes on both 1s and 6s \
+output [explode d{1, 2, 3} on {2, 3}]  \ Explodes on 2s and 3s \
+```
+
+### `[reroll POOL:d]`
+
+This transforms a die to match a reroll rule: if the die rolls its highest face value, the die is re-rolled and only the new value is kept (unlike explode, which keeps both the original and new values).
+
+The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
+
+```
+output [reroll d6]  \ Rerolls on 6s, keeping only the reroll result \
+```
+
+### `[reroll POOL:d on COND:s]`
+
+This is similar to `[reroll POOL:d]`, but instead of rerolling on the highest face value, it rerolls on any value contained in the `COND` list.
+
+The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
+
+```
+output [reroll d6 on {1, 6}]  \ Rerolls on both 1s and 6s \
+output [reroll d{1, 2, 3, 4} on {1, 4}]  \ Rerolls on 1s and 4s \
+```
+
 ### `[highest COUNT:n of POOL:d]`, `[lowest COUNT:n of POOL:d]`, `[middle COUNT:n of POOL:d]`
 
 These functions return pools of dimension 1 whose distribution is the sum of the highest `COUNT`, lowest `COUNT`, or middle `COUNT` values in the possible outcomes of `POOL`.
