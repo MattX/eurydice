@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useCallback } from "react";
 
 import { WorkerWrapper } from "./worker-wrapper";
 import { Distribution } from "./util";
@@ -42,22 +42,13 @@ function AppInner() {
     setRunLiveInner(val);
     if (val) {
       localStorage.removeItem("eurydice0_run_live");
-      run(editorText);
+      run(running, editorText);
     } else {
       localStorage.setItem("eurydice0_run_live", "false");
     }
   }
 
-  function attachOnMessage(
-    worker: WorkerWrapper,
-    printOutputs: [string, string][],
-  ) {
-    // Why take in printOutputs as an argument, instead of using the state?
-    // Worker messages may be received in quick successiom, and setting React state
-    // is asynchronous. This means that the state may not be updated when the next
-    // message comes, leading to random messages being dropped.
-    // This also means we need to reattach the onmessage listener every time the
-    // printOutputs state is updated.
+  const attachOnMessage = useCallback((worker: WorkerWrapper) => {
     worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
       if (event.data.Err !== undefined) {
         setRunning(false);
@@ -104,29 +95,29 @@ function AppInner() {
           setOutput(chartData);
         }
       } else if (event.data.Print !== undefined) {
-        const newPrintOutputs = [...printOutputs, event.data.Print];
-        setPrintOutputs(newPrintOutputs);
-        attachOnMessage(worker, newPrintOutputs);
+        const evt = event.data.Print as [string, string];
+        setPrintOutputs(printOutputs => [...printOutputs, evt]);
       }
     });
-  }
+  }, []);
 
-  function run(val?: string) {
+  const run = useCallback((running: boolean, val: string) => {
     if (running) {
       worker.terminate();
       worker = new WorkerWrapper(new EurydiceWorker());
+      attachOnMessage(worker);
     }
     setRunning(true);
     setPrintOutputs([]);
-    attachOnMessage(worker, []);
     setError(null);
-    worker.postMessage(val ?? editorText);
-  }
+    worker.postMessage(val);
+  }, [attachOnMessage]);
 
   useEffect(() => {
-    // Attach the onmessage listener
-    attachOnMessage(worker, []);
+    attachOnMessage(worker);
+  }, [attachOnMessage]);
 
+  useEffect(() => {
     // Load the saved state from local storage
     const savedRunLive = localStorage.getItem("eurydice0_run_live") !== "false";
     if (!savedRunLive) {
@@ -143,15 +134,15 @@ function AppInner() {
     }
     setEditorText(savedText);
     if (savedRunLive) {
-      run(savedText);
+      run(true, savedText);
     }
-  }, []);
+  }, [run]);
 
   function onChange(val: string) {
     setEditorText(val);
     localStorage.setItem("eurydice0_editor_program", val);
     if (runLive) {
-      run(val);
+      run(running, val);
     }
   }
 
@@ -180,7 +171,7 @@ function AppInner() {
                 runLive={runLive}
                 setRunLive={setRunLive}
                 running={running}
-                run={() => run()}
+                run={() => run(running, editorText)}
                 error={error}
                 printOutputs={printOutputs}
               />
