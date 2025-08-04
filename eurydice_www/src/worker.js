@@ -1,4 +1,4 @@
-import { run }from "eurydice_wasm";
+import { run } from "eurydice_wasm";
 
 self.onmessage = async (event) => {
   const start = performance.now();

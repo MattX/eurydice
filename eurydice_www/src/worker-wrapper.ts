@@ -16,7 +16,6 @@ export class WorkerWrapper {
     undefined;
 
   constructor(worker: Worker) {
-    console.log("WorkerWrapper constructor");
     this.worker = worker;
     this.worker.onmessage = () => {
       if (this.pendingCallback) {

@@ -5,7 +5,7 @@ import { Distribution } from "./util";
 import OutputPane from "./components/OutputPane";
 import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
-import { ExternalWebsite, Octocat } from "./components/Icons";
+import Header from "./components/Header";
 import {
   DarkModeContext,
   DarkModeSwitcher,
@@ -33,7 +33,6 @@ function AppInner() {
     [],
   );
   const [showTutorial, setShowTutorial] = React.useState(false);
-  const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
   const borderColor = React.useContext(DarkModeContext)
     ? "border-gray-700"
@@ -165,61 +164,12 @@ function AppInner() {
 
   return (
     <>
-      <Octocat />
       <div><Toaster /></div>
       <div className="flex flex-col min-h-screen">
-        <nav className="w-[calc(100%-60px)] p-4">
-          <div className="md:hidden flex justify-between items-center">
-            <a className="hover:underline" href="#">
-              Eurydice
-            </a>
-            <button
-              className="flex flex-col justify-center items-center w-6 h-6 space-y-1"
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              aria-label="Toggle menu"
-            >
-              <span className={`block w-5 h-0.5 bg-current transform transition ${isMenuOpen ? 'rotate-45 translate-y-1.5' : ''}`}></span>
-              <span className={`block w-5 h-0.5 bg-current transition ${isMenuOpen ? 'opacity-0' : ''}`}></span>
-              <span className={`block w-5 h-0.5 bg-current transform transition ${isMenuOpen ? '-rotate-45 -translate-y-1.5' : ''}`}></span>
-            </button>
-          </div>
-          <ul className={`${isMenuOpen ? 'flex' : 'hidden'} md:flex flex-col md:flex-row flex-wrap mt-4 md:mt-0 *:border-l-0 md:*:border-l *:border-gray-500 *:px-0 md:*:px-4 *:py-2 md:*:py-0`}>
-            <li className="border-none hidden md:block">
-              <a className="hover:underline" href="#" onClick={() => setIsMenuOpen(false)}>
-                Eurydice
-              </a>
-            </li>
-            <li>
-              <a className="hover:underline block" href="about/" onClick={() => setIsMenuOpen(false)}>
-                About
-              </a>
-            </li>
-            <li>
-              <a
-                className="hover:underline block"
-                href="#"
-                onClick={() => {
-                  setIsMenuOpen(false);
-                  if (confirm("Opening the tutorial will clear the current code. Continue?")) {
-                    setShowTutorial(true);
-                  }
-                }}
-              >
-                Tutorial
-              </a>
-            </li>
-            <li>
-              <a className="hover:underline block" href="https://anydice.com" onClick={() => setIsMenuOpen(false)}>
-                AnyDice <ExternalWebsite />
-              </a>
-            </li>
-            <li>
-              <a className="hover:underline block" href="https://anydice.com/docs" onClick={() => setIsMenuOpen(false)}>
-                AnyDice Documentation <ExternalWebsite />
-              </a>
-            </li>
-          </ul>
-        </nav>
+        <Header 
+          showTutorial={true} 
+          onTutorialClick={() => setShowTutorial(true)} 
+        />
         <div className="flex grow md:min-h-[400px]">
           <div className="flex flex-col md:flex-row w-full h-full items-stretch">
             <div className={`w-full md:w-1/2 p-4 ${borderColor} border`}>
