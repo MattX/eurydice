@@ -138,13 +138,13 @@ function AppInner() {
     }
   }, [run]);
 
-  function onChange(val: string) {
+  const onChange = useCallback((val: string) => {
     setEditorText(val);
     localStorage.setItem("eurydice0_editor_program", val);
     if (runLive) {
       run(running, val);
     }
-  }
+  }, [runLive, running, run]);
 
   const tutorial = showTutorial ? (
     <Tutorial
