@@ -21,6 +21,10 @@
 }
 
 @layer components {
+  .document-content :is(h2, h3) {
+    scroll-margin-top: 1rem;
+  }
+
   .document-content pre,
   .document-content table {
     overflow-x: auto;
