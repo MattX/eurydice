@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 
 import { WorkerWrapper } from "./worker-wrapper";
 import { Distribution } from "./util";
@@ -33,16 +33,19 @@ function AppInner() {
     [],
   );
   const [showTutorial, setShowTutorial] = React.useState(false);
+  const runLiveRef = useRef(true);
+  const runningRef = useRef(false);
 
   const borderColor = React.useContext(DarkModeContext)
     ? "border-gray-700"
     : "border-gray-300";
 
   function setRunLive(val: boolean) {
+    runLiveRef.current = val;
     setRunLiveInner(val);
     if (val) {
       localStorage.removeItem("eurydice0_run_live");
-      run(running, editorText);
+      run(editorText);
     } else {
       localStorage.setItem("eurydice0_run_live", "false");
     }
@@ -51,9 +54,11 @@ function AppInner() {
   const attachOnMessage = useCallback((worker: WorkerWrapper) => {
     worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
       if (event.data.Err !== undefined) {
+        runningRef.current = false;
         setRunning(false);
         setError(event.data.Err);
       } else if (event.data.Ok !== undefined) {
+        runningRef.current = false;
         setRunning(false);
         setError(null);
         const chartData: [string, Distribution][] = [];
@@ -96,17 +101,18 @@ function AppInner() {
         }
       } else if (event.data.Print !== undefined) {
         const evt = event.data.Print as [string, string];
-        setPrintOutputs(printOutputs => [...printOutputs, evt]);
+        setPrintOutputs((printOutputs) => [...printOutputs, evt]);
       }
     });
   }, []);
 
-  const run = useCallback((running: boolean, val: string) => {
-    if (running) {
+  const run = useCallback((val: string) => {
+    if (runningRef.current) {
       worker.terminate();
       worker = new WorkerWrapper(new EurydiceWorker());
       attachOnMessage(worker);
     }
+    runningRef.current = true;
     setRunning(true);
     setPrintOutputs([]);
     setError(null);
@@ -121,6 +127,7 @@ function AppInner() {
     // Load the saved state from local storage
     const savedRunLive = localStorage.getItem("eurydice0_run_live") !== "false";
     if (!savedRunLive) {
+      runLiveRef.current = false;
       setRunLiveInner(false);
     }
 
@@ -134,17 +141,17 @@ function AppInner() {
     }
     setEditorText(savedText);
     if (savedRunLive) {
-      run(true, savedText);
+      run(savedText);
     }
   }, [run]);
 
   const onChange = useCallback((val: string) => {
     setEditorText(val);
     localStorage.setItem("eurydice0_editor_program", val);
-    if (runLive) {
-      run(running, val);
+    if (runLiveRef.current) {
+      run(val);
     }
-  }, [runLive, running, run]);
+  }, [run]);
 
   const tutorial = showTutorial ? (
     <Tutorial
@@ -157,9 +164,9 @@ function AppInner() {
     <>
       <div><Toaster /></div>
       <div className="flex flex-col min-h-screen">
-        <Header 
-          showTutorial={true} 
-          onTutorialClick={() => setShowTutorial(true)} 
+        <Header
+          showTutorial={true}
+          onTutorialClick={() => setShowTutorial(true)}
         />
         <div className="flex grow md:min-h-[400px]">
           <div className="flex flex-col md:flex-row w-full h-full items-stretch">
@@ -171,7 +178,7 @@ function AppInner() {
                 runLive={runLive}
                 setRunLive={setRunLive}
                 running={running}
-                run={() => run(running, editorText)}
+                run={() => run(editorText)}
                 error={error}
                 printOutputs={printOutputs}
               />

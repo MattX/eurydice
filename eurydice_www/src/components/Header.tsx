@@ -14,7 +14,7 @@ export default function Header({ showTutorial = false, onTutorialClick }: Header
       <Octocat />
       <nav className="w-[calc(100%-60px)] p-4">
       <div className="md:hidden flex justify-between items-center">
-        <a className="hover:underline" href="#">
+        <a className="hover:underline" href="/">
           Eurydice
         </a>
         <button
