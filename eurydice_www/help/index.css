@@ -21,6 +21,11 @@
 }
 
 @layer components {
+  .document-content code::before,
+  .document-content code::after {
+    content: none;
+  }
+
   .document-content :is(h2, h3) {
     scroll-margin-top: 1rem;
   }

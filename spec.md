@@ -683,7 +683,7 @@ These functions return pools of dimension 1 whose distribution is the sum of the
 
 These functions return the max and min of their two arguments, respectively.
 
-### `[maximum POOL:d]`
+### `[maximum of POOL:d]`
 
 Sums `POOL`, then returns its largest possible outcome as an int.
 
