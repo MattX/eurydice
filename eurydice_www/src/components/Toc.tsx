@@ -95,8 +95,8 @@ export default function Toc({ contentRef }: TocProps) {
         entry.level === 3 ? "pl-5" : "pl-3"
       } ${
         activeId === entry.id
-          ? "border-sky-600 font-semibold text-sky-700 dark:border-sky-400 dark:text-sky-300"
-          : "border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-950 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-100"
+          ? "font-semibold text-[var(--accent)] border-[var(--accent)]"
+          : "border-transparent text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)]"
       }`}
       href={`#${entry.id}`}
       aria-current={activeId === entry.id ? "location" : undefined}
@@ -130,7 +130,8 @@ export default function Toc({ contentRef }: TocProps) {
     <>
       <details
         ref={mobileDetailsRef}
-        className="mb-6 rounded-md border border-slate-300 bg-slate-50 px-4 py-3 dark:border-slate-600 dark:bg-slate-700/40 lg:hidden"
+        className="mb-6 rounded-md border px-4 py-3 lg:hidden"
+        style={{ background: "var(--surface-2)", borderColor: "var(--border)" }}
       >
         <summary className="cursor-pointer font-semibold">On this page</summary>
         <nav className="mt-3 max-h-80 overflow-y-auto" aria-label="Specification contents">
@@ -138,7 +139,7 @@ export default function Toc({ contentRef }: TocProps) {
         </nav>
       </details>
 
-      <aside className="sticky top-4 hidden max-h-[calc(100vh-2rem)] self-start lg:block">
+      <aside className="sticky top-20 hidden max-h-[calc(100vh-6rem)] self-start lg:block">
         <nav
           ref={desktopNavRef}
           className="max-h-[calc(100vh-2rem)] overflow-y-auto pr-3"

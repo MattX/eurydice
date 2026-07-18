@@ -63,10 +63,10 @@ describe('chartData', () => {
   });
 
   describe('ColorGenerator', () => {
-    it('should generate valid rgba colors', () => {
+    it('should generate valid hex colors', () => {
       const generator = new ColorGenerator();
       const color = generator.nextColor();
-      expect(color).toMatch(/^rgba\(\d+, \d+, \d+, 1\.0\)$/);
+      expect(color).toMatch(/^#[0-9a-f]{6}$/i);
     });
 
     it('should generate different colors on subsequent calls', () => {
@@ -76,20 +76,16 @@ describe('chartData', () => {
       expect(color1).not.toBe(color2);
     });
 
-    it('should generate colors with values between 0 and 255', () => {
-      const generator = new ColorGenerator();
-      const color = generator.nextColor();
-      const matches = color.match(/rgba\((\d+), (\d+), (\d+), 1\.0\)/);
-      expect(matches).toBeTruthy();
-      if (matches) {
-        const [, r, g, b] = matches;
-        expect(parseInt(r)).toBeGreaterThanOrEqual(0);
-        expect(parseInt(r)).toBeLessThanOrEqual(255);
-        expect(parseInt(g)).toBeGreaterThanOrEqual(0);
-        expect(parseInt(g)).toBeLessThanOrEqual(255);
-        expect(parseInt(b)).toBeGreaterThanOrEqual(0);
-        expect(parseInt(b)).toBeLessThanOrEqual(255);
-      }
+    it('should be deterministic and start from the same first color', () => {
+      const first = new ColorGenerator().nextColor();
+      const firstAgain = new ColorGenerator().nextColor();
+      expect(first).toBe(firstAgain);
+    });
+
+    it('should use a different palette for dark mode', () => {
+      const light = new ColorGenerator(false).nextColor();
+      const dark = new ColorGenerator(true).nextColor();
+      expect(light).not.toBe(dark);
     });
   });
 

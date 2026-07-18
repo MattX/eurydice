@@ -19,10 +19,6 @@ import { toast } from "react-hot-toast";
 export default function EditorPane(props: EditorPaneProps) {
   const isDarkMode = React.useContext(DarkModeContext);
 
-  const runButtonClass = props.runLive
-    ? "border-gray-400 text-gray-400"
-    : "border-blue-500 hover:border-blue-700";
-
   const eurydiceLinter = linter(() => {
     if (props.error === null) {
       return [];
@@ -63,9 +59,11 @@ export default function EditorPane(props: EditorPaneProps) {
       );
     });
     outputs = (
-      <div>
-        <h3 className="font-bold py-2">Print log</h3>
-        {outputDivs}
+      <div className="mt-4 rounded-lg border p-3" style={{ background: "var(--surface-2)" }}>
+        <h3 className="mb-2 text-xs font-semibold tracking-wide uppercase text-[var(--text-muted)]">
+          Print log
+        </h3>
+        <div className="space-y-0.5">{outputDivs}</div>
       </div>
     );
     outputIcon = (
@@ -84,36 +82,41 @@ export default function EditorPane(props: EditorPaneProps) {
 
   return (
     <>
-      <div className="flex flex-row mb-4 px-2 pt-2 clear-both">
-        <button className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm" onClick={share}>
+      <div className="mb-3 flex flex-row flex-wrap items-center gap-2 clear-both">
+        <button className="btn btn-secondary" onClick={share}>
           <Share /> Share
         </button>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mr-1 rounded-sm align-middle">
-          <input
-            type="checkbox"
-            name="runLiveCheckbox"
-            checked={props.runLive}
-            onChange={(e) => props.setRunLive(e.target.checked)}
-          />{" "}
+        <button
+          className="btn-toggle"
+          aria-pressed={props.runLive}
+          onClick={() => props.setRunLive(!props.runLive)}
+        >
           Run live
-        </label>
+        </button>
         <button
           disabled={props.runLive}
           onClick={() => !props.runLive && props.run()}
-          className={`border-2 ${runButtonClass} py-1 px-2 mx-1 rounded-sm`}
+          className="btn btn-primary"
         >
           Run
         </button>
-        {props.running && <Spinner />}
-        {outputIcon}
-        {errorIcon}
+        <div className="ml-auto flex items-center gap-1">
+          {props.running && <Spinner />}
+          {outputIcon}
+          {errorIcon}
+        </div>
       </div>
-      <CodeMirror
-        value={props.editorText}
-        onChange={props.onChange}
-        extensions={[languageSupport, eurydiceLinter]}
-        theme={isDarkMode ? githubDark : githubLight}
-      />
+      <div
+        className="overflow-hidden rounded-lg border"
+        style={{ borderColor: "var(--border)" }}
+      >
+        <CodeMirror
+          value={props.editorText}
+          onChange={props.onChange}
+          extensions={[languageSupport, eurydiceLinter]}
+          theme={isDarkMode ? githubDark : githubLight}
+        />
+      </div>
       {outputs}
     </>
   );

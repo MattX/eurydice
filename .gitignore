@@ -1,3 +1,6 @@
 /target/
 /eurydice_wasm/pkg/
+
 .claude/
+.playwright-mcp/
+

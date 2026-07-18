@@ -1,76 +1,130 @@
 import React from "react";
-import { ExternalWebsite, Octocat } from "./Icons";
+import { ExternalWebsite, Github, D20Logo } from "./Icons";
 
 interface HeaderProps {
   showTutorial?: boolean;
   onTutorialClick?: () => void;
 }
 
-export default function Header({ showTutorial = false, onTutorialClick }: HeaderProps) {
+const linkClass =
+  "block rounded px-2 py-1 text-sm font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]";
+
+export default function Header({
+  showTutorial = false,
+  onTutorialClick,
+}: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const close = () => setIsMenuOpen(false);
 
   return (
-    <>
-      <Octocat />
-      <nav className="w-[calc(100%-60px)] p-4">
-      <div className="md:hidden flex justify-between items-center">
-        <a className="hover:underline" href="/">
+    <header
+      className="sticky top-0 z-30 border-b"
+      style={{
+        background: "color-mix(in srgb, var(--bg) 88%, transparent)",
+        backdropFilter: "blur(8px)",
+        borderColor: "var(--border)",
+      }}
+    >
+      <nav className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-1 gap-y-2 px-4 py-2.5">
+        <a
+          href="/"
+          className="flex items-center gap-2 pr-2 font-semibold tracking-tight text-[var(--text)]"
+        >
+          <span style={{ color: "var(--accent)" }}>
+            <D20Logo className="size-7" />
+          </span>
           Eurydice
         </a>
+
         <button
-          className="flex flex-col justify-center items-center w-6 h-6 space-y-1"
+          className="ml-auto flex size-8 flex-col items-center justify-center gap-1 rounded-md hover:bg-[var(--surface-2)] md:hidden"
           onClick={() => setIsMenuOpen(!isMenuOpen)}
           aria-label="Toggle menu"
         >
-          <span className={`block w-5 h-0.5 bg-current transform transition ${isMenuOpen ? 'rotate-45 translate-y-1.5' : ''}`}></span>
-          <span className={`block w-5 h-0.5 bg-current transition ${isMenuOpen ? 'opacity-0' : ''}`}></span>
-          <span className={`block w-5 h-0.5 bg-current transform transition ${isMenuOpen ? '-rotate-45 -translate-y-1.5' : ''}`}></span>
+          <span
+            className={`block h-0.5 w-5 bg-current transition-transform ${isMenuOpen ? "translate-y-1.5 rotate-45" : ""}`}
+          ></span>
+          <span
+            className={`block h-0.5 w-5 bg-current transition-opacity ${isMenuOpen ? "opacity-0" : ""}`}
+          ></span>
+          <span
+            className={`block h-0.5 w-5 bg-current transition-transform ${isMenuOpen ? "-translate-y-1.5 -rotate-45" : ""}`}
+          ></span>
         </button>
-      </div>
-      <ul className={`${isMenuOpen ? 'flex' : 'hidden'} md:flex flex-col md:flex-row flex-wrap mt-4 md:mt-0 *:border-l-0 md:*:border-l *:border-gray-500 *:px-0 md:*:px-4 *:py-2 md:*:py-0`}>
-        <li className="border-none hidden md:block">
-          <a className="hover:underline" href="/" onClick={() => setIsMenuOpen(false)}>
-            Eurydice
-          </a>
-        </li>
-        <li>
-          <a className="hover:underline block" href="/help/about/" onClick={() => setIsMenuOpen(false)}>
-            About
-          </a>
-        </li>
-        <li>
-          <a className="hover:underline block" href="/help/spec/" onClick={() => setIsMenuOpen(false)}>
-            Specification
-          </a>
-        </li>
-        {showTutorial && (
+
+        <ul
+          className={`${isMenuOpen ? "flex" : "hidden"} w-full flex-col gap-0.5 md:flex md:w-auto md:flex-row md:items-center`}
+        >
           <li>
-            <a
-              className="hover:underline block"
-              href="#"
-              onClick={() => {
-                setIsMenuOpen(false);
-                if (onTutorialClick && confirm("Opening the tutorial will clear the current code. Continue?")) {
-                  onTutorialClick();
-                }
-              }}
-            >
-              Tutorial
+            <a className={linkClass} href="/help/about/" onClick={close}>
+              About
             </a>
           </li>
-        )}
-        <li>
-          <a className="hover:underline block" href="https://anydice.com" onClick={() => setIsMenuOpen(false)}>
-            AnyDice <ExternalWebsite />
-          </a>
-        </li>
-        <li>
-          <a className="hover:underline block" href="https://anydice.com/docs" onClick={() => setIsMenuOpen(false)}>
-            AnyDice Documentation <ExternalWebsite />
-          </a>
-        </li>
-      </ul>
-    </nav>
-    </>
+          <li>
+            <a className={linkClass} href="/help/spec/" onClick={close}>
+              Specification
+            </a>
+          </li>
+          {showTutorial && (
+            <li>
+              <a
+                className={linkClass}
+                href="#"
+                onClick={() => {
+                  close();
+                  if (
+                    onTutorialClick &&
+                    confirm(
+                      "Opening the tutorial will clear the current code. Continue?",
+                    )
+                  ) {
+                    onTutorialClick();
+                  }
+                }}
+              >
+                Tutorial
+              </a>
+            </li>
+          )}
+
+          <li aria-hidden="true" className="hidden md:block">
+            <span
+              className="mx-1 block h-4 w-px"
+              style={{ background: "var(--border-strong)" }}
+            />
+          </li>
+
+          <li>
+            <a
+              className={`${linkClass} flex items-center gap-1`}
+              href="https://anydice.com"
+              onClick={close}
+            >
+              AnyDice <ExternalWebsite />
+            </a>
+          </li>
+          <li>
+            <a
+              className={`${linkClass} flex items-center gap-1`}
+              href="https://anydice.com/docs"
+              onClick={close}
+            >
+              AnyDice Docs <ExternalWebsite />
+            </a>
+          </li>
+          <li>
+            <a
+              className={`${linkClass} flex items-center gap-1.5`}
+              href="https://github.com/MattX/eurydice"
+              aria-label="View source on GitHub"
+              onClick={close}
+            >
+              <Github className="size-4" />
+              <span className="md:sr-only">GitHub</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </header>
   );
 }

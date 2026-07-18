@@ -62,54 +62,45 @@ export default function ExportModal({ distributions, isOpen, onClose }: ExportMo
   };
 
   return (
-    <dialog 
+    <dialog
       ref={dialogRef}
-      className="backdrop:backdrop-blur-sm rounded-lg p-6 max-w-2xl w-full max-h-96 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 dark:bg-slate-800 dark:text-slate-300 border-2 border-gray-500"
+      className="top-1/2 left-1/2 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-xl p-6 shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-sm"
+      style={{
+        background: "var(--surface)",
+        color: "var(--text)",
+        border: "1px solid var(--border-strong)",
+      }}
       onClose={onClose}
       onClick={handleDialogClick}
     >
-      <div className="flex gap-2 mb-4">
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
-          <input
-            type="radio"
-            name="csvFormat"
-            checked={csvFormat === "values"}
-            onChange={() => setCsvFormat("values")}
-          />{" "}
+      <h2 className="mb-3 text-lg font-semibold">Export distributions</h2>
+      <div className="segmented mb-4" role="group" aria-label="Export format">
+        <button
+          aria-pressed={csvFormat === "values"}
+          onClick={() => setCsvFormat("values")}
+        >
           Value table
-        </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
-          <input
-            type="radio"
-            name="csvFormat"
-            checked={csvFormat === "anydice"}
-            onChange={() => setCsvFormat("anydice")}
-          />{" "}
+        </button>
+        <button
+          aria-pressed={csvFormat === "anydice"}
+          onClick={() => setCsvFormat("anydice")}
+        >
           AnyDice format
-        </label>
+        </button>
       </div>
       <textarea
         value={csvContent}
         readOnly
-        className="w-full h-48 border border-gray-300 rounded p-2 font-mono text-sm resize-none"
+        className="field h-48 w-full resize-none font-mono"
       />
-      <div className="flex gap-2 mt-4">
-        <button
-          onClick={handleCopyToClipboard}
-          className="px-4 py-2 bg-blue-500 rounded hover:bg-blue-600"
-        >
+      <div className="mt-4 flex gap-2">
+        <button onClick={handleCopyToClipboard} className="btn btn-primary">
           Copy to clipboard
         </button>
-        <button
-          onClick={handleDownload}
-          className="px-4 py-2 bg-blue-500 rounded hover:bg-blue-600"
-        >
+        <button onClick={handleDownload} className="btn btn-secondary">
           Download
         </button>
-        <button
-          onClick={onClose}
-          className="px-4 py-2 bg-gray-500 rounded hover:bg-gray-600 ml-auto"
-        >
+        <button onClick={onClose} className="btn btn-ghost ml-auto">
           Close
         </button>
       </div>

@@ -27,40 +27,57 @@ export function partialSums(array: number[], backwards: boolean): number[] {
   return sums;
 }
 
-/// A simple seedable random number generator
-/// https://stackoverflow.com/a/47593316
-function splitmix32(a: number) {
-  return function () {
-    a |= 0;
-    a = (a + 0x9e3779b9) | 0;
-    let t = a ^ (a >>> 16);
-    t = Math.imul(t, 0x21f0aaad);
-    t = t ^ (t >>> 15);
-    t = Math.imul(t, 0x735a2d97);
-    return ((t = t ^ (t >>> 15)) >>> 0) / 4294967296;
-  };
-}
+/**
+ * Fixed categorical palette in a CVD-safe order (validated: worst adjacent
+ * CVD ΔE 9.1 light / 8.4 dark). Assigned in order, never cycled by hue — a
+ * ninth series simply wraps, which is acceptable here since series count is
+ * user-controlled and rarely large. Light/dark columns are the same eight
+ * hues stepped for their surface.
+ */
+const CATEGORICAL_LIGHT = [
+  "#2a78d6", // blue
+  "#008300", // green
+  "#e87ba4", // magenta
+  "#eda100", // yellow
+  "#1baf7a", // aqua
+  "#eb6834", // orange
+  "#4a3aa7", // violet
+  "#e34948", // red
+];
+
+const CATEGORICAL_DARK = [
+  "#3987e5", // blue
+  "#008300", // green
+  "#d55181", // magenta
+  "#c98500", // yellow
+  "#199e70", // aqua
+  "#d95926", // orange
+  "#9085e9", // violet
+  "#e66767", // red
+];
 
 export class ColorGenerator {
-  private rng: () => number;
+  private index = 0;
+  private palette: string[];
 
-  constructor() {
-    this.rng = splitmix32(2);
+  constructor(isDarkMode = false) {
+    this.palette = isDarkMode ? CATEGORICAL_DARK : CATEGORICAL_LIGHT;
   }
 
   nextColor(): string {
-    return `rgba(${Math.floor(this.rng() * 256)}, ${Math.floor(
-      this.rng() * 256
-    )}, ${Math.floor(this.rng() * 256)}, 1.0)`;
+    const color = this.palette[this.index % this.palette.length];
+    this.index++;
+    return color;
   }
 }
 
 export function prepareChartData(
   chartData: [string, Distribution][],
-  mode: DisplayMode
+  mode: DisplayMode,
+  isDarkMode = false
 ): ChartData<"line", number[], string> {
   if (mode === DisplayMode.Transposed) {
-    return prepareTransposedChartData(chartData);
+    return prepareTransposedChartData(chartData, isDarkMode);
   }
 
   // Compute the range of outcomes
@@ -74,7 +91,7 @@ export function prepareChartData(
     (_, i) => i + min_outcome
   );
   const datasets = [];
-  const colorGenerator = new ColorGenerator();
+  const colorGenerator = new ColorGenerator(isDarkMode);
   for (const nameAndDist of chartData) {
     const [name, dist] = nameAndDist;
     const distMap = new Map(dist.probabilities);
@@ -101,7 +118,8 @@ export function prepareChartData(
 }
 
 function prepareTransposedChartData(
-  chartData: [string, Distribution][]
+  chartData: [string, Distribution][],
+  isDarkMode = false
 ): ChartData<"line", number[], string> {
   // Get all unique outcomes across all distributions
   const allOutcomes = new Set<number>();
@@ -116,8 +134,8 @@ function prepareTransposedChartData(
   
   // Create a dataset for each outcome value
   const datasets = [];
-  const colorGenerator = new ColorGenerator();
-  
+  const colorGenerator = new ColorGenerator(isDarkMode);
+
   for (const outcome of sortedOutcomes) {
     const data: number[] = [];
     

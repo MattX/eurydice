@@ -1,12 +1,53 @@
+// A d20 (icosahedron) logo mark, drawn as a hexagonal outline with the
+// characteristic triangular facets of a twenty-sided die.
+export function D20Logo({ className = "size-7" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={5}
+      strokeLinejoin="round"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      {/* Outer hexagon */}
+      <path d="M50 6 L88 28 L88 72 L50 94 L12 72 L12 28 Z" />
+      {/* Top face triangle */}
+      <path d="M50 6 L29 40 L71 40 Z" />
+      {/* Central inverted triangle */}
+      <path d="M29 40 L71 40 L50 74 Z" />
+      {/* Lower connecting edges */}
+      <path d="M12 28 L29 40 M88 28 L71 40 M50 74 L50 94 M29 40 L12 72 M71 40 L88 72" />
+    </svg>
+  );
+}
+
+export function Github({ className = "size-5" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.34-5.47-5.96 0-1.32.47-2.39 1.24-3.23-.13-.3-.54-1.53.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.65.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.23 0 4.63-2.81 5.65-5.49 5.95.43.37.82 1.1.82 2.22v3.29c0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z" />
+    </svg>
+  );
+}
+
 // Unceremoniously stolen from https://github.com/n3r4zzurr0/svg-spinners/blob/main/svg-css/3-dots-move.svg
 export function Spinner() {
   return (
-    <span className="grid place-content-center">
+    <span className="grid place-content-center" style={{ color: "var(--accent)" }}>
       <svg
         viewBox="0 0 24 24"
         xmlns="http://www.w3.org/2000/svg"
         stroke="currentColor"
-        className="size-9"
+        className="size-6"
       >
         <style>{`.spinner_nOfF{animation:spinner_qtyZ 2s cubic-bezier(0.36,.6,.31,1) infinite}.spinner_fVhf{animation-delay:-.5s}.spinner_piVe{animation-delay:-1s}.spinner_MSNs{animation-delay:-1.5s}@keyframes spinner_qtyZ{0%{r:0}25%{r:3px;cx:4px}50%{r:3px;cx:12px}75%{r:3px;cx:20px}100%{r:0;cx:20px}}`}</style>
         <circle className="spinner_nOfF" cx="4" cy="12" r="3" />
@@ -27,7 +68,8 @@ export function Warning() {
         viewBox="0 0 24 24"
         strokeWidth={1.5}
         stroke="currentColor"
-        className="size-9 text-red-700"
+        className="size-6"
+        style={{ color: "var(--danger)" }}
       >
         <path
           strokeLinecap="round"
@@ -48,7 +90,8 @@ export function Information() {
         viewBox="0 0 24 24"
         strokeWidth={1.5}
         stroke="currentColor"
-        className="size-9 text-blue-500"
+        className="size-6"
+        style={{ color: "var(--accent)" }}
       >
         <path
           strokeLinecap="round"
@@ -62,14 +105,14 @@ export function Information() {
 
 export function Share() {
   return (
-    <span className="inline-block align-middle -translate-y-0.5">
+    <span className="inline-flex">
       <svg
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
         viewBox="0 0 24 24"
         strokeWidth={1.5}
         stroke="currentColor"
-        className="size-6"
+        className="size-4"
       >
         <path
           strokeLinecap="round"

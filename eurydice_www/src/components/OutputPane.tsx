@@ -66,9 +66,11 @@ export default function OutputPane(props: OutputPaneProps) {
 
 
   const isDarkMode = React.useContext(DarkModeContext);
-  const tickColor = isDarkMode ? "gray" : "lightgray";
-  const gridColor = isDarkMode ? "gray" : "lightgray";
-  const textColor = isDarkMode ? "white" : "lightgray";
+  const gridColor = isDarkMode ? "#26323f" : "#e4eaf1";
+  const textColor = isDarkMode ? "#94a3b8" : "#64748b";
+  const tooltipBg = isDarkMode ? "#182230" : "#ffffff";
+  const tooltipText = isDarkMode ? "#e5edf6" : "#1a2431";
+  const tooltipBorder = isDarkMode ? "#3a4c60" : "#c2ccda";
 
   let display;
   if (tableMode) {
@@ -79,10 +81,10 @@ export default function OutputPane(props: OutputPaneProps) {
       />
     );
   } else {
-    const datasets = prepareChartData(props.distributions, displayMode);
+    const datasets = prepareChartData(props.distributions, displayMode, isDarkMode);
     const grid = {
       color: gridColor,
-      tickColor,
+      tickColor: gridColor,
     };
     display = (
       <Line
@@ -92,29 +94,57 @@ export default function OutputPane(props: OutputPaneProps) {
             intersect: false,
             mode: "index",
           },
+          elements: {
+            line: { borderWidth: 2, tension: 0.25 },
+            point: { radius: 0, hoverRadius: 4, hitRadius: 8 },
+          },
           scales: {
             y: {
               beginAtZero: true,
+              border: { color: gridColor },
               ticks: {
                 callback: (value) => `${value}%`,
                 color: textColor,
+                font: { size: 11 },
               },
               grid,
             },
             x: {
+              border: { color: gridColor },
               ticks: {
                 color: textColor,
+                font: { size: 11 },
+                maxRotation: 0,
+                autoSkipPadding: 12,
               },
               grid,
             },
           },
           animation: false,
           plugins: {
+            legend: {
+              labels: {
+                color: tooltipText,
+                usePointStyle: true,
+                pointStyle: "line",
+                boxWidth: 24,
+                font: { size: 12 },
+              },
+            },
             tooltip: {
+              backgroundColor: tooltipBg,
+              titleColor: tooltipText,
+              bodyColor: tooltipText,
+              borderColor: tooltipBorder,
+              borderWidth: 1,
+              padding: 10,
+              cornerRadius: 8,
+              usePointStyle: true,
+              boxPadding: 4,
               callbacks: {
                 label: (context) => {
                   const value = context.parsed.y;
-                  return `${context.dataset.label}: ${value.toFixed(3)}%`;
+                  return `${context.dataset.label}: ${value.toFixed(2)}%`;
                 },
               },
             },
@@ -131,58 +161,47 @@ export default function OutputPane(props: OutputPaneProps) {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-1 mb-4 px-2">
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
-          <input
-            type="checkbox"
-            checked={tableMode}
-            onChange={() => setTableMode(!tableMode)}
-          />{" "}
-          Table
-        </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
-          <input
-            type="radio"
-            name="displayMode"
-            checked={displayMode === DisplayMode.Distribution}
-            onChange={() => setDisplayMode(DisplayMode.Distribution)}
-          />{" "}
-          Distribution
-        </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
-          <input
-            type="radio"
-            name="displayMode"
-            checked={displayMode === DisplayMode.AtLeast}
-            onChange={() => setDisplayMode(DisplayMode.AtLeast)}
-          />{" "}
-          At least
-        </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
-          <input
-            type="radio"
-            name="displayMode"
-            checked={displayMode === DisplayMode.AtMost}
-            onChange={() => setDisplayMode(DisplayMode.AtMost)}
-          />{" "}
-          At most
-        </label>
-        <label className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 rounded-sm align-middle">
-          <input
-            type="radio"
-            name="displayMode"
-            checked={displayMode === DisplayMode.Transposed}
-            onChange={() => {
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="segmented" role="group" aria-label="Display mode">
+          <button
+            aria-pressed={displayMode === DisplayMode.Distribution}
+            onClick={() => setDisplayMode(DisplayMode.Distribution)}
+          >
+            Distribution
+          </button>
+          <button
+            aria-pressed={displayMode === DisplayMode.AtLeast}
+            onClick={() => setDisplayMode(DisplayMode.AtLeast)}
+          >
+            At least
+          </button>
+          <button
+            aria-pressed={displayMode === DisplayMode.AtMost}
+            onClick={() => setDisplayMode(DisplayMode.AtMost)}
+          >
+            At most
+          </button>
+          <button
+            aria-pressed={displayMode === DisplayMode.Transposed}
+            onClick={() => {
               setDisplayMode(DisplayMode.Transposed);
               if (showBracketing) {
                 setShowBracketing(false);
                 plugin.current.setActive(false);
               }
             }}
-          />{" "}
-          Transposed
-        </label>
-        <div className="relative flex gap-1 ml-auto">
+          >
+            Transposed
+          </button>
+        </div>
+        <button
+          className="btn-toggle"
+          aria-pressed={tableMode}
+          onClick={() => setTableMode(!tableMode)}
+        >
+          Table
+        </button>
+        <div className="relative ml-auto flex gap-2">
           <button
             onClick={() => {
               setShowBracketing(!showBracketing);
@@ -190,17 +209,14 @@ export default function OutputPane(props: OutputPaneProps) {
               plugin.current.setRange(lowerBound, upperBound);
             }}
             disabled={displayMode === DisplayMode.Transposed}
-            className={`border-2 py-1 px-3 rounded-sm ${
-              displayMode === DisplayMode.Transposed
-                ? "border-gray-400 bg-gray-400 text-gray-600 cursor-not-allowed"
-                : "border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600"
-            }`}
+            className="btn-toggle"
+            aria-pressed={showBracketing && displayMode !== DisplayMode.Transposed}
           >
             Bracket {showBracketing ? "▲" : "▼"}
           </button>
           <button
             onClick={() => setShowExportModal(true)}
-            className="border-2 border-green-500 hover:border-green-700 bg-green-500 hover:bg-green-600 py-1 px-3 rounded-sm"
+            className="btn btn-secondary"
           >
             Export
           </button>
@@ -209,9 +225,9 @@ export default function OutputPane(props: OutputPaneProps) {
       <div>
         {showBracketing && displayMode !== DisplayMode.Transposed && (
           <div>
-            <div className="mb-4">
-              <label className="mr-1">
-                Lower:
+            <div className="mb-4 flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                Lower
                 <input
                   type="number"
                   value={lowerBound}
@@ -227,12 +243,12 @@ export default function OutputPane(props: OutputPaneProps) {
                       newUpperBound
                     );
                   }}
-                  className="w-20 border rounded px-2 py-1 mx-2"
+                  className="field"
                   style={{ width: "5em" }}
                 />
               </label>
-              <label className="ml-2">
-                Upper:
+              <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                Upper
                 <input
                   type="number"
                   value={upperBound}
@@ -245,7 +261,7 @@ export default function OutputPane(props: OutputPaneProps) {
                     setLowerBound(newLowerBound);
                     plugin.current.setRange(newLowerBound, Number(e.target.value));
                   }}
-                  className="w-20 border rounded px-2 py-1 mx-2"
+                  className="field"
                   style={{ width: "5em" }}
                 />
               </label>
@@ -284,33 +300,44 @@ interface BracketingTableProps {
   upperBound: number;
 }
 
+function ColorSwatch({ color }: { color: string }) {
+  return (
+    <span
+      className="mr-1.5 inline-block size-2.5 shrink-0 rounded-sm align-middle"
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
 function CombinedProbabilityTable({
   distributions,
   mode,
 }: CombinedProbabilityTableProps) {
-  const colorGenerator = new ColorGenerator();
+  const isDarkMode = React.useContext(DarkModeContext);
+  const colorGenerator = new ColorGenerator(isDarkMode);
   const colors = distributions.map(() => colorGenerator.nextColor());
 
   const sortedOutcomes = getAllUniqueOutcomes(distributions);
   const tableData = computeTableData(distributions, mode, sortedOutcomes);
   const statisticsData = computeDistributionStatistics(distributions);
 
-  const baseClassName = "border px-2 py-1 text-center";
-  const headerClassName = "border px-2 py-1 text-center font-semibold sticky top-0 left-0 z-20";
-  const leftColumnClassName = "border px-2 py-1 text-center font-semibold sticky left-0 z-10";
+  const cell = "px-3 py-1.5 text-right tabular-nums whitespace-nowrap";
+  const cornerHeader =
+    "px-3 py-1.5 text-left font-semibold sticky top-0 left-0 z-20 bg-[var(--surface-2)]";
+  const colHeader =
+    "px-3 py-1.5 text-right font-semibold whitespace-nowrap sticky top-0 z-10 bg-[var(--surface-2)]";
+  const rowHeader =
+    "px-3 py-1.5 text-left font-semibold sticky left-0 z-10 bg-[var(--surface)]";
 
   return (
-    <div className="overflow-x-auto">
-      <table className="border-collapse border w-full table-fixed">
+    <div className="dice-table overflow-x-auto rounded-lg border">
+      <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
-            <th className={headerClassName}>Outcome</th>
+            <th className={cornerHeader}>Outcome</th>
             {distributions.map(([name], index) => (
-              <th
-                key={index}
-                className="border px-2 py-1 text-center font-semibold"
-                style={{ backgroundColor: colors[index] }}
-              >
+              <th key={index} className={colHeader}>
+                <ColorSwatch color={colors[index]} />
                 {name}
               </th>
             ))}
@@ -318,49 +345,34 @@ function CombinedProbabilityTable({
         </thead>
         <tbody>
           {tableData.map((row) => (
-            <tr key={row.outcome}>
-              <td className={leftColumnClassName}>{row.outcome}</td>
+            <tr key={row.outcome} className="dice-row">
+              <td className={rowHeader}>{row.outcome}</td>
               {row.values.map((value, index) => (
-                <td key={index} className={`${baseClassName} text-right`}>
+                <td key={index} className={cell}>
                   {value}
                 </td>
               ))}
             </tr>
           ))}
         </tbody>
-      </table>
-      
-      {/* Statistics table */}
-      <div className="mt-4">
-        <table className="border-collapse border w-full table-fixed">
-          <thead>
-            <tr>
-              <th className={headerClassName}>Statistic</th>
-              {distributions.map(([name], index) => (
-                <th
-                  key={index}
-                  className="border px-2 py-1 text-center font-semibold text-white"
-                  style={{ backgroundColor: colors[index] }}
-                >
-                  {name}
-                </th>
+        <tbody className="dice-stats">
+          {[
+            ["Mean", "mean"],
+            ["Std dev", "stdDev"],
+            ["Min", "min"],
+            ["Max", "max"],
+          ].map(([stat, key]) => (
+            <tr key={stat} className="dice-row">
+              <td className={`${rowHeader} text-[var(--text-muted)]`}>{stat}</td>
+              {statisticsData.map((stats, index) => (
+                <td key={index} className={`${cell} text-[var(--text-muted)]`}>
+                  {stats[key as keyof DistributionStatistics]}
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {[['Mean', 'mean'], ['StdDev', 'stdDev'], ['Min', 'min'], ['Max', 'max']].map(([stat, key]) => (
-              <tr key={stat}>
-                <td className={leftColumnClassName}>{stat}</td>
-                {statisticsData.map((stats, index) => (
-                  <td key={index} className={`${baseClassName} text-right`}>
-                    {stats[key as keyof DistributionStatistics]}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -370,24 +382,26 @@ function BracketingTable({
   lowerBound,
   upperBound,
 }: BracketingTableProps) {
-
-  const baseClassName = "border border-gray-300 px-2 py-1 text-center";
-  const headerClassName =
-    "border border-gray-300 px-2 py-1 text-center font-semibold";
-  const colorGenerator = new ColorGenerator();
+  const isDarkMode = React.useContext(DarkModeContext);
+  const colorGenerator = new ColorGenerator(isDarkMode);
   const colors = distributions.map(() => colorGenerator.nextColor());
 
+  const cell = "px-3 py-1.5 text-right tabular-nums whitespace-nowrap";
+  const header =
+    "px-3 py-1.5 text-right font-semibold whitespace-nowrap bg-[var(--surface-2)]";
+  const rowHeader = "px-3 py-1.5 text-left font-medium";
+
   return (
-    <div className="mb-4">
-      <table className="border-collapse border border-gray-300 w-full">
+    <div className="dice-table mb-4 overflow-x-auto rounded-lg border">
+      <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
-            <th className={headerClassName}>Distribution</th>
-            <th className={headerClassName}>P(X &lt; {lowerBound})</th>
-            <th className={headerClassName}>
+            <th className={`${header} text-left`}>Distribution</th>
+            <th className={header}>P(X &lt; {lowerBound})</th>
+            <th className={header}>
               P({lowerBound} ≤ X ≤ {upperBound})
             </th>
-            <th className={headerClassName}>P(X &gt; {upperBound})</th>
+            <th className={header}>P(X &gt; {upperBound})</th>
           </tr>
         </thead>
         <tbody>
@@ -398,16 +412,14 @@ function BracketingTable({
               upperBound
             );
             return (
-              <tr key={index}>
-                <td
-                  className="border border-gray-300 px-2 py-1"
-                  style={{ backgroundColor: colors[index] }}
-                >
+              <tr key={index} className="dice-row">
+                <td className={rowHeader}>
+                  <ColorSwatch color={colors[index]} />
                   {name}
                 </td>
-                <td className={baseClassName}>{pLower.toFixed(2)}%</td>
-                <td className={baseClassName}>{pBetween.toFixed(2)}%</td>
-                <td className={baseClassName}>{pUpper.toFixed(2)}%</td>
+                <td className={cell}>{pLower.toFixed(2)}%</td>
+                <td className={cell}>{pBetween.toFixed(2)}%</td>
+                <td className={cell}>{pUpper.toFixed(2)}%</td>
               </tr>
             );
           })}

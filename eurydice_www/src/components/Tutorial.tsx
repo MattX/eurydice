@@ -11,7 +11,7 @@ export default function Tutorial(props: TutorialProps) {
   const prevButton =
     step > 0 ? (
       <button
-        className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded-sm"
+        className="btn btn-secondary"
         onClick={() => {
           props.setEditorText(steps[step - 1].editorText);
           setStep(step - 1);
@@ -23,7 +23,7 @@ export default function Tutorial(props: TutorialProps) {
   const nextButton =
     step < steps.length - 1 ? (
       <button
-        className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded-sm"
+        className="btn btn-primary"
         onClick={() => {
           props.setEditorText(steps[step + 1].editorText);
           setStep(step + 1);
@@ -34,17 +34,22 @@ export default function Tutorial(props: TutorialProps) {
     ) : null;
 
   return (
-    <div className="p-1">
-      <div className="p-2">{steps[step].text}</div>
-      <div className="float-right">
+    <div
+      className="mb-4 rounded-lg border p-4"
+      style={{ background: "var(--accent-soft)", borderColor: "var(--accent-border)" }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold tracking-wide uppercase text-[var(--accent)]">
+          Tutorial · Step {step + 1} of {steps.length}
+        </span>
+      </div>
+      <div className="text-sm leading-relaxed">{steps[step].text}</div>
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        <button className="btn btn-ghost" onClick={props.closeTutorial}>
+          Close
+        </button>
         {prevButton}
         {nextButton}
-        <button
-          className="border-2 border-blue-500 hover:border-blue-700 py-1 px-2 mx-1 rounded-sm"
-          onClick={props.closeTutorial}
-        >
-          Close tutorial
-        </button>
       </div>
     </div>
   );

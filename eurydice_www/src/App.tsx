@@ -6,10 +6,7 @@ import OutputPane from "./components/OutputPane";
 import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
 import Header from "./components/Header";
-import {
-  DarkModeContext,
-  DarkModeSwitcher,
-} from "./components/DarkModeSwitcher";
+import { DarkModeSwitcher } from "./components/DarkModeSwitcher";
 import EurydiceWorker from "./worker?worker";
 import { Toaster } from "react-hot-toast";
 
@@ -35,10 +32,6 @@ function AppInner() {
   const [showTutorial, setShowTutorial] = React.useState(false);
   const runLiveRef = useRef(true);
   const runningRef = useRef(false);
-
-  const borderColor = React.useContext(DarkModeContext)
-    ? "border-gray-700"
-    : "border-gray-300";
 
   function setRunLive(val: boolean) {
     runLiveRef.current = val;
@@ -169,8 +162,8 @@ function AppInner() {
           onTutorialClick={() => setShowTutorial(true)}
         />
         <div className="flex grow md:min-h-[400px]">
-          <div className="flex flex-col md:flex-row w-full h-full items-stretch">
-            <div className={`w-full md:w-1/2 p-4 ${borderColor} border`}>
+          <div className="flex w-full flex-col items-stretch md:flex-row">
+            <div className="w-full border-b p-4 md:w-1/2 md:border-r md:border-b-0">
               {tutorial}
               <EditorPane
                 editorText={editorText}
@@ -183,7 +176,7 @@ function AppInner() {
                 printOutputs={printOutputs}
               />
             </div>
-            <div className={`w-full md:w-1/2 p-4 ${borderColor} border`}>
+            <div className="w-full p-4 md:w-1/2">
               <OutputPane distributions={output} />
             </div>
           </div>
