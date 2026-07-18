@@ -220,12 +220,10 @@ There are three named global settings:
 * `maximum function depth`: set to a non-negative number, default 10. An attempt to call a function when the current recursion depth is already equal to the maximum function depth will result in the function call not actually executing, and returning an empty list.
 * `position order`: set to `"lowest first"` or `"highest first"` (default `"highest first"`). This setting affects three things:
   * the behavior of the [`@` operator](#-operator),
-  * the behavior of the [sort function](#sort-SEQUENCEs),
-  * the behavior of [calling a function over pools](#Pool-based-evaluation)
+  * the behavior of the [sort function](#sort-sequences),
+  * the behavior of [calling a function over pools](#pool-based-evaluation)
 
-<!-- TODO: Check whether these links work on GitHub; various markdown formatters seem to process special characters in titles differently. -->
-
-Settings can only be set outside of a function, using the [`set` statement](#Set).
+Settings can only be set outside of a function, using the [`set` statement](#set).
 
 ## Expressions
 
@@ -256,7 +254,7 @@ output X + X   \\\ Output outcomes are {2, 3, 4, 5, 6, 7, 8}
                \\\ *not* {2, 4, 6, 8}.
 ```
 
-To achieve this effect, use a [pool-evaluated function](#Pool-based-evaluation):
+To achieve this effect, use a [pool-evaluated function](#pool-based-evaluation):
 
 ```
 function: add D:n to self { result: D + D }
@@ -279,7 +277,7 @@ A list expression is a comma-separated list of _list elements_, enclosed in curl
 ListExpr = '{' {ListElem ','} [ListElem [',']] '}'.
 ```
 
-Once all list elements are evaluated, they are each [flattened into a list](#List-flattening), and concatenated.
+Once all list elements are evaluated, they are each [flattened into a list](#list-flattening), and concatenated.
 
 #### List elements
 
@@ -291,7 +289,7 @@ ListElem = (Expression|Expression '..' Expression) [':' Expression].
 
 Expressions composing a list elements are evaluated in an unspecified order. If the list element is a range, both expressions must evaluate to `int` values, and the range is replaced by a list containing all integers between the start and end of the range, inclusive. If the start of the range is greater than the end, an empty list is produced.
 
-If a repeat expression is present, it must evaluate to an `int`. If this value is negative, it is replaced with `0`. The primary expression is then [flattened into a list](#List-flattening), and is concatenated to itself the indicated number of times. If the repeat count is 0, the empty list is produced.
+If a repeat expression is present, it must evaluate to an `int`. If this value is negative, it is replaced with `0`. The primary expression is then [flattened into a list](#list-flattening), and is concatenated to itself the indicated number of times. If the repeat count is 0, the empty list is produced.
 
 #### List flattening
 
@@ -299,7 +297,7 @@ List flattening transforms values in the following way:
 
 * `int` values are flattened by enclosing them in a single-element list.
 * `list` values are unchanged by flattening.
-* `pool` values are flattened first by [summing](#Summing), then by discarding the probabilities and creating a list containing each outcome in ascending order. Outcomes with nonzero probability appear once regardless of their probabilities.
+* `pool` values are flattened first by [summing](#summing), then by discarding the probabilities and creating a list containing each outcome in ascending order. Outcomes with nonzero probability appear once regardless of their probabilities.
 
 #### Examples
 
@@ -327,7 +325,7 @@ There are 4 unary operators, which all bind tighter than any binary operator. Th
 
 * If the argument is an `int`, `-` negates the value, while `!` evaluates 0 if the argument is nonzero, and 1 otherwise.
 * If the argument is a `list`, the values of the list are summed to produce an int, then `!` or `-` is applied to that int to produce the result.
-* If the argument is a `pool`, the pool is summed, then the [outcomes of the pool are all mapped](#Outcome-mapping) with the operator.
+* If the argument is a `pool`, the pool is summed, then the [outcomes of the pool are all mapped](#outcome-mapping) with the operator.
 
 `#` evaluates to the length of its argument:
 
@@ -361,7 +359,7 @@ The `d` operator is the main way to create a pool.
    3. Pools provided as an RHS operand are not transformed.
 2. The LHS operand is summed if it is a `list`, resulting in either an `int` or a `pool`.
    1. If it is an `int` `i`, the dimension of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
-   2. If it is a `pool`, then the RHS is [flat mapped](#Flat-mapping) with the operation described in (a). (Recall that flat-mapping takes a pool and an `int -> pool` function; the operation described in (a) is such a function).
+   2. If it is a `pool`, then the RHS is [flat mapped](#flat-mapping) with the operation described in (a). (Recall that flat-mapping takes a pool and an `int -> pool` function; the operation described in (a) is such a function).
 
 #### `@` operator
 
@@ -370,12 +368,12 @@ The `@` operator selects the (LHS)-th element from its RHS.
 First, if the LHS argument is an int, it is converted to a singleton list. It is an error if the LHS argument is a pool.
 
 * If the RHS is an `int` or `list`, for each value `i` in the resulting list:
-  * If the RHS is an `int` `j`, the base-10 digit of `abs(j)` at index `i` is selected. If `j` is negative, this digit is multiplied by -1. If the `"position order"` [global setting](#Global-settings) is set to `"highest first"`, index 1 corresponds to the most significant digit; otherwise, to the least significant. Valid indices start at 1.
+  * If the RHS is an `int` `j`, the base-10 digit of `abs(j)` at index `i` is selected. If `j` is negative, this digit is multiplied by -1. If the `"position order"` [global setting](#global-settings) is set to `"highest first"`, index 1 corresponds to the most significant digit; otherwise, to the least significant. Valid indices start at 1.
   * If the RHS is a `list`, its element at position `i` is selected. The first element of the list has index 1. This is not affected by the `"position order"` setting.
   * In both the int and list RHS cases, if `i` is invalid (zero or negative, or greater than list length or digit count), the expression evaluates to 0.
   * Finally, all selected elements are summed to produce an `int`.
 * If the RHS argument is a `pool`, then, each outcome multiset is flat mapped with the following function:
-  * The multiset is sorted according to the `"position order"` [global setting](#Global-settings).
+  * The multiset is sorted according to the `"position order"` [global setting](#global-settings).
   * Elements are selected from the multiset and summed as if using the `@` operator from a list.
 
 #### Mathematical operators
@@ -440,11 +438,11 @@ The actual types of the argument expressions are compared to the expected argume
   * if a `pool` is requested, a single-outcome `pool` is created.
 * If the actual argument type is a `pool`, and an `int` is requested, the pool is summed, creating a new `pool` (see note below: `pool`-typed values can be passed to `int`-typed arguments).
 
-After this process, some values of type `pool` may still correspond to arguments where `int` or `list` types are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#Function-evaluation). If it is the case, evaluation proceeds as described in the next section.
+After this process, some values of type `pool` may still correspond to arguments where `int` or `list` types are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#function-evaluation). If it is the case, evaluation proceeds as described in the next section.
 
 #### Pool-based evaluation
 
-This section applies if any `pool` values are being passed to `int` or `list` typed arguments. As mentioned above, any `pool`s corresponding to an `int` argument is summed to dimension 1. Then, the [multiset cross product](#Multiset-cross-product) of the pools is generated. The order in which elements inside each multiset are ordered follows the `"position order"` [global setting](#Global-settings).
+This section applies if any `pool` values are being passed to `int` or `list` typed arguments. As mentioned above, any `pool`s corresponding to an `int` argument is summed to dimension 1. Then, the [multiset cross product](#multiset-cross-product) of the pools is generated. The order in which elements inside each multiset are ordered follows the `"position order"` [global setting](#global-settings).
 
 The function is then evaluated once for each value in the multiset cross product (this may be 0 times if the cross product is empty). In each invocation, the argument values are:
 
@@ -483,7 +481,7 @@ The final result has outcome 1 with weight 18, and outcome 2 with weight 6.
 
 #### Function evaluation
 
-A [new environment frame](#Values-variables-and-bindings) is created, binding the value of each expression to its corresponding argument name. Each statement in the function's body is then evaluated sequentially. If a [return statement](#Return-from-function) is encountered, execution returns to the caller, and the function call's value is the return statement's expression.
+A [new environment frame](#values-variables-and-bindings) is created, binding the value of each expression to its corresponding argument name. Each statement in the function's body is then evaluated sequentially. If a [return statement](#return-from-function) is encountered, execution returns to the caller, and the function call's value is the return statement's expression.
 
 If no return statement is encountered, the function returns an empty list.
 
@@ -545,7 +543,7 @@ For a `print` statement, the value of the expression is shown to the user as soo
 
 ### Set
 
-The `set` statement allows changing [global settings](#Global-settings). It is an error for a `set` statement to occur inside a function.
+The `set` statement allows changing [global settings](#global-settings). It is an error for a `set` statement to occur inside a function.
 
 ```
 SetStatement = 'set' '"position order"' 'to' '"highest first"'.
@@ -559,7 +557,7 @@ SetStatement = 'set' '"maximum function depth"' 'to' Int.
 
 ### Assignment
 
-Assignment statements either create a new binding in the [innermost environment frame](#Values-variables-and-bindings), or replace the value of an existing binding, if a variable with the same name already exists in that frame.
+Assignment statements either create a new binding in the [innermost environment frame](#values-variables-and-bindings), or replace the value of an existing binding, if a variable with the same name already exists in that frame.
 
 ```
 AssignmentStatement = VariableName ':' Expr.
@@ -567,7 +565,7 @@ AssignmentStatement = VariableName ':' Expr.
 
 ### Function definition
 
-Function definitions create a new function binding in the [innermost environment frame](#Values-variables-and-bindings), or replace the value of an existing binding, if a function with the same identifier already exists in that frame.
+Function definitions create a new function binding in the [innermost environment frame](#values-variables-and-bindings), or replace the value of an existing binding, if a function with the same identifier already exists in that frame.
 
 ```
 FunctionDefinitionStatement = 'function' ':' (Word | Parameter)+ Block.
@@ -619,7 +617,7 @@ output [count {1, 1, 2} in {1, 2, 2, 3}]  \ Outputs 4 \
 
 This transforms a die to match an [explosion rule](https://nethackwiki.com/wiki/Exploding_die): if the die rolls its highest face value, that value is kept and the die is re-rolled.
 
-The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
+The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#global-settings).
 
 If the argument is a pool with dimension >= 1, it is summed first. The return value's dimension is always 1, or 0 if the input pool has dimension 0.
 
@@ -647,7 +645,7 @@ Here's a worked out example for `[explode 2d2]` with `explode depth` set to 1:
 
 This is similar to `[explode POOL:d]`, but instead of exploding on the highest face value, it explodes on any value contained in the `COND` list.
 
-The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
+The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#global-settings).
 
 ```
 output [explode d6 on {1, 6}]  \ Explodes on both 1s and 6s \
@@ -658,7 +656,7 @@ output [explode d{1, 2, 3} on {2, 3}]  \ Explodes on 2s and 3s \
 
 This transforms a die to match a reroll rule: if the die rolls its highest face value, the die is re-rolled and only the new value is kept (unlike explode, which keeps both the original and new values).
 
-The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
+The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#global-settings).
 
 ```
 output [reroll d6]  \ Rerolls on 6s, keeping only the reroll result \
@@ -668,7 +666,7 @@ output [reroll d6]  \ Rerolls on 6s, keeping only the reroll result \
 
 This is similar to `[reroll POOL:d]`, but instead of rerolling on the highest face value, it rerolls on any value contained in the `COND` list.
 
-The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#Global-settings).
+The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#global-settings).
 
 ```
 output [reroll d6 on {1, 6}]  \ Rerolls on both 1s and 6s \

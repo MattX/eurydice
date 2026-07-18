@@ -38,6 +38,11 @@ export default function Header({ showTutorial = false, onTutorialClick }: Header
             About
           </a>
         </li>
+        <li>
+          <a className="hover:underline block" href="/help/spec/" onClick={() => setIsMenuOpen(false)}>
+            Specification
+          </a>
+        </li>
         {showTutorial && (
           <li>
             <a

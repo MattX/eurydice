@@ -19,3 +19,15 @@
     border-color: var(--color-gray-200, currentcolor);
   }
 }
+
+@layer components {
+  .document-content pre,
+  .document-content table {
+    overflow-x: auto;
+  }
+
+  .document-content table {
+    display: block;
+    white-space: nowrap;
+  }
+}
