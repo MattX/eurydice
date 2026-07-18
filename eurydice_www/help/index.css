@@ -21,11 +21,6 @@
 }
 
 @layer components {
-  .document-content code::before,
-  .document-content code::after {
-    content: none;
-  }
-
   .document-content :is(h2, h3) {
     scroll-margin-top: 1rem;
   }
@@ -39,4 +34,10 @@
     display: block;
     white-space: nowrap;
   }
+}
+
+/* Unlayered so this takes precedence over Typography's utility-layer markers. */
+.document-content code::before,
+.document-content code::after {
+  content: none;
 }
