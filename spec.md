@@ -67,16 +67,38 @@ Errors are fatal and terminate program execution.
 
 ## Data types
 
-There are three data types in Eurydice:
+There are two types of scalars in Eurydice:
 
-* `int`: values of this type hold a 32-bit signed integer
-* `list`: values of this type hold a list of 32-bit signed integers.
-* `pool`: values of this type hold a pool, which is composed of a mapping of outcomes (each of which is a 32-bit signed integer) to probabilities (whose representation is unspecified), together with an unsigned count of dice, which is called the _dimension_.
+* `int`: a 32-bit signed integer
+* _enums_ are user-declared types which each contain a set of nominal, non-numeric values, which can be used to represent discrete outcomes, booleans, etc.
+
+> [!IMPORTANT]
+> AnyDice does not support enums; all scalar values are numeric.
+
+And three types of values built on these basic types:
+
+* scalars: hold a single `int` or enum value
+* `list`: values of this type hold a list of scalars.
+* `pool`: values of this type hold a pool, which is composed of a mapping of outcomes (each of which is a scalar) to probabilities (whose representation is unspecified), together with an unsigned count of dice, which is called the _dimension_.
+
+Scalars, lists, and pools have an _outcome type_: either `int` or one particular enum. Lists and pools are homogeneous and cannot mix integers with enum members or members of different enums. An empty literal is numeric unless its enum type comes from an enum-typed expression, such as `{MISS:0}`; an untyped empty literal is not inferred to satisfy an enum constraint.
 
 The maximum number of elements in a list, or of outcomes in a pool, is 2^31-1.
 
 > [!IMPORTANT]
 > AnyDice does not restrict integers, or pool outcomes, to 32-bit values. Experimentation suggests that AnyDice outcomes are represented as double-precision floats (`output 9007199254740993` returns 9007199254740992).
+
+### Enums
+
+Enums are declared at the top level:
+
+```
+enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
+```
+
+The enum type and its members use variable-identifier syntax. An enum must contain at least one member. Enum type and member names share a namespace and cannot collide. Both are immutable; members are global constants. Enum declarations cannot occur in functions or nested blocks and cannot replace an existing enum, member, or variable binding.
+
+Enum members support equality and inequality with members of the same enum. Arithmetic, ordering, boolean negation, ranges, numeric dice-side or dice-count use, sorting, and other numeric operations are errors. Homogeneous enum values can be placed in lists and dimension-one pools, passed to functions, returned, repeated, reversed, counted, tested for containment, and displayed. Enum pools are categorical distributions, not collections of multiple sampled enum values: `d{MISS, HIT}` is valid, while `2d{MISS, HIT}` is an error. Use an enum sequence to represent multiple enum values.
 
 There are no first-class functions.
 
@@ -490,7 +512,7 @@ If no return statement is encountered, the function returns an empty list.
 ```
 Statement = IfStatement | LoopStatement | PrintStatement | OutputStatement
           | FunctionDefinitionStatement | ResultStatement | AssignmentStatement
-          | SetStatement.
+          | EnumDefinitionStatement | SetStatement.
 Block = '{' Statement* '}'.
 ```
 
@@ -539,6 +561,8 @@ In both cases, the expression is evaluated. If present, the name string is then 
 
 For an `output` statement, the value of the expression is converted to a `pool`, and added to an output list. If a name is not provided, it is associated with the default name `output n`, where `n` is the 1-indexed output number.
 
+Enum outputs display member names rather than numeric values. Numeric statistics and cumulative/order-based presentation do not apply to enum distributions.
+
 For a `print` statement, the value of the expression is shown to the user as soon as possible, attached to the name if present. There is no default name otherwise.
 
 ### Set
@@ -563,14 +587,27 @@ Assignment statements either create a new binding in the [innermost environment 
 AssignmentStatement = VariableName ':' Expr.
 ```
 
+Assigning to the name of an enum type or enum member is an error. Enum names also cannot be reused for function parameters or loop variables.
+
+### Enum definition
+
+```
+EnumDefinitionStatement = 'enum' ':' VariableName '{' VariableName {',' VariableName} '}'.
+```
+
+Enum definitions are executed sequentially and are only valid at the top level. Consequently, an enum type used by a function annotation must be declared before that function definition is executed.
+
 ### Function definition
 
 Function definitions create a new function binding in the [innermost environment frame](#values-variables-and-bindings), or replace the value of an existing binding, if a function with the same identifier already exists in that frame.
 
+Function definitions are executed sequentially, like other statements. A function call can therefore only resolve a function definition that has already been executed. A later definition with the same identifier replaces the earlier binding from that point onward.
+
 ```
 FunctionDefinitionStatement = 'function' ':' (Word | Parameter)+ Block.
 Parameter = VariableName [':' Type].
-Type = 'n' | 's' | 'd'.
+Type = 'n' | 's' | 'd' | OutcomeType | 's' '<' OutcomeType '>' | 'd' '<' OutcomeType '>'.
+OutcomeType = 'int' | VariableName.
 ```
 
 > [!IMPORTANT]
@@ -578,7 +615,9 @@ Type = 'n' | 's' | 'd'.
 
 The function's identifier is the sequence of words and argument positions in the name. It is valid for a function identifier to contain no words, or to contain no argument positions.
 
-Each argument name can optionally be annotated with a type. `n`, `s`, and `d` correspond to `int`, `list` (sequence), and `pool` (dice) argument types. Specifying types explicitly causes special behavior if the actual arguments passed are of different types from the specification, as explained above.
+Each argument name can optionally be annotated with a type. `n`, `s`, and `d` constrain only the value's shape to scalar, sequence, and pool respectively; their outcomes may be integers or members of any one enum. `int`, `s<int>`, and `d<int>` additionally require numeric outcomes. An enum name, `s<ENUM>`, or `d<ENUM>` requires outcomes of that particular enum. Specifying a shape causes the usual argument coercion and pool-based evaluation, while incompatible outcome types produce an error.
+
+An enum scalar may be coerced to a singleton sequence or pool. An enum pool may be expanded for an enum scalar or sequence parameter. Enum sequences cannot be summed into enum scalars, and enum pools always have dimension one.
 
 ### Return from function
 

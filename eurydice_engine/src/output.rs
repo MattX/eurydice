@@ -10,22 +10,60 @@ use crate::eval::RuntimeValue;
 pub enum OutputValue {
     Int(i32),
     List(Vec<i32>),
+    EnumInt(EnumScalar),
+    EnumList(EnumSequence),
     Distribution(Distribution),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EnumScalar {
+    pub value: i32,
+    pub enum_name: String,
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EnumSequence {
+    pub values: Vec<i32>,
+    pub enum_name: String,
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Distribution {
     pub probabilities: Vec<(i32, f64)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enum_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
 }
 
 impl From<RuntimeValue> for OutputValue {
     fn from(value: RuntimeValue) -> Self {
         match value {
-            RuntimeValue::Int(i) => OutputValue::Int(i),
-            RuntimeValue::List(is) => OutputValue::List(is.to_vec()),
-            RuntimeValue::Pool(d) => {
-                let probabilities = to_probabilities(d.sum().ordered_outcomes());
-                OutputValue::Distribution(Distribution { probabilities })
+            RuntimeValue::Int(i, None) => OutputValue::Int(i),
+            RuntimeValue::List(is, None) => OutputValue::List(is.to_vec()),
+            RuntimeValue::Int(value, Some(ty)) => OutputValue::EnumInt(EnumScalar {
+                value,
+                enum_name: ty.name.clone(),
+                labels: ty.members.clone(),
+            }),
+            RuntimeValue::List(values, Some(ty)) => OutputValue::EnumList(EnumSequence {
+                values: values.to_vec(),
+                enum_name: ty.name.clone(),
+                labels: ty.members.clone(),
+            }),
+            RuntimeValue::Pool(pool, enum_type) => {
+                let probabilities = to_probabilities(pool.sum().ordered_outcomes());
+                let (enum_name, labels) = match enum_type {
+                    Some(ty) => (Some(ty.name.clone()), Some(ty.members.clone())),
+                    None => (None, None),
+                };
+                OutputValue::Distribution(Distribution {
+                    probabilities,
+                    enum_name,
+                    labels,
+                })
             }
         }
     }

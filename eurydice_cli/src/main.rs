@@ -35,20 +35,27 @@ fn main() {
             }
         }
         for (value, name) in evaluator.take_outputs() {
-            let d = match value {
-                eurydice_engine::eval::RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
-                eurydice_engine::eval::RuntimeValue::List(is) => Pool::from_list(1, is.to_vec()),
-                eurydice_engine::eval::RuntimeValue::Pool(d) => (*d).clone().sum(),
+            let (d, labels) = match value {
+                eurydice_engine::eval::RuntimeValue::Int(i, ty) => {
+                    (Pool::from_list(1, vec![i]), ty.map(|ty| ty.members.clone()))
+                }
+                eurydice_engine::eval::RuntimeValue::List(is, ty) => (
+                    Pool::from_list(1, is.to_vec()),
+                    ty.map(|ty| ty.members.clone()),
+                ),
+                eurydice_engine::eval::RuntimeValue::Pool(d, ty) => {
+                    ((*d).clone().sum(), ty.map(|ty| ty.members.clone()))
+                }
             };
             let (width, _) = crossterm::terminal::size().unwrap_or((80, 0));
             let dist = eurydice_engine::output::to_probabilities(d.ordered_outcomes());
             println!("{}:", name);
-            display_distribution(&dist, width);
+            display_distribution(&dist, labels.as_deref(), width);
         }
     }
 }
 
-fn display_distribution(distribution: &[(i32, f64)], max_width: u16) {
+fn display_distribution(distribution: &[(i32, f64)], labels: Option<&[String]>, max_width: u16) {
     if distribution.is_empty() {
         println!("Distribution is empty");
         return;
@@ -63,6 +70,10 @@ fn display_distribution(distribution: &[(i32, f64)], max_width: u16) {
     for (outcome, prob) in distribution {
         let bar_width = ((prob / max_prob) * (max_width - 20) as f64) as u16;
         let bar = "━".repeat(bar_width as usize);
-        println!("{:4} {:8.3}% |{}", outcome, prob * 100.0, bar);
+        let label = labels
+            .and_then(|labels| usize::try_from(*outcome).ok().and_then(|i| labels.get(i)))
+            .cloned()
+            .unwrap_or_else(|| outcome.to_string());
+        println!("{:>12} {:8.3}% |{}", label, prob * 100.0, bar);
     }
 }

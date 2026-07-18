@@ -40,6 +40,7 @@ ty<term, name> { @specialize[@name={name}]<Word, term> }
 
 Statement {
     Assignment |
+    EnumDefinition |
     FunctionDefinition |
     Output |
     Print |
@@ -50,6 +51,10 @@ Statement {
 }
 
 Assignment { VariableIdentifier ":" Expression }
+
+EnumDefinition {
+    kw<"enum"> ":" VariableIdentifier "{" VariableIdentifier ("," VariableIdentifier)* "}"
+}
 
 Output { kw<"output"> Expression OutputName? }
 Print { kw<"print"> Expression OutputName? }
@@ -152,4 +157,14 @@ BareListItem {
 Repeat { ":" Expression }
 
 // Todo: use tokens or something to give "d" the right name
-Type { ty<"n", "ty-n"> | ty<"s", "ty-s"> | kw<"d"> }
+Type {
+    ty<"n", "ty-n"> |
+    ty<"s", "ty-s"> |
+    kw<"d"> |
+    ty<"int", "ty-int"> |
+    VariableIdentifier |
+    ty<"s", "ty-s"> "<" OutcomeType ">" |
+    kw<"d"> "<" OutcomeType ">"
+}
+
+OutcomeType { ty<"int", "ty-int"> | VariableIdentifier }

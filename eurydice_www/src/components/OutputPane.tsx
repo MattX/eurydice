@@ -31,6 +31,14 @@ export default function OutputPane(props: OutputPaneProps) {
   const [lowerBound, setLowerBound] = React.useState(0);
   const [upperBound, setUpperBound] = React.useState(0);
   const [showExportModal, setShowExportModal] = React.useState(false);
+  const hasEnum = props.distributions.some(([, distribution]) => distribution.enum_name !== undefined);
+
+  React.useEffect(() => {
+    if (hasEnum) {
+      setDisplayMode(DisplayMode.Distribution);
+      setShowBracketing(false);
+    }
+  }, [hasEnum]);
 
   // The plugin is a ref because we can't recreate it every time the distributions change.
   const plugin = React.useRef<ChartJsRangeSelect>(
@@ -174,12 +182,14 @@ export default function OutputPane(props: OutputPaneProps) {
             Distribution
           </button>
           <button
+            disabled={hasEnum}
             aria-pressed={displayMode === DisplayMode.AtLeast}
             onClick={() => setDisplayMode(DisplayMode.AtLeast)}
           >
             At least
           </button>
           <button
+            disabled={hasEnum}
             aria-pressed={displayMode === DisplayMode.AtMost}
             onClick={() => setDisplayMode(DisplayMode.AtMost)}
           >
@@ -212,7 +222,7 @@ export default function OutputPane(props: OutputPaneProps) {
               plugin.current.setActive(!showBracketing);
               plugin.current.setRange(lowerBound, upperBound);
             }}
-            disabled={displayMode === DisplayMode.Transposed}
+            disabled={hasEnum || displayMode === DisplayMode.Transposed}
             className="btn-toggle"
             aria-pressed={showBracketing && displayMode !== DisplayMode.Transposed}
           >
@@ -227,7 +237,7 @@ export default function OutputPane(props: OutputPaneProps) {
         </div>
       </div>
       <div>
-        {showBracketing && displayMode !== DisplayMode.Transposed && (
+        {!hasEnum && showBracketing && displayMode !== DisplayMode.Transposed && (
           <div>
             <div className="mb-4 flex flex-wrap items-center gap-4">
               <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
@@ -350,7 +360,7 @@ function CombinedProbabilityTable({
         <tbody>
           {tableData.map((row) => (
             <tr key={row.outcome} className="dice-row">
-              <td className={rowHeader}>{row.outcome}</td>
+              <td className={rowHeader}>{row.outcomeLabel}</td>
               {row.values.map((value, index) => (
                 <td key={index} className={cell}>
                   {value}
@@ -359,7 +369,7 @@ function CombinedProbabilityTable({
             </tr>
           ))}
         </tbody>
-        <tbody className="dice-stats">
+        {!distributions.some(([, distribution]) => distribution.enum_name !== undefined) && <tbody className="dice-stats">
           {[
             ["Mean", "mean"],
             ["Std dev", "stdDev"],
@@ -375,7 +385,7 @@ function CombinedProbabilityTable({
               ))}
             </tr>
           ))}
-        </tbody>
+        </tbody>}
       </table>
     </div>
   );

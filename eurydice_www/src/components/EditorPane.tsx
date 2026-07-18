@@ -146,14 +146,14 @@ const parserWithMetadata = parser.configure({
       LineComment: t.lineComment,
       "over output print set to named": t.keyword,
       "if else loop result": t.controlKeyword,
-      function: t.definitionKeyword,
+      "function enum": t.definitionKeyword,
       "( )": t.paren,
       "{ }": t.brace,
       "[ ]": t.squareBracket,
       // Some of these are missing otherwise I get an error: !, /, *, !=, @
       "# - ^ + = < <= > >= & |": t.operator,
       d: t.operatorKeyword,
-      "ty-n ty-s": t.typeName,
+      "ty-n ty-s ty-int": t.typeName,
     }),
     indentNodeProp.add({
       Block: (context) =>

@@ -102,9 +102,9 @@ fn test_anydice_programs() {
                 .zip(expected_results_strings.iter())
             {
                 let d = match value {
-                    eval::RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
-                    eval::RuntimeValue::List(is) => Pool::from_list(1, is.to_vec()),
-                    eval::RuntimeValue::Pool(d) => (*d).clone(),
+                    eval::RuntimeValue::Int(i, _) => Pool::from_list(1, vec![i]),
+                    eval::RuntimeValue::List(is, _) => Pool::from_list(1, is.to_vec()),
+                    eval::RuntimeValue::Pool(d, _) => (*d).clone(),
                 };
                 let actual_result = create_expected_result(&name, &d);
                 if !compare_expected_results(&actual_result, expected) {

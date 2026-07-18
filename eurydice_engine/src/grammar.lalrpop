@@ -29,6 +29,12 @@ StatementInner: Statement = {
     <id_start: @L> <id:VariableIdentifier> <id_end: @L> ":" <e:Expr> => 
         Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
     <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
+    "enum" ":" <name_start:@L> <name:VariableIdentifier> <name_end:@R>
+        "{" <members:Comma1<RangedVariableIdentifier>> "}" =>
+        Statement::EnumDefinition(EnumDefinition {
+            name: WithRange::new(name_start, name_end, name),
+            members,
+        }),
     "output" <e:Expr> <n:OutputName?> => Statement::Output { expr: e, named: n },
     "print" <e:Expr> <n:OutputName?> => Statement::Print { expr: e, named: n },
     "result" ":" <e:Expr> => Statement::Return { value: e },
@@ -188,14 +194,23 @@ FunctionDefinitionItem: WithRange<FunctionDefinitionItem> = {
 };
 
 SingleArg: FunctionDefinitionItem = {
-    <id:VariableIdentifier> ":" <t:StaticType> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: Some(t) }),
+    <id:VariableIdentifier> ":" <t:TypeConstraint> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: Some(t) }),
     <id:VariableIdentifier> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: None }),
 };
 
-StaticType: StaticType = {
-    "n" => StaticType::Int,
-    "s" => StaticType::List,
-    "d" => StaticType::Pool,
+TypeConstraint: TypeConstraint = {
+    "n" => TypeConstraint { shape: StaticType::Int, outcome: None },
+    "s" => TypeConstraint { shape: StaticType::List, outcome: None },
+    "d" => TypeConstraint { shape: StaticType::Pool, outcome: None },
+    "int" => TypeConstraint { shape: StaticType::Int, outcome: Some("int".to_string()) },
+    "s" "<" <t:OutcomeTypeName> ">" => TypeConstraint { shape: StaticType::List, outcome: Some(t) },
+    "d" "<" <t:OutcomeTypeName> ">" => TypeConstraint { shape: StaticType::Pool, outcome: Some(t) },
+    <t:VariableIdentifier> => TypeConstraint { shape: StaticType::Int, outcome: Some(t) },
+};
+
+OutcomeTypeName: String = {
+    "int" => "int".to_string(),
+    <t:VariableIdentifier> => t,
 };
 
 // TOOD: avoid unwrap here
@@ -205,6 +220,17 @@ Num: i32 = <start: @L> <s:r"[0-9]+"> <end: @R> =>?
         error: ParseActionError::InvalidIntegerLiteral { range: (start, end).into(), error: e.to_string() }
     });
 VariableIdentifier: String = <s:r"[A-Z_]+"> => s.to_string();
+RangedVariableIdentifier: WithRange<String> = {
+    <start:@L> <s:VariableIdentifier> <end:@R> => WithRange::new(start, end, s),
+};
+
+Comma1<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T> => {
+        let mut v = v;
+        v.push(e);
+        v
+    }
+};
 Word: String = {
     <s:r"[a-z][a-z_]+"> => s.to_string(),
     "if" => "if".to_string(),
@@ -220,6 +246,8 @@ Word: String = {
     "named" => "named".to_string(),
     "n" => "n".to_string(),
     "s" => "s".to_string(),
+    "int" => "int".to_string(),
+    "enum" => "enum".to_string(),
 };
 
 SafeUnaryOp: UnaryOp = {

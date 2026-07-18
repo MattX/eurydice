@@ -29,7 +29,10 @@ export function generateValuesOnlyCSV(distributions: DistributionData[]): string
   csv += '\n';
 
   sortedOutcomes.forEach(outcome => {
-    csv += outcome.toString();
+    const label = distributions
+      .map(({ distribution }) => distribution.labels?.[outcome])
+      .find((value) => value !== undefined);
+    csv += escapeCSVField(label ?? outcome.toString());
     distributions.forEach(({ distribution }) => {
       const prob = distribution.probabilities.find(([o]) => o === outcome)?.[1] || 0;
       csv += ',' + prob.toString();
@@ -46,6 +49,16 @@ export function generateAnyDiceFormatCSV(distributions: DistributionData[]): str
   distributions.forEach(({ name, distribution }, index) => {
     if (index > 0) csv += '\n';
     
+    if (distribution.enum_name !== undefined) {
+      csv += `${escapeCSVField(name)},${escapeCSVField(distribution.enum_name)}\n`;
+      csv += 'Outcome,%\n';
+      distribution.probabilities.forEach(([outcome, probability]) => {
+        const label = distribution.labels?.[outcome] ?? outcome.toString();
+        csv += `${escapeCSVField(label)},${(probability * 100).toFixed(10)}\n`;
+      });
+      return;
+    }
+
     const outcomes = distribution.probabilities.map(([outcome]) => outcome);
     const probabilities = distribution.probabilities.map(([, probability]) => probability);
     

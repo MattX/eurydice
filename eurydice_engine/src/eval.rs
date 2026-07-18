@@ -2,7 +2,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     rc::Rc,
 };
 
@@ -17,33 +17,103 @@ use thiserror::Error;
 
 use crate::{
     ast::{
-        self, BareListItem, BinaryOp, Expression, FunctionDefinition, ListItem, PositionOrder,
-        SetParam, Statement, StaticType, UnaryOp, WithRange,
+        self, BareListItem, BinaryOp, EnumDefinition, Expression, FunctionDefinition, ListItem,
+        PositionOrder, SetParam, Statement, StaticType, TypeConstraint, UnaryOp, WithRange,
     },
     dice::{MultisetCrossProductIterator, Pool},
     primitives::{register_primitives, Primitive},
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumType {
+    pub name: String,
+    pub members: Vec<String>,
+}
+
+impl EnumType {
+    pub fn member_name(&self, value: i32) -> Option<&str> {
+        usize::try_from(value)
+            .ok()
+            .and_then(|index| self.members.get(index))
+            .map(String::as_str)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OutcomeType {
+    Int,
+    Enum(Rc<EnumType>),
+}
+
+impl OutcomeType {
+    fn enum_type_ref(&self) -> Option<&Rc<EnumType>> {
+        match self {
+            OutcomeType::Int => None,
+            OutcomeType::Enum(ty) => Some(ty),
+        }
+    }
+
+    fn is_enum(&self) -> bool {
+        matches!(self, OutcomeType::Enum(_))
+    }
+
+    fn merged_with(&self, other: &Self) -> Option<Self> {
+        if same_enum_type(self.enum_type_ref(), other.enum_type_ref()) {
+            Some(self.clone())
+        } else {
+            None
+        }
+    }
+
+    fn display_name(&self) -> &str {
+        match self {
+            OutcomeType::Int => "int",
+            OutcomeType::Enum(ty) => &ty.name,
+        }
+    }
+}
+
+fn same_enum_type(left: Option<&Rc<EnumType>>, right: Option<&Rc<EnumType>>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeValue {
-    Int(i32),
-    List(Rc<Vec<i32>>),
-    Pool(Rc<Pool>),
+    Int(i32, Option<Rc<EnumType>>),
+    List(Rc<Vec<i32>>, Option<Rc<EnumType>>),
+    Pool(Rc<Pool>, Option<Rc<EnumType>>),
 }
 
 impl std::fmt::Display for RuntimeValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuntimeValue::Int(i) => write!(f, "{}", i),
-            RuntimeValue::List(list) => write!(
+            RuntimeValue::Int(i, None) => write!(f, "{}", i),
+            RuntimeValue::Int(i, Some(ty)) => write!(f, "{}", ty.member_name(*i).unwrap_or("<?>")),
+            RuntimeValue::List(list, ty) => write!(
                 f,
                 "{{{}}}",
                 list.iter()
-                    .map(|i| i.to_string())
+                    .map(|i| match ty {
+                        Some(ty) => ty.member_name(*i).unwrap_or("<?>").to_string(),
+                        None => i.to_string(),
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            RuntimeValue::Pool(d) => write!(f, "{}", d),
+            RuntimeValue::Pool(pool, None) => write!(f, "{}", pool),
+            RuntimeValue::Pool(pool, Some(ty)) => write!(
+                f,
+                "d{{{}}}",
+                pool.ordered_outcomes()
+                    .iter()
+                    .map(|(i, count)| format!("{}:{}", ty.member_name(*i).unwrap_or("<?>"), count))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 }
@@ -51,17 +121,42 @@ impl std::fmt::Display for RuntimeValue {
 impl RuntimeValue {
     fn runtime_type(&self) -> StaticType {
         match self {
-            RuntimeValue::Int(_) => StaticType::Int,
-            RuntimeValue::List(_) => StaticType::List,
-            RuntimeValue::Pool(_) => StaticType::Pool,
+            RuntimeValue::Int(_, _) => StaticType::Int,
+            RuntimeValue::List(_, _) => StaticType::List,
+            RuntimeValue::Pool(_, _) => StaticType::Pool,
+        }
+    }
+
+    fn outcome_type(&self) -> OutcomeType {
+        self.enum_type_ref()
+            .map_or(OutcomeType::Int, |ty| OutcomeType::Enum(Rc::clone(ty)))
+    }
+
+    pub fn enum_type(&self) -> Option<Rc<EnumType>> {
+        self.enum_type_ref().map(Rc::clone)
+    }
+
+    pub(crate) fn has_same_outcome_type(&self, other: &Self) -> bool {
+        same_enum_type(self.enum_type_ref(), other.enum_type_ref())
+    }
+
+    fn is_enum(&self) -> bool {
+        self.enum_type_ref().is_some()
+    }
+
+    fn enum_type_ref(&self) -> Option<&Rc<EnumType>> {
+        match self {
+            RuntimeValue::Int(_, ty) | RuntimeValue::List(_, ty) | RuntimeValue::Pool(_, ty) => {
+                ty.as_ref()
+            }
         }
     }
 
     fn to_list(&self, repeat: usize) -> Vec<i32> {
         match self {
-            RuntimeValue::Int(i) => vec![*i; repeat],
-            RuntimeValue::List(list) => Rc::clone(list).repeat(repeat),
-            RuntimeValue::Pool(d) => d
+            RuntimeValue::Int(i, _) => vec![*i; repeat],
+            RuntimeValue::List(list, _) => Rc::clone(list).repeat(repeat),
+            RuntimeValue::Pool(d, _) => d
                 .sum()
                 .into_die_iter()
                 .map(|(k, _)| k)
@@ -70,44 +165,55 @@ impl RuntimeValue {
         }
     }
 
-    pub fn map_outcomes(&self, f: impl Fn(i32) -> i32) -> Self {
+    pub(crate) fn map_outcomes(&self, f: impl Fn(i32) -> i32) -> Self {
         match self {
-            RuntimeValue::Int(i) => f(*i).into(),
-            RuntimeValue::List(list) => f(list.iter().sum()).into(),
-            RuntimeValue::Pool(d) => (**d).clone().map_outcomes(f).into(),
+            RuntimeValue::Int(i, ty) => RuntimeValue::Int(f(*i), ty.clone()),
+            RuntimeValue::List(list, ty) => RuntimeValue::Int(f(list.iter().sum()), ty.clone()),
+            RuntimeValue::Pool(d, ty) => {
+                RuntimeValue::Pool(Rc::new((**d).clone().map_outcomes(f)), ty.clone())
+            }
         }
     }
 
     fn to_pool(&self) -> Pool {
         match self {
-            RuntimeValue::Int(i) => Pool::from_list(1, vec![*i]),
-            RuntimeValue::List(list) => Pool::from_list(1, vec![list.iter().sum()]),
-            RuntimeValue::Pool(p) => (**p).clone(),
+            RuntimeValue::Int(i, _) => Pool::from_list(1, vec![*i]),
+            RuntimeValue::List(list, _) => Pool::from_list(1, vec![list.iter().sum()]),
+            RuntimeValue::Pool(p, _) => (**p).clone(),
+        }
+    }
+
+    fn with_outcome_type(self, outcome: &OutcomeType) -> Self {
+        let enum_type = outcome.enum_type_ref().cloned();
+        match self {
+            RuntimeValue::Int(i, _) => RuntimeValue::Int(i, enum_type),
+            RuntimeValue::List(v, _) => RuntimeValue::List(v, enum_type),
+            RuntimeValue::Pool(p, _) => RuntimeValue::Pool(p, enum_type),
         }
     }
 }
 
 impl From<i32> for RuntimeValue {
     fn from(value: i32) -> Self {
-        RuntimeValue::Int(value)
+        RuntimeValue::Int(value, None)
     }
 }
 
 impl From<Rc<Vec<i32>>> for RuntimeValue {
     fn from(value: Rc<Vec<i32>>) -> Self {
-        RuntimeValue::List(value)
+        RuntimeValue::List(value, None)
     }
 }
 
 impl From<Vec<i32>> for RuntimeValue {
     fn from(value: Vec<i32>) -> Self {
-        RuntimeValue::List(Rc::new(value))
+        RuntimeValue::List(Rc::new(value), None)
     }
 }
 
 impl From<Pool> for RuntimeValue {
     fn from(value: Pool) -> Self {
-        RuntimeValue::Pool(Rc::new(value))
+        RuntimeValue::Pool(Rc::new(value), None)
     }
 }
 
@@ -150,19 +256,48 @@ impl ValEnv {
     fn insert(&mut self, key: String, value: RuntimeValue) {
         self.env.insert(key, value);
     }
+
+    fn contains(&self, key: &str) -> bool {
+        self.env.contains_key(key)
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.borrow().contains(key))
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Function {
     Primitive(&'static Primitive),
-    UserDefined(Rc<FunctionDefinition>),
+    UserDefined(Rc<UserFunction>),
+}
+
+#[derive(Debug, Clone)]
+pub struct UserFunction {
+    definition: FunctionDefinition,
+    arg_types: Vec<Option<ResolvedArgType>>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedArgType {
+    shape: StaticType,
+    outcome: Option<OutcomeType>,
 }
 
 impl Function {
-    fn get_arg_types(&self) -> Vec<Option<StaticType>> {
+    fn get_arg_types(&self) -> Vec<Option<ResolvedArgType>> {
         match self {
-            Function::Primitive(primitive) => primitive.arg_types.clone(),
-            Function::UserDefined(fd) => fd.args.iter().map(|arg| arg.value.ty).collect(),
+            Function::Primitive(primitive) => primitive
+                .arg_types
+                .iter()
+                .map(|shape| {
+                    shape.map(|shape| ResolvedArgType {
+                        shape,
+                        outcome: (!primitive.accepts_enums).then_some(OutcomeType::Int),
+                    })
+                })
+                .collect(),
+            Function::UserDefined(function) => function.arg_types.clone(),
         }
     }
 }
@@ -170,6 +305,7 @@ impl Function {
 struct EvalContext {
     env: RcValEnv,
     recursion_depth: usize,
+    block_depth: usize,
 }
 
 impl EvalContext {
@@ -177,6 +313,37 @@ impl EvalContext {
         Self {
             env,
             recursion_depth: 0,
+            block_depth: 0,
+        }
+    }
+
+    fn nested_block(&self) -> Self {
+        Self {
+            env: Rc::clone(&self.env),
+            recursion_depth: self.recursion_depth,
+            block_depth: self.block_depth + 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BindingKind {
+    Assignment,
+    FunctionParameter,
+    LoopVariable,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EnumIdentifierKind {
+    Type,
+    Member,
+}
+
+impl std::fmt::Display for EnumIdentifierKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EnumIdentifierKind::Type => write!(f, "type"),
+            EnumIdentifierKind::Member => write!(f, "member"),
         }
     }
 }
@@ -185,6 +352,8 @@ pub struct Evaluator {
     global_env: RcValEnv,
     outputs: Vec<(RuntimeValue, String)>,
     functions: HashMap<String, Function>,
+    enums: HashMap<String, Rc<EnumType>>,
+    enum_members: HashSet<String>,
     explode_depth: usize,
     recursion_depth: usize,
     lowest_first: bool,
@@ -205,6 +374,8 @@ impl Evaluator {
             global_env: Rc::new(RefCell::new(ValEnv::new())),
             outputs: Vec::new(),
             functions,
+            enums: HashMap::new(),
+            enum_members: HashSet::new(),
             explode_depth: 2,
             recursion_depth: 10,
             lowest_first: false,
@@ -230,6 +401,120 @@ impl Evaluator {
         std::mem::take(&mut self.outputs)
     }
 
+    fn enum_identifier_kind(&self, name: &str) -> Option<EnumIdentifierKind> {
+        if self.enums.contains_key(name) {
+            Some(EnumIdentifierKind::Type)
+        } else if self.enum_members.contains(name) {
+            Some(EnumIdentifierKind::Member)
+        } else {
+            None
+        }
+    }
+
+    fn validate_binding_name(
+        &self,
+        name: &str,
+        range: ast::Range,
+        binding: BindingKind,
+    ) -> Result<(), RuntimeError> {
+        let Some(identifier_kind) = self.enum_identifier_kind(name) else {
+            return Ok(());
+        };
+        let message = match binding {
+            BindingKind::Assignment => {
+                format!("enum {identifier_kind} {name} is immutable")
+            }
+            BindingKind::FunctionParameter => {
+                format!("enum {identifier_kind} {name} cannot be used as a parameter")
+            }
+            BindingKind::LoopVariable => {
+                format!("enum {identifier_kind} {name} cannot be used as a loop variable")
+            }
+        };
+        Err(RuntimeError::EnumTypeError {
+            range: range.into(),
+            message,
+        })
+    }
+
+    fn define_enum(
+        &mut self,
+        eval_context: &EvalContext,
+        definition: &EnumDefinition,
+        statement_range: ast::Range,
+    ) -> Result<(), RuntimeError> {
+        if eval_context.recursion_depth != 0 || eval_context.block_depth != 0 {
+            return Err(RuntimeError::EnumTypeError {
+                range: statement_range.into(),
+                message: "enum declarations are only allowed at the top level".to_string(),
+            });
+        }
+        if let Some(kind) = self.enum_identifier_kind(&definition.name.value) {
+            return Err(RuntimeError::EnumTypeError {
+                range: definition.name.range.into(),
+                message: format!(
+                    "enum {} conflicts with an existing enum {kind}",
+                    definition.name.value
+                ),
+            });
+        }
+        if eval_context.env.borrow().contains(&definition.name.value) {
+            return Err(RuntimeError::EnumTypeError {
+                range: definition.name.range.into(),
+                message: format!("{} is already bound as a variable", definition.name.value),
+            });
+        }
+
+        let mut seen = HashSet::new();
+        for member in &definition.members {
+            if !seen.insert(member.value.as_str()) {
+                return Err(RuntimeError::EnumTypeError {
+                    range: member.range.into(),
+                    message: format!("enum member {} is already defined", member.value),
+                });
+            }
+            if member.value == definition.name.value {
+                return Err(RuntimeError::EnumTypeError {
+                    range: member.range.into(),
+                    message: format!("enum member {} conflicts with its enum type", member.value),
+                });
+            }
+            if let Some(kind) = self.enum_identifier_kind(&member.value) {
+                return Err(RuntimeError::EnumTypeError {
+                    range: member.range.into(),
+                    message: format!(
+                        "enum member {} conflicts with an existing enum {kind}",
+                        member.value
+                    ),
+                });
+            }
+            if eval_context.env.borrow().contains(&member.value) {
+                return Err(RuntimeError::EnumTypeError {
+                    range: member.range.into(),
+                    message: format!("{} is already bound as a variable", member.value),
+                });
+            }
+        }
+
+        let ty = Rc::new(EnumType {
+            name: definition.name.value.clone(),
+            members: definition.members.iter().map(|m| m.value.clone()).collect(),
+        });
+        for (index, member) in definition.members.iter().enumerate() {
+            let value = i32::try_from(index).map_err(|_| RuntimeError::EnumTypeError {
+                range: member.range.into(),
+                message: "enum has too many members".to_string(),
+            })?;
+            self.global_env.borrow_mut().insert(
+                member.value.clone(),
+                RuntimeValue::Int(value, Some(Rc::clone(&ty))),
+            );
+            self.enum_members.insert(member.value.clone());
+        }
+        self.enums.insert(definition.name.value.clone(), ty);
+        Ok(())
+    }
+
     /// Executes a statement; returns a value if a `return` statement is encountered.
     fn execute_statement(
         &mut self,
@@ -238,6 +523,7 @@ impl Evaluator {
     ) -> Result<Option<RuntimeValue>, RuntimeError> {
         match &statement.value {
             Statement::Assignment { name, value } => {
+                self.validate_binding_name(&name.value, name.range, BindingKind::Assignment)?;
                 let value = self.evaluate(eval_context, value)?;
                 eval_context
                     .env
@@ -245,10 +531,34 @@ impl Evaluator {
                     .insert(name.value.clone(), value);
             }
             Statement::FunctionDefinition(fd) => {
+                for arg in &fd.args {
+                    self.validate_binding_name(
+                        &arg.value.name,
+                        arg.range,
+                        BindingKind::FunctionParameter,
+                    )?;
+                }
+                let arg_types = fd
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        arg.value
+                            .ty
+                            .as_ref()
+                            .map(|ty| self.resolve_type_constraint(ty, arg.range))
+                            .transpose()
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 self.functions.insert(
                     fd.name.value.clone(),
-                    Function::UserDefined(Rc::new(fd.clone())),
+                    Function::UserDefined(Rc::new(UserFunction {
+                        definition: fd.clone(),
+                        arg_types,
+                    })),
                 );
+            }
+            Statement::EnumDefinition(definition) => {
+                self.define_enum(eval_context, definition, statement.range)?;
             }
             Statement::Output { expr, named } => {
                 if eval_context.recursion_depth != 0 {
@@ -289,7 +599,7 @@ impl Evaluator {
             } => {
                 let condition_value = self.evaluate(eval_context, condition)?;
                 let cond_value = match condition_value {
-                    RuntimeValue::Int(i) => i,
+                    RuntimeValue::Int(i, None) => i,
                     _ => {
                         return Err(RuntimeError::InvalidCondition {
                             range: condition.range.into(),
@@ -305,8 +615,9 @@ impl Evaluator {
                 } else {
                     return Ok(None);
                 };
+                let nested_context = eval_context.nested_block();
                 for statement in block {
-                    let res = self.execute_statement(eval_context, statement)?;
+                    let res = self.execute_statement(&nested_context, statement)?;
                     if res.is_some() {
                         return Ok(res);
                     }
@@ -317,9 +628,14 @@ impl Evaluator {
                 range_expression,
                 body,
             } => {
+                self.validate_binding_name(
+                    &variable.value,
+                    variable.range,
+                    BindingKind::LoopVariable,
+                )?;
                 let range = self.evaluate(eval_context, range_expression)?;
-                let range = match range {
-                    RuntimeValue::List(range) => range,
+                let (range, enum_type) = match range {
+                    RuntimeValue::List(range, ty) => (range, ty),
                     _ => {
                         return Err(RuntimeError::LoopOverNonSequence {
                             range: range_expression.range.into(),
@@ -327,13 +643,17 @@ impl Evaluator {
                         })
                     }
                 };
+                let nested_context = eval_context.nested_block();
                 for value in range.iter() {
-                    eval_context
-                        .env
-                        .borrow_mut()
-                        .insert(variable.value.clone(), RuntimeValue::Int(*value));
+                    eval_context.env.borrow_mut().insert(
+                        variable.value.clone(),
+                        match &enum_type {
+                            Some(ty) => RuntimeValue::Int(*value, Some(Rc::clone(ty))),
+                            None => RuntimeValue::Int(*value, None),
+                        },
+                    );
                     for statement in body {
-                        let res = self.execute_statement(eval_context, statement)?;
+                        let res = self.execute_statement(&nested_context, statement)?;
                         if res.is_some() {
                             return Ok(res);
                         }
@@ -358,6 +678,30 @@ impl Evaluator {
         Ok(None)
     }
 
+    fn resolve_type_constraint(
+        &self,
+        constraint: &TypeConstraint,
+        range: ast::Range,
+    ) -> Result<ResolvedArgType, RuntimeError> {
+        let outcome = match constraint.outcome.as_deref() {
+            None => None,
+            Some("int") => Some(OutcomeType::Int),
+            Some(name) => Some(OutcomeType::Enum(
+                self.enums
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| RuntimeError::EnumTypeError {
+                        range: range.into(),
+                        message: format!("enum type {name} is not defined"),
+                    })?,
+            )),
+        };
+        Ok(ResolvedArgType {
+            shape: constraint.shape,
+            outcome,
+        })
+    }
+
     fn evaluate(
         &mut self,
         eval_context: &EvalContext,
@@ -366,7 +710,7 @@ impl Evaluator {
         match &expression.value {
             Expression::UnaryOp { op, operand } => {
                 let value = self.evaluate(eval_context, operand)?;
-                Ok(apply_unary_op(op.value, &value))
+                apply_unary_op(op, &value)
             }
             Expression::BinaryOp { op, left, right } => {
                 let left_value = self.evaluate(eval_context, left)?;
@@ -380,15 +724,25 @@ impl Evaluator {
                 )?)
             }
             Expression::List(list) => {
-                let elems = list
+                let items = list
                     .items
                     .iter()
                     .map(|item| self.evaluate_list_literal_item(eval_context, item))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<i32>>();
-                Ok(elems.into())
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut outcome: Option<OutcomeType> = None;
+                let mut elems = Vec::new();
+                for item in items {
+                    let item_type = item.outcome_type();
+                    merge_outcome_type(
+                        &mut outcome,
+                        item_type,
+                        expression.range,
+                        "list literal contains mixed outcome types",
+                    )?;
+                    elems.extend(item.to_list(1));
+                }
+                Ok(RuntimeValue::List(Rc::new(elems), None)
+                    .with_outcome_type(&outcome.unwrap_or(OutcomeType::Int)))
             }
             Expression::FunctionCall { name, args } => {
                 let func = self
@@ -424,7 +778,7 @@ impl Evaluator {
                     name: name.clone(),
                 }
             }),
-            Expression::Int(i) => Ok(RuntimeValue::Int(*i)),
+            Expression::Int(i) => Ok(RuntimeValue::Int(*i, None)),
         }
     }
 
@@ -435,10 +789,10 @@ impl Evaluator {
         &mut self,
         eval_context: &EvalContext,
         item: &ListItem,
-    ) -> Result<Vec<i32>, RuntimeError> {
+    ) -> Result<RuntimeValue, RuntimeError> {
         let repeat_count = match &item.repeat {
             Some(repeat) => match self.evaluate(eval_context, repeat)? {
-                RuntimeValue::Int(i) => {
+                RuntimeValue::Int(i, None) => {
                     usize::try_from(i.max(0)).expect("converting a positive i32 into usize")
                 }
                 repeat_value => {
@@ -456,7 +810,7 @@ impl Evaluator {
             BareListItem::Range(start_expr, end_expr) => {
                 let start = self.evaluate(eval_context, start_expr)?;
                 let start = match start {
-                    RuntimeValue::Int(i) => i,
+                    RuntimeValue::Int(i, None) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: start_expr.range.into(),
@@ -466,7 +820,7 @@ impl Evaluator {
                 };
                 let end = self.evaluate(eval_context, end_expr)?;
                 let end = match end {
-                    RuntimeValue::Int(i) => i,
+                    RuntimeValue::Int(i, None) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: end_expr.range.into(),
@@ -474,10 +828,14 @@ impl Evaluator {
                         })
                     }
                 };
-                Ok(RuntimeValue::List(Rc::new((start..=end).collect())))
+                Ok(RuntimeValue::List(Rc::new((start..=end).collect()), None))
             }
         }?;
-        Ok(base.to_list(repeat_count))
+        let outcome = base.outcome_type();
+        Ok(
+            RuntimeValue::List(Rc::new(base.to_list(repeat_count)), None)
+                .with_outcome_type(&outcome),
+        )
     }
 
     fn evaluate_function_call(
@@ -501,7 +859,7 @@ impl Evaluator {
         let args = args
             .into_iter()
             .zip(expected_types.iter())
-            .map(|(arg, &expected)| coerce_arg(arg.value, expected))
+            .map(|(arg, expected)| coerce_arg(arg.value, expected.as_ref(), arg.range))
             .collect::<Result<Vec<_>, _>>()?;
 
         // This vector will contain references to pools which match an int or list arguments. These
@@ -510,13 +868,18 @@ impl Evaluator {
         // Contains (index, is_int) for the corresponding pool.
         let mut pool_iterator_info = Vec::new();
         for (i, (arg, expected_type)) in args.iter().zip(expected_types.iter()).enumerate() {
-            if let (RuntimeValue::Pool(p), Some(StaticType::Int) | Some(StaticType::List)) =
-                (&arg, expected_type)
-            {
+            let pool = match arg {
+                RuntimeValue::Pool(p, _) => Some(p),
+                _ => None,
+            };
+            if let (Some(p), Some(expected)) = (pool, expected_type) {
+                if !matches!(expected.shape, StaticType::Int | StaticType::List) {
+                    continue;
+                }
                 // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum,
                 // with outcomes of length 1.
                 pools.push(p);
-                pool_iterator_info.push((i, *expected_type == Some(StaticType::Int)));
+                pool_iterator_info.push((i, expected.shape == StaticType::Int, arg.outcome_type()));
             }
         }
 
@@ -531,11 +894,13 @@ impl Evaluator {
         let mut args = args.clone();
         let mut results = Vec::new();
         for (values, weight) in cross_product_iterator {
-            for ((i, is_int), value) in pool_iterator_info.iter().zip(values.iter()) {
+            for ((i, is_int, outcome_type), value) in pool_iterator_info.iter().zip(values.iter()) {
                 if *is_int {
-                    args[*i] = value[0].into();
+                    args[*i] = RuntimeValue::Int(value[0], None).with_outcome_type(outcome_type);
                 } else {
-                    args[*i] = reverse_if(!self.lowest_first, value).into();
+                    args[*i] =
+                        RuntimeValue::List(Rc::new(reverse_if(!self.lowest_first, value)), None)
+                            .with_outcome_type(outcome_type);
                 }
             }
             results.push((
@@ -547,12 +912,31 @@ impl Evaluator {
         // TODO this is similar to the logic in flat_map in Pool, find a way to use that?
         let mut total_results = BTreeMap::<i32, Rational>::new();
         let mut lcm = Natural::ONE;
+        let mut result_type: Option<OutcomeType> = None;
         for (result, weight) in results {
-            if let RuntimeValue::Pool(ref p) = result {
+            if let RuntimeValue::Pool(ref p, _) = result {
                 // The empty die is ignored in this context, but the empty list is not.
                 if p.ordered_outcomes().is_empty() {
                     continue;
                 }
+            }
+            let current_type = result.outcome_type();
+            merge_outcome_type(
+                &mut result_type,
+                current_type,
+                function.range,
+                "function evaluations returned incompatible outcome types",
+            )?;
+            match &result {
+                RuntimeValue::List(values, Some(_)) if values.len() != 1 => {
+                    return Err(RuntimeError::EnumTypeError {
+                        range: function.range.into(),
+                        message:
+                            "an enum sequence returned during pool evaluation cannot be summed"
+                                .to_string(),
+                    });
+                }
+                _ => {}
             }
             let summed = result.to_pool().sum();
             let total_count = summed
@@ -566,16 +950,22 @@ impl Evaluator {
                     Rational::from_naturals(count * &weight, total_count.clone());
             }
         }
-        Ok(total_results
-            .into_iter()
-            .map(|(outcome, weight)| {
-                let (numerator, denominator) =
-                    (weight * Rational::from(&lcm)).into_numerator_and_denominator();
-                debug_assert_eq!(denominator, Natural::ONE);
-                (outcome, numerator)
-            })
-            .collect::<Pool>()
-            .into())
+        let result_type = result_type.unwrap_or(OutcomeType::Int);
+        Ok(RuntimeValue::Pool(
+            Rc::new(
+                total_results
+                    .into_iter()
+                    .map(|(outcome, weight)| {
+                        let (numerator, denominator) =
+                            (weight * Rational::from(&lcm)).into_numerator_and_denominator();
+                        debug_assert_eq!(denominator, Natural::ONE);
+                        (outcome, numerator)
+                    })
+                    .collect::<Pool>(),
+            ),
+            None,
+        )
+        .with_outcome_type(&result_type))
     }
 
     fn call_function(
@@ -595,15 +985,16 @@ impl Evaluator {
             ),
             Function::UserDefined(user_function) => {
                 let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
-                for (arg, formal) in args.iter().zip(user_function.args.iter()) {
+                for (arg, formal) in args.iter().zip(user_function.definition.args.iter()) {
                     new_env.insert(formal.value.name.clone(), arg.clone());
                 }
                 let new_context = EvalContext {
                     env: Rc::new(RefCell::new(new_env)),
                     recursion_depth: eval_context.recursion_depth + 1,
+                    block_depth: eval_context.block_depth + 1,
                 };
                 let mut result = None;
-                for statement in &user_function.body {
+                for statement in &user_function.definition.body {
                     result = self.execute_statement(&new_context, statement)?;
                     if result.is_some() {
                         break;
@@ -616,22 +1007,32 @@ impl Evaluator {
     }
 }
 
-fn apply_unary_op(op: UnaryOp, operand: &RuntimeValue) -> RuntimeValue {
-    match op {
-        UnaryOp::D => make_d(None, operand),
-        UnaryOp::Negate => operand.map_outcomes(|o| -o),
-        UnaryOp::Invert => operand.map_outcomes(|o| if o == 0 { 1 } else { 0 }),
-        UnaryOp::Length => match operand {
-            RuntimeValue::Int(i) => i32::try_from(i.abs().to_string().len())
+fn apply_unary_op(
+    op: &WithRange<UnaryOp>,
+    operand: &RuntimeValue,
+) -> Result<RuntimeValue, RuntimeError> {
+    match op.value {
+        UnaryOp::D => make_d(None, operand, op.range),
+        UnaryOp::Negate | UnaryOp::Invert if operand.is_enum() => {
+            Err(RuntimeError::EnumTypeError {
+                range: op.range.into(),
+                message: format!("operator {} is not defined for enum values", op.value),
+            })
+        }
+        UnaryOp::Negate => Ok(operand.map_outcomes(|o| -o)),
+        UnaryOp::Invert => Ok(operand.map_outcomes(|o| if o == 0 { 1 } else { 0 })),
+        UnaryOp::Length => Ok(match operand {
+            RuntimeValue::Int(i, None) => i32::try_from(i.abs().to_string().len())
                 .expect("vector length fits in i32")
                 .into(),
-            RuntimeValue::List(list) => i32::try_from(list.len())
+            RuntimeValue::Int(_, Some(_)) => 1.into(),
+            RuntimeValue::List(list, _) => i32::try_from(list.len())
                 .expect("vector length fits in i32")
                 .into(),
-            RuntimeValue::Pool(d) => i32::try_from(d.dimension())
+            RuntimeValue::Pool(d, _) => i32::try_from(d.dimension())
                 .expect("vector length fits in i32")
                 .into(),
-        },
+        }),
     }
 }
 
@@ -642,13 +1043,37 @@ fn apply_binary_op(
     right: &RuntimeValue,
     lowest_first: bool,
 ) -> Result<RuntimeValue, RuntimeError> {
+    let has_enum = left.is_enum() || right.is_enum();
+    if has_enum
+        && !matches!(
+            op.value,
+            BinaryOp::D | BinaryOp::At | BinaryOp::Eq | BinaryOp::Ne
+        )
+    {
+        return Err(RuntimeError::EnumTypeError {
+            range: op.range.into(),
+            message: format!("operator {} is not defined for enum values", op.value),
+        });
+    }
+    if matches!(op.value, BinaryOp::Eq | BinaryOp::Ne) && !left.has_same_outcome_type(right) {
+        return Err(RuntimeError::EnumTypeError {
+            range: op.range.into(),
+            message: "equality requires operands with the same outcome type".to_string(),
+        });
+    }
     match &op.value {
-        BinaryOp::D => Ok(make_d(Some(left), right)),
+        BinaryOp::D => make_d(Some(left), right, op.range),
         BinaryOp::At => {
+            if left.is_enum() {
+                return Err(RuntimeError::EnumTypeError {
+                    range: op.range.into(),
+                    message: "enum values cannot be used as positions".to_string(),
+                });
+            }
             let left = match left {
-                RuntimeValue::Int(i) => Rc::new(vec![*i]),
-                RuntimeValue::List(lst) => Rc::clone(lst),
-                RuntimeValue::Pool(_) => {
+                RuntimeValue::Int(i, None) => Rc::new(vec![*i]),
+                RuntimeValue::List(lst, None) => Rc::clone(lst),
+                RuntimeValue::Pool(_, None) => {
                     return Err(RuntimeError::InvalidArgumentToOperator {
                         operator_range: op.range.into(),
                         op: op.value,
@@ -657,9 +1082,12 @@ fn apply_binary_op(
                         found: left.runtime_type(),
                     })
                 }
+                RuntimeValue::Int(_, Some(_))
+                | RuntimeValue::List(_, Some(_))
+                | RuntimeValue::Pool(_, Some(_)) => unreachable!(),
             };
             match right {
-                RuntimeValue::Int(i) => {
+                RuntimeValue::Int(i, None) => {
                     let digits: Vec<i32> = i
                         .abs()
                         .to_string()
@@ -672,9 +1100,32 @@ fn apply_binary_op(
                         .collect();
                     Ok(select_positions(&left, &digits, lowest_first).into())
                 }
-                RuntimeValue::List(lst) => Ok(select_positions(&left, lst, false).into()),
-                RuntimeValue::Pool(p) => {
+                RuntimeValue::List(lst, None) => Ok(select_positions(&left, lst, false).into()),
+                RuntimeValue::Pool(p, None) => {
                     Ok(select_in_dice(&left, (**p).clone(), lowest_first).into())
+                }
+                RuntimeValue::List(lst, Some(ty)) => {
+                    if left.len() != 1 {
+                        return Err(RuntimeError::EnumTypeError { range: op.range.into(), message: "selecting multiple enum positions would require summing enum values".to_string() });
+                    }
+                    let index = left[0];
+                    if index < 1 || index > i32::try_from(lst.len()).unwrap_or(i32::MAX) {
+                        return Err(RuntimeError::EnumTypeError {
+                            range: op.range.into(),
+                            message: "enum position is out of range".to_string(),
+                        });
+                    }
+                    Ok(RuntimeValue::Int(
+                        lst[usize::try_from(index - 1).unwrap()],
+                        Some(Rc::clone(ty)),
+                    ))
+                }
+                RuntimeValue::Int(_, Some(_)) | RuntimeValue::Pool(_, Some(_)) => {
+                    Err(RuntimeError::EnumTypeError {
+                        range: op.range.into(),
+                        message: "positional selection is not defined for this enum value"
+                            .to_string(),
+                    })
                 }
             }
         }
@@ -853,12 +1304,12 @@ fn comp_binary_op(
     list_comp: impl Fn(&[i32], &[i32]) -> i32,
 ) -> RuntimeValue {
     match (left, right) {
-        (RuntimeValue::Int(a), RuntimeValue::Int(b)) => int_comp(*a, *b).into(),
-        (RuntimeValue::List(a), RuntimeValue::List(b)) => list_comp(a, b).into(),
-        (RuntimeValue::List(a), RuntimeValue::Int(b)) => {
+        (RuntimeValue::Int(a, _), RuntimeValue::Int(b, _)) => int_comp(*a, *b).into(),
+        (RuntimeValue::List(a, _), RuntimeValue::List(b, _)) => list_comp(a, b).into(),
+        (RuntimeValue::List(a, _), RuntimeValue::Int(b, _)) => {
             a.iter().map(|&a| int_comp(a, *b)).sum::<i32>().into()
         }
-        (RuntimeValue::Int(a), RuntimeValue::List(b)) => {
+        (RuntimeValue::Int(a, _), RuntimeValue::List(b, _)) => {
             b.iter().map(|&b| int_comp(*a, b)).sum::<i32>().into()
         }
         _ => {
@@ -898,22 +1349,33 @@ enum DRightSide {
 
 fn flatten_list(arg: &RuntimeValue) -> DLeftSide {
     match arg {
-        RuntimeValue::Int(i) => DLeftSide::Int(*i),
-        RuntimeValue::List(list) => DLeftSide::Int(list.iter().sum()),
-        RuntimeValue::Pool(d) => DLeftSide::Pool(Rc::clone(d)),
+        RuntimeValue::Int(i, None) => DLeftSide::Int(*i),
+        RuntimeValue::List(list, None) => DLeftSide::Int(list.iter().sum()),
+        RuntimeValue::Pool(d, None) => DLeftSide::Pool(Rc::clone(d)),
+        RuntimeValue::Int(_, Some(_))
+        | RuntimeValue::List(_, Some(_))
+        | RuntimeValue::Pool(_, Some(_)) => {
+            unreachable!("enum values are rejected before numeric operations")
+        }
     }
 }
 
 /// Executes the unary or binary version of the _n_ `d` _m_ operator.
-fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
-    let repeat = match left {
-        Some(RuntimeValue::Int(i)) => DLeftSide::Int(*i),
-        Some(RuntimeValue::List(list)) => DLeftSide::Int(list.iter().sum()),
-        Some(RuntimeValue::Pool(d)) => DLeftSide::Pool(Rc::clone(d)),
-        None => DLeftSide::Int(1),
-    };
+fn make_d(
+    left: Option<&RuntimeValue>,
+    right: &RuntimeValue,
+    range: ast::Range,
+) -> Result<RuntimeValue, RuntimeError> {
+    if left.is_some_and(RuntimeValue::is_enum) {
+        return Err(RuntimeError::EnumTypeError {
+            range: range.into(),
+            message: "enum values cannot be used as dice counts".to_string(),
+        });
+    }
+    let repeat = left.map_or(DLeftSide::Int(1), flatten_list);
+    let outcome_type = right.outcome_type();
     let right = match right {
-        RuntimeValue::Int(sides) => {
+        RuntimeValue::Int(sides, None) => {
             if *sides > 0 {
                 DRightSide::List((1..=*sides).collect())
             } else if *sides == 0 {
@@ -922,10 +1384,23 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
                 DRightSide::List((*sides..=-1).collect())
             }
         }
-        RuntimeValue::List(list) => DRightSide::List(Rc::clone(list).to_vec()),
-        RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
+        RuntimeValue::List(list, _) => DRightSide::List(Rc::clone(list).to_vec()),
+        RuntimeValue::Pool(d, _) => DRightSide::Pool(Rc::clone(d)),
+        RuntimeValue::Int(_, Some(_)) => {
+            return Err(RuntimeError::EnumTypeError {
+                range: range.into(),
+                message: "an enum scalar cannot specify numeric die sides; use an enum sequence"
+                    .to_string(),
+            })
+        }
     };
-    match (repeat, right) {
+    if outcome_type.is_enum() && !matches!(&repeat, DLeftSide::Int(1)) {
+        return Err(RuntimeError::EnumTypeError {
+            range: range.into(),
+            message: "enum pools must have dimension one".to_string(),
+        });
+    }
+    let result: RuntimeValue = match (repeat, right) {
         (DLeftSide::Int(i), DRightSide::List(list)) => make_pool(i, list).into(),
         (DLeftSide::Int(i), DRightSide::Pool(p)) => {
             let mut new_pool = (*p).clone();
@@ -961,7 +1436,8 @@ fn make_d(left: Option<&RuntimeValue>, right: &RuntimeValue) -> RuntimeValue {
                 })
                 .into()
         }
-    }
+    };
+    Ok(result.with_outcome_type(&outcome_type))
 }
 
 fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {
@@ -974,22 +1450,71 @@ fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {
     Pool::from_list(u32::try_from(n).expect("n is positive"), sides)
 }
 
+fn merge_outcome_type(
+    accumulated: &mut Option<OutcomeType>,
+    next: OutcomeType,
+    range: ast::Range,
+    error_message: &'static str,
+) -> Result<(), RuntimeError> {
+    let merged = match accumulated.as_ref() {
+        None => next,
+        Some(current) => current
+            .merged_with(&next)
+            .ok_or_else(|| RuntimeError::EnumTypeError {
+                range: range.into(),
+                message: error_message.to_string(),
+            })?,
+    };
+    *accumulated = Some(merged);
+    Ok(())
+}
+
 fn coerce_arg(
     arg: RuntimeValue,
-    expected: Option<StaticType>,
+    expected: Option<&ResolvedArgType>,
+    range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
-    match (arg, expected) {
-        (arg, None) => Ok(arg),
-        (arg @ RuntimeValue::Int(_), Some(StaticType::Int)) => Ok(arg),
-        (RuntimeValue::Int(i), Some(StaticType::List)) => Ok(vec![i].into()),
-        (RuntimeValue::Int(i), Some(StaticType::Pool)) => Ok(Pool::from_list(1, vec![i]).into()),
-        (RuntimeValue::List(lst), Some(StaticType::Int)) => Ok(lst.iter().sum::<i32>().into()),
-        (list @ RuntimeValue::List(_), Some(StaticType::List)) => Ok(list),
-        (RuntimeValue::List(lst), Some(StaticType::Pool)) => {
-            Ok(Pool::from_list(1, (*lst).clone()).into())
+    let Some(expected) = expected else {
+        return Ok(arg);
+    };
+    let actual_outcome = arg.outcome_type();
+    if let Some(required) = &expected.outcome {
+        if actual_outcome.merged_with(required).is_none() {
+            return Err(RuntimeError::EnumTypeError {
+                range: range.into(),
+                message: format!(
+                    "expected {}, found {}",
+                    required.display_name(),
+                    actual_outcome.display_name()
+                ),
+            });
         }
-        (RuntimeValue::Pool(p), Some(StaticType::Int)) => Ok(p.sum().into()),
-        (pool @ RuntimeValue::Pool(_), _) => Ok(pool),
+    }
+    match (arg, expected.shape) {
+        (value @ RuntimeValue::Int(_, _), StaticType::Int) => Ok(value),
+        (RuntimeValue::Int(i, ty), StaticType::List) => {
+            Ok(RuntimeValue::List(Rc::new(vec![i]), ty))
+        }
+        (RuntimeValue::Int(i, ty), StaticType::Pool) => {
+            Ok(RuntimeValue::Pool(Rc::new(Pool::from_list(1, vec![i])), ty))
+        }
+        (RuntimeValue::List(_, Some(_)), StaticType::Int) => Err(RuntimeError::EnumTypeError {
+            range: range.into(),
+            message: "an enum sequence cannot be summed into a scalar".to_string(),
+        }),
+        (RuntimeValue::List(lst, None), StaticType::Int) => {
+            Ok(RuntimeValue::Int(lst.iter().sum(), None))
+        }
+        (value @ RuntimeValue::List(_, _), StaticType::List) => Ok(value),
+        (RuntimeValue::List(lst, ty), StaticType::Pool) => Ok(RuntimeValue::Pool(
+            Rc::new(Pool::from_list(1, (*lst).clone())),
+            ty,
+        )),
+        (RuntimeValue::Pool(p, Some(ty)), StaticType::Int) => Ok(RuntimeValue::Pool(p, Some(ty))),
+        (RuntimeValue::Pool(p, None), StaticType::Int) => {
+            Ok(RuntimeValue::Pool(Rc::new(p.sum()), None))
+        }
+        (value @ RuntimeValue::Pool(_, _), _) => Ok(value),
     }
 }
 
@@ -1048,6 +1573,13 @@ fn reverse_if(should_reverse: bool, v: &[i32]) -> Vec<i32> {
 #[derive(Debug, Error, Diagnostic)]
 #[error("Runtime error")]
 pub enum RuntimeError {
+    #[error("Enum type error: {message}")]
+    EnumTypeError {
+        #[label = "{message}"]
+        range: SourceSpan,
+        message: String,
+    },
+
     #[error("Output statement inside a function")]
     #[diagnostic(help("Output statements can only appear outside functions."))]
     OutputNotAtTopLevel {
@@ -1148,6 +1680,7 @@ pub enum RuntimeError {
 impl RuntimeError {
     pub fn range(&self) -> ast::Range {
         match self {
+            RuntimeError::EnumTypeError { range, .. } => range.into(),
             RuntimeError::OutputNotAtTopLevel { range } => range.into(),
             RuntimeError::SetNotAtTopLevel { range } => range.into(),
             RuntimeError::ReturnOutsideFunction { range } => range.into(),
@@ -1205,8 +1738,8 @@ mod tests {
     fn test_division_by_zero() {
         use crate::ast::{BinaryOp, Range};
 
-        let left = RuntimeValue::Int(5);
-        let right = RuntimeValue::Int(0);
+        let left = RuntimeValue::Int(5, None);
+        let right = RuntimeValue::Int(0, None);
         let op = WithRange {
             value: BinaryOp::Div,
             range: Range { start: 0, end: 1 },
@@ -1225,8 +1758,8 @@ mod tests {
     fn test_negative_exponentiation() {
         use crate::ast::{BinaryOp, Range};
 
-        let left = RuntimeValue::Int(2);
-        let right = RuntimeValue::Int(-3);
+        let left = RuntimeValue::Int(2, None);
+        let right = RuntimeValue::Int(-3, None);
         let op = WithRange {
             value: BinaryOp::Pow,
             range: Range { start: 0, end: 1 },
@@ -1246,8 +1779,8 @@ mod tests {
         use crate::ast::{BinaryOp, Range};
 
         // Test valid division
-        let left = RuntimeValue::Int(10);
-        let right = RuntimeValue::Int(2);
+        let left = RuntimeValue::Int(10, None);
+        let right = RuntimeValue::Int(2, None);
         let op = WithRange {
             value: BinaryOp::Div,
             range: Range { start: 0, end: 1 },
@@ -1255,13 +1788,13 @@ mod tests {
 
         let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
         match result {
-            Ok(RuntimeValue::Int(5)) => {}
+            Ok(RuntimeValue::Int(5, None)) => {}
             _ => panic!("Expected successful division result of 5"),
         }
 
         // Test valid exponentiation
-        let left = RuntimeValue::Int(2);
-        let right = RuntimeValue::Int(3);
+        let left = RuntimeValue::Int(2, None);
+        let right = RuntimeValue::Int(3, None);
         let op = WithRange {
             value: BinaryOp::Pow,
             range: Range { start: 0, end: 1 },
@@ -1269,7 +1802,7 @@ mod tests {
 
         let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
         match result {
-            Ok(RuntimeValue::Int(8)) => {}
+            Ok(RuntimeValue::Int(8, None)) => {}
             _ => panic!("Expected successful exponentiation result of 8"),
         }
     }
@@ -1278,8 +1811,8 @@ mod tests {
     fn test_addition_overflow() {
         use crate::ast::{BinaryOp, Range};
 
-        let left = RuntimeValue::Int(i32::MAX);
-        let right = RuntimeValue::Int(1);
+        let left = RuntimeValue::Int(i32::MAX, None);
+        let right = RuntimeValue::Int(1, None);
         let op = WithRange {
             value: BinaryOp::Add,
             range: Range { start: 0, end: 1 },
@@ -1299,8 +1832,8 @@ mod tests {
     fn test_subtraction_overflow() {
         use crate::ast::{BinaryOp, Range};
 
-        let left = RuntimeValue::Int(i32::MIN);
-        let right = RuntimeValue::Int(1);
+        let left = RuntimeValue::Int(i32::MIN, None);
+        let right = RuntimeValue::Int(1, None);
         let op = WithRange {
             value: BinaryOp::Sub,
             range: Range { start: 0, end: 1 },
@@ -1320,8 +1853,8 @@ mod tests {
     fn test_multiplication_overflow() {
         use crate::ast::{BinaryOp, Range};
 
-        let left = RuntimeValue::Int(i32::MAX);
-        let right = RuntimeValue::Int(2);
+        let left = RuntimeValue::Int(i32::MAX, None);
+        let right = RuntimeValue::Int(2, None);
         let op = WithRange {
             value: BinaryOp::Mul,
             range: Range { start: 0, end: 1 },
@@ -1341,8 +1874,8 @@ mod tests {
     fn test_power_overflow() {
         use crate::ast::{BinaryOp, Range};
 
-        let left = RuntimeValue::Int(2);
-        let right = RuntimeValue::Int(32); // 2^32 overflows i32
+        let left = RuntimeValue::Int(2, None);
+        let right = RuntimeValue::Int(32, None); // 2^32 overflows i32
         let op = WithRange {
             value: BinaryOp::Pow,
             range: Range { start: 0, end: 1 },

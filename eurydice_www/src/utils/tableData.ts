@@ -3,6 +3,7 @@ import { DisplayMode, partialSums } from "./chartData";
 
 export interface TableRowData {
   outcome: number;
+  outcomeLabel: string;
   values: string[];
 }
 
@@ -41,7 +42,10 @@ export function computeTableData(
   sortedOutcomes: number[]
 ): TableRowData[] {
   return sortedOutcomes.map((outcome) => {
-    const row = { outcome, values: [] as string[] };
+    const enumLabel = distributions
+      .map(([, distribution]) => distribution.labels?.[outcome])
+      .find((label) => label !== undefined);
+    const row = { outcome, outcomeLabel: enumLabel ?? outcome.toString(), values: [] as string[] };
     distributions.forEach(([, distribution]) => {
       const probabilityEntry = distribution.probabilities.find(
         ([outcomeValue]) => outcomeValue === outcome

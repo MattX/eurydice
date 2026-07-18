@@ -117,7 +117,7 @@ export function prepareChartData(
     });
   }
   return {
-    labels: range.map((x) => x.toString()),
+    labels: range.map((x) => outcomeLabel(chartData, x)),
     datasets,
   };
 }
@@ -153,7 +153,7 @@ function prepareTransposedChartData(
     
     const color = colorGenerator.nextColor();
     datasets.push({
-      label: `${outcome}`,
+      label: outcomeLabel(chartData, outcome),
       data,
       borderColor: color,
       backgroundColor: color,
@@ -165,3 +165,12 @@ function prepareTransposedChartData(
     datasets,
   };
 }
+
+function outcomeLabel(chartData: [string, Distribution][], outcome: number): string {
+  for (const [, distribution] of chartData) {
+    const label = distribution.labels?.[outcome];
+    if (label !== undefined) return label;
+  }
+  return outcome.toString();
+}
+

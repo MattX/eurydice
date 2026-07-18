@@ -8,16 +8,19 @@ use crate::{
     eval::{Function, RuntimeValue},
 };
 
+type PrimitiveExecutor = fn(
+    &[RuntimeValue],
+    &[ast::Range],
+    usize,      // explode_depth
+    bool,       // lowest_first
+    ast::Range, // function_range
+) -> Result<RuntimeValue, crate::eval::RuntimeError>;
+
 #[derive(Debug)]
 pub struct Primitive {
     pub arg_types: Vec<Option<StaticType>>,
-    pub execute: fn(
-        &[RuntimeValue],
-        &[ast::Range],
-        usize,      // explode_depth
-        bool,       // lowest_first
-        ast::Range, // function_range
-    ) -> Result<RuntimeValue, crate::eval::RuntimeError>,
+    pub accepts_enums: bool,
+    pub execute: PrimitiveExecutor,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,17 +46,24 @@ fn contains_execute(
     _arg_ranges: &[ast::Range],
     _explode_depth: usize,
     _lowest_first: bool,
-    _function_range: ast::Range,
+    function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::List(haystack), RuntimeValue::Int(needle)) = (&args[0], &args[1]) {
-        Ok(if haystack.iter().any(|h| h == needle) {
-            1.into()
-        } else {
-            0.into()
-        })
-    } else {
-        panic!("wrong argument types to [contains]");
-    }
+    let result = match (&args[0], &args[1]) {
+        (
+            haystack_value @ RuntimeValue::List(haystack, _),
+            needle_value @ RuntimeValue::Int(needle, _),
+        ) if haystack_value.has_same_outcome_type(needle_value) => {
+            haystack.iter().any(|h| h == needle)
+        }
+        _ => {
+            return Err(crate::eval::RuntimeError::EnumTypeError {
+                range: function_range.into(),
+                message: "[contains] requires a sequence and scalar with the same outcome type"
+                    .to_string(),
+            })
+        }
+    };
+    Ok(if result { 1.into() } else { 0.into() })
 }
 
 fn count_execute(
@@ -61,21 +71,31 @@ fn count_execute(
     _arg_ranges: &[ast::Range],
     _explode_depth: usize,
     _lowest_first: bool,
-    _function_range: ast::Range,
+    function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::List(needle), RuntimeValue::List(haystack)) = (&args[0], &args[1]) {
-        let mut needle_map = HashMap::new();
-        for n in needle.iter() {
-            *needle_map.entry(n).or_insert(0) += 1;
+    let (needle, haystack) = match (&args[0], &args[1]) {
+        (
+            needle_value @ RuntimeValue::List(needle, _),
+            haystack_value @ RuntimeValue::List(haystack, _),
+        ) if needle_value.has_same_outcome_type(haystack_value) => {
+            (needle.as_slice(), haystack.as_slice())
         }
-        Ok(haystack
-            .iter()
-            .map(|item| needle_map.get(item).copied().unwrap_or(0))
-            .sum::<i32>()
-            .into())
-    } else {
-        panic!("wrong argument types to [count]");
+        _ => {
+            return Err(crate::eval::RuntimeError::EnumTypeError {
+                range: function_range.into(),
+                message: "[count] requires sequences with the same outcome type".to_string(),
+            })
+        }
+    };
+    let mut needle_map = HashMap::new();
+    for n in needle.iter() {
+        *needle_map.entry(n).or_insert(0) += 1;
     }
+    Ok(haystack
+        .iter()
+        .map(|item| needle_map.get(item).copied().unwrap_or(0))
+        .sum::<i32>()
+        .into())
 }
 
 fn explode_execute(
@@ -85,7 +105,7 @@ fn explode_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::Pool(d) = &args[0] {
+    if let RuntimeValue::Pool(d, None) = &args[0] {
         if d.is_empty() {
             return Ok(Pool::from_list(1, vec![]).into());
         }
@@ -104,7 +124,7 @@ fn explode_on_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Pool(d), RuntimeValue::List(cond)) = (&args[0], &args[1]) {
+    if let (RuntimeValue::Pool(d, None), RuntimeValue::List(cond, None)) = (&args[0], &args[1]) {
         if d.is_empty() {
             return Ok(Pool::from_list(1, vec![]).into());
         }
@@ -122,7 +142,7 @@ fn reroll_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::Pool(d) = &args[0] {
+    if let RuntimeValue::Pool(d, None) = &args[0] {
         if d.is_empty() {
             return Ok(Pool::from_list(1, vec![]).into());
         }
@@ -141,7 +161,7 @@ fn reroll_on_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Pool(d), RuntimeValue::List(cond)) = (&args[0], &args[1]) {
+    if let (RuntimeValue::Pool(d, None), RuntimeValue::List(cond, None)) = (&args[0], &args[1]) {
         if d.is_empty() {
             return Ok(Pool::from_list(1, vec![]).into());
         }
@@ -159,7 +179,7 @@ fn highest_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Int(i), RuntimeValue::Pool(d)) = (&args[0], &args[1]) {
+    if let (RuntimeValue::Int(i, None), RuntimeValue::Pool(d, None)) = (&args[0], &args[1]) {
         let keep_list = keep_list_for_primitive(
             PrimitiveType::Highest,
             *i,
@@ -180,7 +200,7 @@ fn lowest_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Int(i), RuntimeValue::Pool(d)) = (&args[0], &args[1]) {
+    if let (RuntimeValue::Int(i, None), RuntimeValue::Pool(d, None)) = (&args[0], &args[1]) {
         let keep_list = keep_list_for_primitive(
             PrimitiveType::Lowest,
             *i,
@@ -201,7 +221,7 @@ fn middle_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Int(i), RuntimeValue::Pool(d)) = (&args[0], &args[1]) {
+    if let (RuntimeValue::Int(i, None), RuntimeValue::Pool(d, None)) = (&args[0], &args[1]) {
         let keep_list = keep_list_for_primitive(
             PrimitiveType::Middle,
             *i,
@@ -222,7 +242,7 @@ fn highest_of_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
+    if let (RuntimeValue::Int(i, None), RuntimeValue::Int(j, None)) = (&args[0], &args[1]) {
         Ok((*(i.max(j))).into())
     } else {
         panic!("wrong argument types to [highest of]");
@@ -236,7 +256,7 @@ fn lowest_of_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Int(i), RuntimeValue::Int(j)) = (&args[0], &args[1]) {
+    if let (RuntimeValue::Int(i, None), RuntimeValue::Int(j, None)) = (&args[0], &args[1]) {
         Ok((*(i.min(j))).into())
     } else {
         panic!("wrong argument types to [lowest of]");
@@ -250,7 +270,7 @@ fn maximum_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::Pool(d) = &args[0] {
+    if let RuntimeValue::Pool(d, None) = &args[0] {
         Ok(d.sum()
             .ordered_outcomes()
             .last()
@@ -269,10 +289,12 @@ fn reverse_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::List(lst) = &args[0] {
-        Ok(lst.iter().rev().copied().collect::<Vec<_>>().into())
-    } else {
-        panic!("wrong argument types to [reverse]");
+    match &args[0] {
+        RuntimeValue::List(lst, ty) => Ok(RuntimeValue::List(
+            std::rc::Rc::new(lst.iter().rev().copied().collect()),
+            ty.clone(),
+        )),
+        _ => unreachable!("argument coercion guarantees a sequence"),
     }
 }
 
@@ -283,7 +305,7 @@ fn sort_execute(
     lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::List(lst) = &args[0] {
+    if let RuntimeValue::List(lst, None) = &args[0] {
         let mut lst = (**lst).clone();
         if lowest_first {
             lst.sort_unstable();
@@ -299,62 +321,77 @@ fn sort_execute(
 lazy_static! {
     pub static ref ABSOLUTE_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int)],
+        accepts_enums: false,
         execute: absolute_execute,
     };
     pub static ref CONTAINS_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::List), Some(StaticType::Int)],
+        accepts_enums: true,
         execute: contains_execute,
     };
     pub static ref COUNT_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::List), Some(StaticType::List)],
+        accepts_enums: true,
         execute: count_execute,
     };
     pub static ref EXPLODE_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Pool)],
+        accepts_enums: false,
         execute: explode_execute,
     };
     pub static ref HIGHEST_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int), Some(StaticType::Pool)],
+        accepts_enums: false,
         execute: highest_execute,
     };
     pub static ref LOWEST_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int), Some(StaticType::Pool)],
+        accepts_enums: false,
         execute: lowest_execute,
     };
     pub static ref MIDDLE_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int), Some(StaticType::Pool)],
+        accepts_enums: false,
         execute: middle_execute,
     };
     pub static ref HIGHEST_OF_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int), Some(StaticType::Int)],
+        accepts_enums: false,
         execute: highest_of_execute,
     };
     pub static ref LOWEST_OF_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int), Some(StaticType::Int)],
+        accepts_enums: false,
         execute: lowest_of_execute,
     };
     pub static ref MAXIMUM_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Pool)],
+        accepts_enums: false,
         execute: maximum_execute,
     };
     pub static ref REVERSE_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::List)],
+        accepts_enums: true,
         execute: reverse_execute,
     };
     pub static ref SORT_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::List)],
+        accepts_enums: false,
         execute: sort_execute,
     };
     pub static ref EXPLODE_ON_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Pool), Some(StaticType::List)],
+        accepts_enums: false,
         execute: explode_on_execute,
     };
     pub static ref REROLL_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Pool)],
+        accepts_enums: false,
         execute: reroll_execute,
     };
     pub static ref REROLL_ON_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Pool), Some(StaticType::List)],
+        accepts_enums: false,
         execute: reroll_on_execute,
     };
 }
@@ -485,26 +522,32 @@ mod tests {
 
     #[test]
     fn test_absolute_execute() {
-        let args = vec![RuntimeValue::Int(-5)];
+        let args = vec![RuntimeValue::Int(-5, None)];
         let result = absolute_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(5));
+        assert_eq!(result, RuntimeValue::Int(5, None));
 
-        let args = vec![RuntimeValue::Int(3)];
+        let args = vec![RuntimeValue::Int(3, None)];
         let result = absolute_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(3));
+        assert_eq!(result, RuntimeValue::Int(3, None));
     }
 
     #[test]
     fn test_contains_execute() {
         let haystack = vec![1, 2, 3, 3, 4, 5];
-        let args = vec![RuntimeValue::List(Rc::new(haystack)), RuntimeValue::Int(3)];
+        let args = vec![
+            RuntimeValue::List(Rc::new(haystack), None),
+            RuntimeValue::Int(3, None),
+        ];
         let result = contains_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(1));
+        assert_eq!(result, RuntimeValue::Int(1, None));
 
         let haystack = vec![1, 2, 4, 5];
-        let args = vec![RuntimeValue::List(Rc::new(haystack)), RuntimeValue::Int(3)];
+        let args = vec![
+            RuntimeValue::List(Rc::new(haystack), None),
+            RuntimeValue::Int(3, None),
+        ];
         let result = contains_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(0));
+        assert_eq!(result, RuntimeValue::Int(0, None));
     }
 
     #[test]
@@ -512,21 +555,21 @@ mod tests {
         let needle = vec![1, 2, 2];
         let haystack = vec![1, 2, 2, 3, 2, 1];
         let args = vec![
-            RuntimeValue::List(Rc::new(needle)),
-            RuntimeValue::List(Rc::new(haystack)),
+            RuntimeValue::List(Rc::new(needle), None),
+            RuntimeValue::List(Rc::new(haystack), None),
         ];
         let result = count_execute(&args, &[], 0, false, dummy_range()).unwrap();
         // Should count: 1 appears 2 times, 2 appears 3 times -> 1*2 + 2*3 = 8
-        assert_eq!(result, RuntimeValue::Int(8));
+        assert_eq!(result, RuntimeValue::Int(8, None));
     }
 
     #[test]
     fn test_explode_execute() {
         let pool = Pool::from_list(1, vec![1, 2, 3]);
-        let args = vec![RuntimeValue::Pool(Rc::new(pool))];
+        let args = vec![RuntimeValue::Pool(Rc::new(pool), None)];
         let result = explode_execute(&args, &[], 2, false, dummy_range()).unwrap();
         // Should return a pool where 3s explode
-        if let RuntimeValue::Pool(result_pool) = result {
+        if let RuntimeValue::Pool(result_pool, None) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 9), (2, 9), (4, 3), (5, 3), (7, 1), (8, 1), (9, 1)]
@@ -539,11 +582,14 @@ mod tests {
     #[test]
     fn test_highest_execute() {
         let pool = Pool::from_list(3, vec![1, 2, 3, 4, 5, 6]);
-        let args = vec![RuntimeValue::Int(2), RuntimeValue::Pool(Rc::new(pool))];
+        let args = vec![
+            RuntimeValue::Int(2, None),
+            RuntimeValue::Pool(Rc::new(pool), None),
+        ];
         let ranges = vec![dummy_range(), dummy_range()];
         let result = highest_execute(&args, &ranges, 0, false, dummy_range()).unwrap();
         // Should keep the highest 2 dice from a 3d6 roll
-        if let RuntimeValue::Pool(result_pool) = result {
+        if let RuntimeValue::Pool(result_pool, None) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [
@@ -568,11 +614,14 @@ mod tests {
     #[test]
     fn test_lowest_execute() {
         let pool = Pool::from_list(3, vec![1, 2, 3, 4, 5, 6]);
-        let args = vec![RuntimeValue::Int(2), RuntimeValue::Pool(Rc::new(pool))];
+        let args = vec![
+            RuntimeValue::Int(2, None),
+            RuntimeValue::Pool(Rc::new(pool), None),
+        ];
         let ranges = vec![dummy_range(), dummy_range()];
         let result = lowest_execute(&args, &ranges, 0, false, dummy_range()).unwrap();
         // Should keep the lowest 2 dice from a 3d6 roll
-        if let RuntimeValue::Pool(result_pool) = result {
+        if let RuntimeValue::Pool(result_pool, None) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [
@@ -597,11 +646,14 @@ mod tests {
     #[test]
     fn test_middle_execute() {
         let pool = Pool::from_list(3, vec![1, 2, 3, 4, 5, 6]);
-        let args = vec![RuntimeValue::Int(1), RuntimeValue::Pool(Rc::new(pool))];
+        let args = vec![
+            RuntimeValue::Int(1, None),
+            RuntimeValue::Pool(Rc::new(pool), None),
+        ];
         let ranges = vec![dummy_range(), dummy_range()];
         let result = middle_execute(&args, &ranges, 0, false, dummy_range()).unwrap();
         // Should keep the middle 1 die from a 3d6 roll
-        if let RuntimeValue::Pool(result_pool) = result {
+        if let RuntimeValue::Pool(result_pool, None) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 16), (2, 40), (3, 52), (4, 52), (5, 40), (6, 16)]
@@ -613,46 +665,46 @@ mod tests {
 
     #[test]
     fn test_highest_of_execute() {
-        let args = vec![RuntimeValue::Int(5), RuntimeValue::Int(3)];
+        let args = vec![RuntimeValue::Int(5, None), RuntimeValue::Int(3, None)];
         let result = highest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(5));
+        assert_eq!(result, RuntimeValue::Int(5, None));
 
-        let args = vec![RuntimeValue::Int(2), RuntimeValue::Int(7)];
+        let args = vec![RuntimeValue::Int(2, None), RuntimeValue::Int(7, None)];
         let result = highest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(7));
+        assert_eq!(result, RuntimeValue::Int(7, None));
     }
 
     #[test]
     fn test_lowest_of_execute() {
-        let args = vec![RuntimeValue::Int(5), RuntimeValue::Int(3)];
+        let args = vec![RuntimeValue::Int(5, None), RuntimeValue::Int(3, None)];
         let result = lowest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(3));
+        assert_eq!(result, RuntimeValue::Int(3, None));
 
-        let args = vec![RuntimeValue::Int(2), RuntimeValue::Int(7)];
+        let args = vec![RuntimeValue::Int(2, None), RuntimeValue::Int(7, None)];
         let result = lowest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(2));
+        assert_eq!(result, RuntimeValue::Int(2, None));
     }
 
     #[test]
     fn test_maximum_execute() {
         let pool = Pool::from_list(1, vec![1, 3, 2]);
-        let args = vec![RuntimeValue::Pool(Rc::new(pool))];
+        let args = vec![RuntimeValue::Pool(Rc::new(pool), None)];
         let result = maximum_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(3));
+        assert_eq!(result, RuntimeValue::Int(3, None));
 
         // Test empty pool
         let empty_pool = Pool::from_list(1, vec![]);
-        let args = vec![RuntimeValue::Pool(Rc::new(empty_pool))];
+        let args = vec![RuntimeValue::Pool(Rc::new(empty_pool), None)];
         let result = maximum_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        assert_eq!(result, RuntimeValue::Int(0));
+        assert_eq!(result, RuntimeValue::Int(0, None));
     }
 
     #[test]
     fn test_reverse_execute() {
         let list = vec![1, 2, 3, 4, 5];
-        let args = vec![RuntimeValue::List(Rc::new(list))];
+        let args = vec![RuntimeValue::List(Rc::new(list), None)];
         let result = reverse_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        if let RuntimeValue::List(reversed) = result {
+        if let RuntimeValue::List(reversed, None) = result {
             assert_eq!(*reversed, vec![5, 4, 3, 2, 1]);
         } else {
             panic!("Expected list result");
@@ -662,11 +714,11 @@ mod tests {
     #[test]
     fn test_sort_execute() {
         let list = vec![3, 1, 4, 1, 5];
-        let args = vec![RuntimeValue::List(Rc::new(list))];
+        let args = vec![RuntimeValue::List(Rc::new(list), None)];
 
         // Test lowest first (ascending)
         let result = sort_execute(&args, &[], 0, true, dummy_range()).unwrap();
-        if let RuntimeValue::List(sorted) = result {
+        if let RuntimeValue::List(sorted, None) = result {
             assert_eq!(*sorted, vec![1, 1, 3, 4, 5]);
         } else {
             panic!("Expected list result");
@@ -674,9 +726,9 @@ mod tests {
 
         // Test highest first (descending)
         let list = vec![3, 1, 4, 1, 5];
-        let args = vec![RuntimeValue::List(Rc::new(list))];
+        let args = vec![RuntimeValue::List(Rc::new(list), None)];
         let result = sort_execute(&args, &[], 0, false, dummy_range()).unwrap();
-        if let RuntimeValue::List(sorted) = result {
+        if let RuntimeValue::List(sorted, None) = result {
             assert_eq!(*sorted, vec![5, 4, 3, 1, 1]);
         } else {
             panic!("Expected list result");
@@ -688,16 +740,25 @@ mod tests {
         let pool = Pool::from_list(1, vec![1, 2, 3]);
         let condition = vec![2, 3];
         let args = vec![
-            RuntimeValue::Pool(Rc::new(pool)),
-            RuntimeValue::List(Rc::new(condition)),
+            RuntimeValue::Pool(Rc::new(pool), None),
+            RuntimeValue::List(Rc::new(condition), None),
         ];
         let result = explode_on_execute(&args, &[], 2, false, dummy_range()).unwrap();
         // Should return a pool where 2s and 3s explode
-        if let RuntimeValue::Pool(result_pool) = result {
+        if let RuntimeValue::Pool(result_pool, None) = result {
             // 1 stays as 1, 2 explodes to 2+reroll, 3 explodes to 3+reroll
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
-                [(1, 9), (3, 3), (4, 3), (5, 1), (6, 3), (7, 4), (8, 3), (9, 1)]
+                [
+                    (1, 9),
+                    (3, 3),
+                    (4, 3),
+                    (5, 1),
+                    (6, 3),
+                    (7, 4),
+                    (8, 3),
+                    (9, 1)
+                ]
             );
         } else {
             panic!("Expected pool result");
@@ -707,10 +768,10 @@ mod tests {
     #[test]
     fn test_reroll_execute() {
         let pool = Pool::from_list(1, vec![1, 2, 3]);
-        let args = vec![RuntimeValue::Pool(Rc::new(pool))];
+        let args = vec![RuntimeValue::Pool(Rc::new(pool), None)];
         let result = reroll_execute(&args, &[], 2, false, dummy_range()).unwrap();
         // Should return a pool where 3s reroll (without keeping the original value)
-        if let RuntimeValue::Pool(result_pool) = result {
+        if let RuntimeValue::Pool(result_pool, None) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 13), (2, 13), (3, 1)]
@@ -725,12 +786,12 @@ mod tests {
         let pool = Pool::from_list(1, vec![1, 2, 3, 4]);
         let condition = vec![1, 4];
         let args = vec![
-            RuntimeValue::Pool(Rc::new(pool)),
-            RuntimeValue::List(Rc::new(condition)),
+            RuntimeValue::Pool(Rc::new(pool), None),
+            RuntimeValue::List(Rc::new(condition), None),
         ];
         let result = reroll_on_execute(&args, &[], 2, false, dummy_range()).unwrap();
         // Should return a pool where 1s and 4s reroll
-        if let RuntimeValue::Pool(result_pool) = result {
+        if let RuntimeValue::Pool(result_pool, None) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 4), (2, 28), (3, 28), (4, 4)]
