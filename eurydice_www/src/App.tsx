@@ -9,6 +9,7 @@ import Header from "./components/Header";
 import { DarkModeSwitcher } from "./components/DarkModeSwitcher";
 import EurydiceWorker from "./worker?worker";
 import { Toaster } from "react-hot-toast";
+import { numericOutcomeRange } from "./utils/chartData";
 import { Group, Panel, Separator } from "react-resizable-panels";
 
 let worker = new WorkerWrapper(new EurydiceWorker());
@@ -98,18 +99,9 @@ function AppInner() {
           }
         }
 
-        // Check if range is too large
-        let minValue = Infinity;
-        let maxValue = -Infinity;
-        for (const [_, distribution] of chartData) {
-          for (const [value] of distribution.probabilities) {
-            minValue = Math.min(minValue, value);
-            maxValue = Math.max(maxValue, value);
-          }
-        }
-
-        const range = maxValue - minValue;
-        if (range >= 5000) {
+        // Categorical outcomes use enum member ordinals, not a numeric axis.
+        const range = numericOutcomeRange(chartData);
+        if (range !== null && range >= 5000) {
           setOutput([]);
           setError({
             message: `Range of outcomes (${range}) is too large to display. Maximum range is 5000.`,

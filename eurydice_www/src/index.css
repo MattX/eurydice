@@ -137,6 +137,31 @@
     color: var(--accent);
     border-color: var(--accent-border);
   }
+  .btn-toggle[aria-disabled='true'],
+  .segmented > button[aria-disabled='true'] {
+    @apply cursor-not-allowed opacity-50;
+  }
+  .btn-toggle[aria-disabled='true']:hover,
+  .segmented > button[aria-disabled='true']:hover {
+    color: var(--text-muted);
+    border-color: var(--border);
+  }
+
+  /* Accessible explanation for controls that remain focusable while unavailable. */
+  .tooltip-control {
+    position: relative;
+  }
+  .tooltip-control::after {
+    content: attr(data-tooltip);
+    @apply pointer-events-none absolute top-full left-1/2 z-50 mt-2 w-max max-w-56 -translate-x-1/2 rounded-md px-2 py-1 text-xs font-normal opacity-0 transition-opacity;
+    background: var(--text);
+    color: var(--surface);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+  .tooltip-control:hover::after,
+  .tooltip-control:focus-visible::after {
+    opacity: 1;
+  }
 
   /* Segmented control (mutually-exclusive options) ------------------- */
   .segmented {

@@ -1,6 +1,19 @@
 import { ChartData } from "chart.js";
 import { Distribution } from "../util";
 
+export type NamedDistribution = [string, Distribution];
+
+export interface EnumDistributionGroup {
+  enumName: string;
+  labels: string[];
+  distributions: NamedDistribution[];
+}
+
+export interface PartitionedDistributions {
+  numeric: NamedDistribution[];
+  enumGroups: EnumDistributionGroup[];
+}
+
 export enum DisplayMode {
   Distribution,
   AtMost,
@@ -71,8 +84,72 @@ export class ColorGenerator {
   }
 }
 
+export function partitionDistributions(
+  distributions: NamedDistribution[]
+): PartitionedDistributions {
+  const numeric: NamedDistribution[] = [];
+  const enumGroups = new Map<string, EnumDistributionGroup>();
+
+  for (const namedDistribution of distributions) {
+    const [, distribution] = namedDistribution;
+    if (distribution.enum_name === undefined) {
+      numeric.push(namedDistribution);
+      continue;
+    }
+
+    let group = enumGroups.get(distribution.enum_name);
+    if (group === undefined) {
+      group = {
+        enumName: distribution.enum_name,
+        labels: distribution.labels ?? [],
+        distributions: [],
+      };
+      enumGroups.set(distribution.enum_name, group);
+    }
+    group.distributions.push(namedDistribution);
+  }
+
+  return { numeric, enumGroups: Array.from(enumGroups.values()) };
+}
+
+export function numericOutcomeRange(
+  distributions: NamedDistribution[]
+): number | null {
+  const numeric = distributions.filter(
+    ([, distribution]) => distribution.enum_name === undefined
+  );
+  const outcomes = numeric.flatMap(([, distribution]) =>
+    distribution.probabilities.map(([outcome]) => outcome)
+  );
+  if (outcomes.length === 0) return null;
+  return Math.max(...outcomes) - Math.min(...outcomes);
+}
+
+export function prepareCategoricalChartData(
+  group: EnumDistributionGroup,
+  isDarkMode = false
+): ChartData<"bar", number[], string> {
+  const colorGenerator = new ColorGenerator(isDarkMode);
+  return {
+    labels: group.labels,
+    datasets: group.distributions.map(([name, distribution]) => {
+      const probabilities = new Map(distribution.probabilities);
+      const color = colorGenerator.nextColor();
+      return {
+        label: name,
+        data: group.labels.map((_, outcome) =>
+          (probabilities.get(outcome) ?? 0) * 100
+        ),
+        backgroundColor: color,
+        borderColor: color,
+        borderWidth: 1,
+      };
+    }),
+  };
+}
+
 export function prepareChartData(
-  chartData: [string, Distribution][],
+  chartData: NamedDistribution[],
   mode: DisplayMode,
   isDarkMode = false
 ): ChartData<"line", number[], string> {
@@ -123,7 +200,7 @@ export function prepareChartData(
 }
 
 function prepareTransposedChartData(
-  chartData: [string, Distribution][],
+  chartData: NamedDistribution[],
   isDarkMode = false
 ): ChartData<"line", number[], string> {
   // Get all unique outcomes across all distributions
@@ -166,7 +243,7 @@ function prepareTransposedChartData(
   };
 }
 
-function outcomeLabel(chartData: [string, Distribution][], outcome: number): string {
+function outcomeLabel(chartData: NamedDistribution[], outcome: number): string {
   for (const [, distribution] of chartData) {
     const label = distribution.labels?.[outcome];
     if (label !== undefined) return label;

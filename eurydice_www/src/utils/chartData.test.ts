@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   DisplayMode,
   prepareChartData,
+  prepareCategoricalChartData,
+  partitionDistributions,
+  numericOutcomeRange,
   ColorGenerator,
   partialSums,
 } from './chartData';
@@ -235,6 +238,58 @@ describe('chartData', () => {
         expect(typeof dataset.borderColor).toBe('string');
         expect(typeof dataset.backgroundColor).toBe('string');
       });
+    });
+  });
+
+  describe('categorical distributions', () => {
+    const mixedDistributions: [string, Distribution][] = [
+      ['numeric', { probabilities: [[1, 1]] }],
+      ['attack', {
+        probabilities: [[0, 0.25], [2, 0.75]],
+        enum_name: 'RESULT',
+        labels: ['MISS', 'HIT', 'CRITICAL'],
+      }],
+      ['defend', {
+        probabilities: [[1, 1]],
+        enum_name: 'RESULT',
+        labels: ['MISS', 'HIT', 'CRITICAL'],
+      }],
+      ['weather', {
+        probabilities: [[0, 1]],
+        enum_name: 'WEATHER',
+        labels: ['SUN', 'RAIN'],
+      }],
+    ];
+
+    it('partitions numeric outputs and groups enum outputs by type in input order', () => {
+      const result = partitionDistributions(mixedDistributions);
+
+      expect(result.numeric.map(([name]) => name)).toEqual(['numeric']);
+      expect(result.enumGroups.map((group) => group.enumName)).toEqual(['RESULT', 'WEATHER']);
+      expect(result.enumGroups[0].distributions.map(([name]) => name)).toEqual(['attack', 'defend']);
+    });
+
+    it('uses declaration order and fills missing enum members with zero', () => {
+      const { enumGroups } = partitionDistributions(mixedDistributions);
+      const result = prepareCategoricalChartData(enumGroups[0]);
+
+      expect(result.labels).toEqual(['MISS', 'HIT', 'CRITICAL']);
+      expect(result.datasets[0].data).toEqual([25, 0, 75]);
+      expect(result.datasets[1].data).toEqual([0, 100, 0]);
+    });
+
+    it('ignores enum ordinals when calculating the numeric display range', () => {
+      const distributions: [string, Distribution][] = [
+        ['numeric', { probabilities: [[10, 0.5], [20, 0.5]] }],
+        ['enum', {
+          probabilities: [[0, 0.5], [10000, 0.5]],
+          enum_name: 'LARGE_ENUM',
+          labels: ['FIRST'],
+        }],
+      ];
+
+      expect(numericOutcomeRange(distributions)).toBe(10);
+      expect(numericOutcomeRange([distributions[1]])).toBeNull();
     });
   });
 
