@@ -90,13 +90,15 @@ export default function OutputPane(props: OutputPaneProps) {
       <Line
         data={datasets}
         options={{
+          responsive: true,
+          maintainAspectRatio: false,
           interaction: {
             intersect: false,
             mode: "index",
           },
           elements: {
-            line: { borderWidth: 2, tension: 0.25 },
-            point: { radius: 0, hoverRadius: 4, hitRadius: 8 },
+            line: { borderWidth: 2 },
+            point: { radius: 3, hoverRadius: 4 },
           },
           scales: {
             y: {
@@ -126,8 +128,10 @@ export default function OutputPane(props: OutputPaneProps) {
               labels: {
                 color: tooltipText,
                 usePointStyle: true,
-                pointStyle: "line",
-                boxWidth: 24,
+                pointStyle: "rectRounded",
+                boxWidth: 18,
+                boxHeight: 12,
+                padding: 16,
                 font: { size: 12 },
               },
             },
@@ -274,7 +278,7 @@ export default function OutputPane(props: OutputPaneProps) {
           </div>
         )}
       </div>
-      <div className="relative" style={{aspectRatio: "1/1"}}>{display}</div>
+      <div className={tableMode ? "relative" : "chart-container"}>{display}</div>
       
       <ExportModal 
         distributions={props.distributions.map(([name, distribution]) => ({ name, distribution }))}
@@ -428,4 +432,3 @@ function BracketingTable({
     </div>
   );
 }
-

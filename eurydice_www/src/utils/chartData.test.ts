@@ -153,6 +153,14 @@ describe('chartData', () => {
       expect(result.labels).toEqual(['1', '2', '3', '4', '5']);
       expect(result.datasets[0].data).toEqual([50, 0, 0, 0, 50]);
     });
+
+    it('should use the series color for both lines and filled swatches', () => {
+      const result = prepareChartData(testDistributions, DisplayMode.Distribution);
+
+      result.datasets.forEach(dataset => {
+        expect(dataset.backgroundColor).toBe(dataset.borderColor);
+      });
+    });
   });
 
   describe('prepareChartData (transposed)', () => {

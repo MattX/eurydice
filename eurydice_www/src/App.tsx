@@ -9,6 +9,7 @@ import Header from "./components/Header";
 import { DarkModeSwitcher } from "./components/DarkModeSwitcher";
 import EurydiceWorker from "./worker?worker";
 import { Toaster } from "react-hot-toast";
+import { Group, Panel, Separator } from "react-resizable-panels";
 
 let worker = new WorkerWrapper(new EurydiceWorker());
 
@@ -30,8 +31,19 @@ function AppInner() {
     [],
   );
   const [showTutorial, setShowTutorial] = React.useState(false);
+  const [isDesktopLayout, setIsDesktopLayout] = React.useState(() =>
+    window.matchMedia("(min-width: 768px)").matches
+  );
   const runLiveRef = useRef(true);
   const runningRef = useRef(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 768px)");
+    const updateLayout = () => setIsDesktopLayout(mediaQuery.matches);
+
+    mediaQuery.addEventListener("change", updateLayout);
+    return () => mediaQuery.removeEventListener("change", updateLayout);
+  }, []);
 
   function setRunLive(val: boolean) {
     runLiveRef.current = val;
@@ -153,33 +165,60 @@ function AppInner() {
     />
   ) : null;
 
+  const editorPane = (
+    <div className="h-full p-4">
+      {tutorial}
+      <EditorPane
+        editorText={editorText}
+        onChange={onChange}
+        runLive={runLive}
+        setRunLive={setRunLive}
+        running={running}
+        run={() => run(editorText)}
+        error={error}
+        printOutputs={printOutputs}
+      />
+    </div>
+  );
+
+  const outputPane = (
+    <div className="output-pane h-full p-4">
+      <OutputPane distributions={output} />
+    </div>
+  );
+
   return (
     <>
       <div><Toaster /></div>
-      <div className="flex flex-col min-h-screen">
+      <div className="flex min-h-screen flex-col md:h-dvh md:min-h-0 md:overflow-hidden">
         <Header
           showTutorial={true}
           onTutorialClick={() => setShowTutorial(true)}
         />
-        <div className="flex grow md:min-h-[400px]">
-          <div className="flex w-full flex-col items-stretch md:flex-row">
-            <div className="w-full border-b p-4 md:w-1/2 md:border-r md:border-b-0">
-              {tutorial}
-              <EditorPane
-                editorText={editorText}
-                onChange={onChange}
-                runLive={runLive}
-                setRunLive={setRunLive}
-                running={running}
-                run={() => run(editorText)}
-                error={error}
-                printOutputs={printOutputs}
+        <div className="flex grow md:min-h-0">
+          {isDesktopLayout ? (
+            <Group
+              className="w-full"
+              orientation="horizontal"
+              id="editor-results"
+            >
+              <Panel id="editor" defaultSize="50%" minSize="25%">
+                {editorPane}
+              </Panel>
+              <Separator
+                className="split-pane-separator"
+                aria-label="Resize editor and results panes"
               />
+              <Panel id="results" defaultSize="50%" minSize="25%">
+                {outputPane}
+              </Panel>
+            </Group>
+          ) : (
+            <div className="flex w-full flex-col items-stretch">
+              <div className="w-full border-b">{editorPane}</div>
+              <div className="w-full">{outputPane}</div>
             </div>
-            <div className="w-full p-4 md:w-1/2">
-              <OutputPane distributions={output} />
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </>

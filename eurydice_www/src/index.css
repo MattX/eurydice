@@ -200,4 +200,39 @@
     outline-offset: 0;
     border-color: var(--accent-border);
   }
+
+  /* Editor/results split pane -------------------------------------- */
+  .split-pane-separator {
+    position: relative;
+    width: 1px;
+    background: var(--border);
+    transition: background-color 150ms ease;
+  }
+  .split-pane-separator::after {
+    position: absolute;
+    inset-block: 0;
+    left: 50%;
+    width: 12px;
+    content: '';
+    transform: translateX(-50%);
+  }
+  .split-pane-separator:hover,
+  .split-pane-separator[data-separator='active'] {
+    background: var(--accent);
+  }
+  .split-pane-separator:focus-visible {
+    background: var(--accent);
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Keep charts useful at narrow widths without letting wide panes make
+     them taller than the available laptop viewport. */
+  .output-pane {
+    container-type: inline-size;
+  }
+  .chart-container {
+    position: relative;
+    height: clamp(18rem, min(62.5cqw, 55dvh), 34rem);
+  }
 }

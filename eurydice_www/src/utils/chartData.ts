@@ -109,7 +109,12 @@ export function prepareChartData(
     }
 
     const color = colorGenerator.nextColor();
-    datasets.push({ label: name, data, borderColor: color });
+    datasets.push({
+      label: name,
+      data,
+      borderColor: color,
+      backgroundColor: color,
+    });
   }
   return {
     labels: range.map((x) => x.toString()),
