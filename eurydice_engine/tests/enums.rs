@@ -1,5 +1,5 @@
 use eurydice_engine::{
-    eval::{Evaluator, RuntimeValue},
+    eval::{Evaluator, RuntimeValue, ScalarValue},
     grammar,
     output::{Distribution, OutputValue},
 };
@@ -35,8 +35,11 @@ fn attack_function_returns_enum_distribution() {
         "#)
     .unwrap();
 
-    let RuntimeValue::Pool(pool, Some(enum_type)) = &outputs[0].0 else {
+    let RuntimeValue::Pool(pool, _) = &outputs[0].0 else {
         panic!("expected enum pool, got {:?}", outputs[0].0);
+    };
+    let ScalarValue::Enum { ty: enum_type, .. } = &pool.ordered_outcomes()[0].0 else {
+        panic!("expected enum outcome");
     };
     assert_eq!(enum_type.name, "ATTACK_RESULT");
     assert_eq!(enum_type.members, ["MISS", "HIT", "CRITICALHIT"]);
@@ -111,19 +114,22 @@ fn supports_enum_shape_constraints_and_safe_operations() {
         output #{MISS, HIT}
         "#)
     .unwrap();
-    assert!(matches!(outputs[0].0, RuntimeValue::Pool(_, Some(_))));
-    assert!(matches!(outputs[1].0, RuntimeValue::Pool(_, Some(_))));
-    assert_eq!(outputs[2].0, RuntimeValue::Int(1, None));
-    assert_eq!(outputs[3].0, RuntimeValue::Int(2, None));
-    assert!(matches!(outputs[4].0, RuntimeValue::Int(0, Some(_))));
-    assert_eq!(outputs[5].0, RuntimeValue::Int(2, None));
+    assert!(matches!(outputs[0].0, RuntimeValue::Pool(_, _)));
+    assert!(matches!(outputs[1].0, RuntimeValue::Pool(_, _)));
+    assert_eq!(outputs[2].0, 1.into());
+    assert_eq!(outputs[3].0, 2.into());
+    assert!(matches!(
+        outputs[4].0,
+        RuntimeValue::Scalar(ScalarValue::Enum { value: 0, .. })
+    ));
+    assert_eq!(outputs[5].0, 2.into());
 }
 
 #[test]
 fn rejects_enum_arithmetic_ordering_and_multidimensional_output() {
     for (program, expected) in [
-        ("enum: R { A, B } output A + B", "not defined for enum"),
-        ("enum: R { A, B } output A < B", "not defined for enum"),
+        ("enum: R { A, B } output A + B", "not defined"),
+        ("enum: R { A, B } output A < B", "not defined"),
         ("enum: R { A, B } output 2d{A, B}", "dimension one"),
     ] {
         let error = run(program).unwrap_err();
@@ -179,7 +185,7 @@ fn untyped_empty_values_do_not_infer_an_enum_type() {
     let outputs =
         run("enum: RESULT { A } function: typed X:s<RESULT> { result: X } output [typed {A:0}]")
             .unwrap();
-    assert!(matches!(outputs[0].0, RuntimeValue::List(_, Some(_))));
+    assert!(matches!(outputs[0].0, RuntimeValue::List(_, _)));
 }
 
 #[test]

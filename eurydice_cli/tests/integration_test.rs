@@ -102,9 +102,20 @@ fn test_anydice_programs() {
                 .zip(expected_results_strings.iter())
             {
                 let d = match value {
-                    eval::RuntimeValue::Int(i, _) => Pool::from_list(1, vec![i]),
-                    eval::RuntimeValue::List(is, _) => Pool::from_list(1, is.to_vec()),
-                    eval::RuntimeValue::Pool(d, _) => (*d).clone(),
+                    eval::RuntimeValue::Scalar(value) => {
+                        Pool::from_list(1, vec![value.as_int().expect("numeric fixture output")])
+                    }
+                    eval::RuntimeValue::List(values, _) => Pool::from_list(
+                        1,
+                        values
+                            .iter()
+                            .map(|value| value.as_int().expect("numeric fixture output"))
+                            .collect(),
+                    ),
+                    eval::RuntimeValue::Pool(d, _) => d
+                        .as_ref()
+                        .clone()
+                        .map_outcomes(|value| value.as_int().expect("numeric fixture output")),
                 };
                 let actual_result = create_expected_result(&name, &d);
                 if !compare_expected_results(&actual_result, expected) {
