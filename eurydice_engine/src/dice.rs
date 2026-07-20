@@ -21,16 +21,20 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
-/// Represents a pool of identical independent dice.
+/// Represents a pool of identical independent dice whose faces have type `T`.
+///
+/// The Icepool algorithm only needs outcomes to have a stable total order and
+/// equality. Numeric operations such as summing and adding pools are provided
+/// separately for `Pool<i32>`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Pool {
+pub struct Pool<T = i32> {
     dimension: u32,
     // Outcomes are ordered by their face value. The tuple represents (value, weight / count).
     // Outcomes must be unique and have nonzero weight.
-    ordered_outcomes: Vec<(i32, Natural)>,
+    ordered_outcomes: Vec<(T, Natural)>,
 }
 
-impl std::fmt::Display for Pool {
+impl std::fmt::Display for Pool<i32> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.dimension != 1 {
             write!(f, "{}", self.dimension)?;
@@ -74,7 +78,7 @@ struct SubPool {
 }
 
 impl SubPool {
-    fn initial(pool: &Pool) -> Self {
+    fn initial<T>(pool: &Pool<T>) -> Self {
         Self {
             dimension: pool.dimension,
             remaining_outcomes: pool.ordered_outcomes.len(),
@@ -82,7 +86,7 @@ impl SubPool {
     }
 }
 
-impl Pool {
+impl Pool<i32> {
     /// Creates a new pool of `n` dice, each with `sides` sides.
     pub fn ndn(dimension: u32, sides: u32) -> Self {
         Self {
@@ -93,8 +97,40 @@ impl Pool {
         }
     }
 
+    /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
+    pub fn sum(&self) -> Pool<i32> {
+        if self.is_empty() {
+            return Pool {
+                dimension: 1,
+                ordered_outcomes: vec![(0, Natural::ONE)],
+            };
+        } else if self.dimension == 1 {
+            return self.clone();
+        }
+        let keep_list = vec![true; self.dimension as usize];
+        self.apply(SUM_MAPPER, &keep_list).into_iter().collect()
+    }
+
+    pub fn sum_with_keep_list(&self, keep_list: &[bool]) -> Pool<i32> {
+        self.apply(SUM_MAPPER, keep_list).into_iter().collect()
+    }
+
+    pub fn add(&self, other: &Pool<i32>) -> Pool<i32> {
+        let other_summed = other.sum();
+        self.sum().flat_map(|outcome| {
+            other_summed
+                .map(|other_outcome| outcome[0] + other_outcome[0])
+                .into()
+        })
+    }
+}
+
+impl<T> Pool<T>
+where
+    T: Clone + Ord,
+{
     /// Creates a new pool from a list of outcomes. Repeats are allowed and will count as multiple weights.
-    pub fn from_list(dimension: u32, outcomes: Vec<i32>) -> Self {
+    pub fn from_list(dimension: u32, outcomes: Vec<T>) -> Self {
         let mut outcomes_map = BTreeMap::new();
         for outcome in outcomes {
             *outcomes_map.entry(outcome).or_insert(Natural::ZERO) += Natural::ONE;
@@ -120,16 +156,19 @@ impl Pool {
 
     /// Maps the outcomes of the pool using the given function. The function can be non-injective,
     /// in which case the weights of the outcomes are summed.
-    pub fn map_outcomes(self, f: impl Fn(i32) -> i32) -> Self {
+    pub fn map_outcomes<U>(self, f: impl Fn(T) -> U) -> Pool<U>
+    where
+        U: Clone + Ord,
+    {
         let mut new_outcomes = BTreeMap::new();
         for (outcome, weight) in self.ordered_outcomes.into_iter() {
             *new_outcomes
                 .entry(f(outcome))
                 .or_insert(Natural::from(0usize)) += weight;
         }
-        Self {
+        Pool {
             ordered_outcomes: new_outcomes.into_iter().collect(),
-            ..self
+            dimension: self.dimension,
         }
     }
 
@@ -145,7 +184,7 @@ impl Pool {
         }
     }
 
-    fn from_weights(outcomes: impl Iterator<Item = (i32, Natural)>) -> Self {
+    fn from_weights(outcomes: impl Iterator<Item = (T, Natural)>) -> Self {
         let mut ordered_outcomes = outcomes.collect::<Vec<_>>();
         ordered_outcomes.sort_unstable();
         Self {
@@ -157,7 +196,7 @@ impl Pool {
     pub fn apply<S, F>(&self, mapper: StateMapper<S, F>, keep_list: &[bool]) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
-        F: Fn(&S, i32, u32) -> S,
+        F: Fn(&S, &T, u32) -> S,
     {
         debug_assert_eq!(
             keep_list.len(),
@@ -180,7 +219,7 @@ impl Pool {
     ) -> HashMap<S, Natural>
     where
         S: Clone + Hash + Eq,
-        F: Fn(&S, i32, u32) -> S,
+        F: Fn(&S, &T, u32) -> S,
     {
         if let Some(value) = cache.get(&sub_pool) {
             return value.clone();
@@ -190,7 +229,7 @@ impl Pool {
         let result = if new_remaining_outcomes == 0 {
             let num_kept = self.num_kept(keep_list, sub_pool, sub_pool.dimension);
             [(
-                (mapper.f)(&mapper.initial_state, *outcome, num_kept),
+                (mapper.f)(&mapper.initial_state, outcome, num_kept),
                 weight.pow(sub_pool.dimension as u64),
             )]
             .into()
@@ -207,7 +246,7 @@ impl Pool {
                 };
                 let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper, keep_list);
                 for (state, count) in sub_sub_pool_result {
-                    let inner_state = (mapper.f)(&state, *outcome, num_kept);
+                    let inner_state = (mapper.f)(&state, outcome, num_kept);
                     // There were binom(self.n, num_with_outcome) ways to get this outcome,
                     // times weight^num_with_outcome if the weight is >1.
                     *result.entry(inner_state).or_default() += count
@@ -230,41 +269,24 @@ impl Pool {
         u32::try_from(count).expect("count greater than max u32")
     }
 
-    /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
-    pub fn sum(&self) -> Pool {
-        if self.is_empty() {
-            return Pool {
-                dimension: 1,
-                ordered_outcomes: vec![(0, Natural::ONE)],
-            };
-        } else if self.dimension == 1 {
-            return self.clone();
-        }
-        let keep_list = vec![true; self.dimension as usize];
-        self.apply(SUM_MAPPER, &keep_list).into_iter().collect()
-    }
-
-    pub fn sum_with_keep_list(&self, keep_list: &[bool]) -> Pool {
-        self.apply(SUM_MAPPER, keep_list).into_iter().collect()
-    }
-
-    pub fn into_die_iter(self) -> impl Iterator<Item = (i32, Natural)> {
+    pub fn into_die_iter(self) -> impl Iterator<Item = (T, Natural)> {
         self.ordered_outcomes.into_iter()
     }
 
-    pub fn ordered_outcomes(&self) -> &[(i32, Natural)] {
+    pub fn ordered_outcomes(&self) -> &[(T, Natural)] {
         &self.ordered_outcomes
     }
 
-    pub fn multiset_iterator(&self) -> PoolMultisetIterator {
+    pub fn multiset_iterator(&self) -> PoolMultisetIterator<'_, T> {
         PoolMultisetIterator::new(self)
     }
 
     /// This functions call `f` with each multiset outcome from the pool. The distributions returned
     /// by `f` are flatmapped together to create a new distribution, stored as a size-1 pool.
-    pub fn flat_map<F>(&self, f: F) -> Self
+    pub fn flat_map<U, F>(&self, f: F) -> Pool<U>
     where
-        F: Fn(&[i32]) -> BTreeMap<i32, Natural>,
+        U: Clone + Ord,
+        F: Fn(&[T]) -> BTreeMap<U, Natural>,
     {
         // Positions will take all values between [0, 0, ..., 0] and [self.n - 1, self.n - 1, ..., self.n - 1],
         // in lexicographic order.
@@ -294,24 +316,16 @@ impl Pool {
                 (outcome, numerator)
             })
             .collect::<BTreeMap<_, _>>();
-        Pool::from_weights(new_outcomes.into_iter())
+        Pool::<U>::from_weights(new_outcomes.into_iter())
     }
 
     /// Maps multiset outcomes to a single value each.
-    pub fn map<F>(&self, f: F) -> Self
+    pub fn map<U, F>(&self, f: F) -> Pool<U>
     where
-        F: Fn(&[i32]) -> i32,
+        U: Clone + Ord,
+        F: Fn(&[T]) -> U,
     {
         self.flat_map(|outcome| BTreeMap::from([(f(outcome), 1usize.into())]))
-    }
-
-    pub fn add(&self, other: &Pool) -> Pool {
-        let other_summed = other.sum();
-        self.sum().flat_map(|outcome| {
-            other_summed
-                .map(|other_outcome| outcome[0] + other_outcome[0])
-                .into()
-        })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -320,8 +334,8 @@ impl Pool {
 }
 
 /// Iterator over multisets of outcomes in a pool, with their weight.
-pub struct PoolMultisetIterator<'a> {
-    pool: &'a Pool,
+pub struct PoolMultisetIterator<'a, T = i32> {
+    pool: &'a Pool<T>,
     positions: Vec<usize>,
     // Factorial of the number of outcomes in the dice pool.
     factorial: Natural,
@@ -329,8 +343,8 @@ pub struct PoolMultisetIterator<'a> {
     done: bool,
 }
 
-impl<'a> PoolMultisetIterator<'a> {
-    fn new(pool: &'a Pool) -> Self {
+impl<'a, T> PoolMultisetIterator<'a, T> {
+    fn new(pool: &'a Pool<T>) -> Self {
         Self {
             pool,
             positions: vec![0; pool.dimension as usize],
@@ -371,8 +385,11 @@ impl<'a> PoolMultisetIterator<'a> {
     }
 }
 
-impl<'a> Iterator for PoolMultisetIterator<'a> {
-    type Item = (Vec<i32>, Natural);
+impl<T> Iterator for PoolMultisetIterator<'_, T>
+where
+    T: Clone + Eq,
+{
+    type Item = (Vec<T>, Natural);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.done || self.pool.ordered_outcomes.is_empty() || self.pool.dimension == 0 {
@@ -381,8 +398,8 @@ impl<'a> Iterator for PoolMultisetIterator<'a> {
         let outcome = self
             .positions
             .iter()
-            .map(|&i| self.pool.ordered_outcomes[i].0)
-            .collect::<Vec<i32>>();
+            .map(|&i| self.pool.ordered_outcomes[i].0.clone())
+            .collect::<Vec<T>>();
 
         // Compute the number of ways to get this outcome, and multiply by the weight of all
         // elements that make it up.
@@ -400,16 +417,19 @@ impl<'a> Iterator for PoolMultisetIterator<'a> {
 }
 
 /// An interator over the cross product of several PoolMultisetIterators.
-pub struct MultisetCrossProductIterator<'a> {
-    sub_iterators: Vec<PoolMultisetIterator<'a>>,
+pub struct MultisetCrossProductIterator<'a, T = i32> {
+    sub_iterators: Vec<PoolMultisetIterator<'a, T>>,
     started: bool,
     /// None if the iterator is finished. If Some, the outer vector has the same
     /// length as `sub_iterators`.
-    values: Option<Vec<(Rc<Vec<i32>>, Natural)>>,
+    values: Option<Vec<(Rc<Vec<T>>, Natural)>>,
 }
 
-impl<'a> MultisetCrossProductIterator<'a> {
-    pub fn new(sub_iterators: Vec<PoolMultisetIterator<'a>>) -> Self {
+impl<'a, T> MultisetCrossProductIterator<'a, T>
+where
+    T: Clone + Eq,
+{
+    pub fn new(sub_iterators: Vec<PoolMultisetIterator<'a, T>>) -> Self {
         let mut result = Self {
             sub_iterators,
             started: false,
@@ -457,10 +477,13 @@ impl<'a> MultisetCrossProductIterator<'a> {
     }
 }
 
-impl<'a> Iterator for MultisetCrossProductIterator<'a> {
-    type Item = (Vec<Rc<Vec<i32>>>, Natural);
+impl<T> Iterator for MultisetCrossProductIterator<'_, T>
+where
+    T: Clone + Eq,
+{
+    type Item = (Vec<Rc<Vec<T>>>, Natural);
 
-    fn next(&mut self) -> Option<(Vec<Rc<Vec<i32>>>, Natural)> {
+    fn next(&mut self) -> Option<Self::Item> {
         if !self.started {
             self.started = true;
         } else {
@@ -480,7 +503,7 @@ impl<'a> Iterator for MultisetCrossProductIterator<'a> {
 /// For each group of consecutive equal values in the outcomes, this computes
 /// factorial(numer of same outcomes). The result is the product of all these
 /// factorials.
-fn item_factorials(outcome: &[i32]) -> Natural {
+fn item_factorials<T: Eq>(outcome: &[T]) -> Natural {
     let mut product = Natural::ONE;
     let mut count = 1u64;
     for i in 1..outcome.len() {
@@ -496,8 +519,8 @@ fn item_factorials(outcome: &[i32]) -> Natural {
     product
 }
 
-impl FromIterator<(i32, Natural)> for Pool {
-    fn from_iter<I: IntoIterator<Item = (i32, Natural)>>(iter: I) -> Self {
+impl<T: Ord> FromIterator<(T, Natural)> for Pool<T> {
+    fn from_iter<I: IntoIterator<Item = (T, Natural)>>(iter: I) -> Self {
         let mut ordered_outcomes = iter.into_iter().collect::<Vec<_>>();
         ordered_outcomes.sort_unstable();
         Self {
@@ -507,8 +530,8 @@ impl FromIterator<(i32, Natural)> for Pool {
     }
 }
 
-impl From<Vec<(i32, Natural)>> for Pool {
-    fn from(ordered_outcomes: Vec<(i32, Natural)>) -> Self {
+impl<T> From<Vec<(T, Natural)>> for Pool<T> {
+    fn from(ordered_outcomes: Vec<(T, Natural)>) -> Self {
         Self {
             dimension: 1,
             ordered_outcomes,
@@ -516,9 +539,9 @@ impl From<Vec<(i32, Natural)>> for Pool {
     }
 }
 
-impl From<Pool> for BTreeMap<i32, Natural> {
-    fn from(pool: Pool) -> Self {
-        pool.into_die_iter().collect()
+impl<T: Ord> From<Pool<T>> for BTreeMap<T, Natural> {
+    fn from(pool: Pool<T>) -> Self {
+        pool.ordered_outcomes.into_iter().collect()
     }
 }
 
@@ -559,22 +582,18 @@ pub fn reroll(die: Vec<(i32, Natural)>, on: &[i32], depth: usize) -> Vec<(i32, N
     die_dist.ordered_outcomes
 }
 
-pub struct StateMapper<S, F>
-where
-    S: Clone + Hash + Eq,
-    F: Fn(&S, i32, u32) -> S,
-{
+pub struct StateMapper<S, F> {
     initial_state: S,
     f: F,
 }
 
-fn sum_mapper(state: &i32, outcome: i32, count: u32) -> i32 {
-    state + outcome * (count as i32)
+fn sum_mapper(state: &i32, outcome: &i32, count: u32) -> i32 {
+    state + outcome * i32::try_from(count).expect("count fits in i32")
 }
 
 /// Mapper that sums the outcomes.
 #[allow(clippy::type_complexity)]
-pub const SUM_MAPPER: StateMapper<i32, fn(&i32, i32, u32) -> i32> = StateMapper {
+pub const SUM_MAPPER: StateMapper<i32, fn(&i32, &i32, u32) -> i32> = StateMapper {
     initial_state: 0,
     f: sum_mapper,
 };
@@ -713,13 +732,13 @@ mod tests {
         target: i32,
     ) -> StateMapper<
         MaxDiceToReachState,
-        impl Fn(&MaxDiceToReachState, i32, u32) -> MaxDiceToReachState,
+        impl Fn(&MaxDiceToReachState, &i32, u32) -> MaxDiceToReachState,
     > {
         StateMapper {
             initial_state: (Some(0), 0),
-            f: move |state, outcome, count| {
+            f: move |state: &MaxDiceToReachState, outcome: &i32, count| {
                 let count = count as i32;
-                let (sum, rolls) = state;
+                let (sum, rolls) = *state;
                 let sum = match sum {
                     Some(sum) => sum,
                     None => {
@@ -1089,6 +1108,64 @@ mod tests {
         assert_eq!(map, expected);
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum SymbolicOutcome {
+        Miss,
+        Hit,
+    }
+
+    #[test]
+    fn test_generic_pool_icepool_application() {
+        let pool = Pool::from_list(
+            2,
+            vec![
+                SymbolicOutcome::Miss,
+                SymbolicOutcome::Hit,
+                SymbolicOutcome::Hit,
+            ],
+        );
+        let mapper = StateMapper {
+            initial_state: 0,
+            f: |hits: &u32, outcome: &SymbolicOutcome, count| {
+                hits + u32::from(*outcome == SymbolicOutcome::Hit) * count
+            },
+        };
+
+        let result = pool.apply(mapper, &[true, true]);
+
+        assert_eq!(
+            result,
+            [
+                (0, Natural::from(1u32)),
+                (1, Natural::from(4u32)),
+                (2, Natural::from(4u32)),
+            ]
+            .into()
+        );
+    }
+
+    #[test]
+    fn test_generic_pool_maps_to_tuple_outcomes() {
+        let pool = Pool::from_list(
+            1,
+            vec![
+                SymbolicOutcome::Miss,
+                SymbolicOutcome::Hit,
+                SymbolicOutcome::Hit,
+            ],
+        );
+
+        let result: Pool<(u8, u8)> = pool.map(|outcomes| match outcomes[0] {
+            SymbolicOutcome::Miss => (1, 0),
+            SymbolicOutcome::Hit => (0, 1),
+        });
+
+        assert_eq!(
+            result.ordered_outcomes(),
+            &[((0, 1), Natural::from(2u32)), ((1, 0), Natural::from(1u32)),]
+        );
+    }
+
     #[test]
     // Computes (d3 @ d4) in AnyDice or Icepool notation.
     fn test_flat_map() {
@@ -1195,7 +1272,7 @@ mod tests {
 
     #[test]
     fn test_multiset_iterator_no_outcomes() {
-        let pool = Pool::from_list(2, vec![]);
+        let pool: Pool = Pool::from_list(2, vec![]);
         let mut iter = pool.multiset_iterator();
         assert_eq!(iter.next(), None);
         assert_eq!(iter.next(), None);
@@ -1320,14 +1397,24 @@ mod tests {
 
     #[test]
     fn test_reroll_d4_on_1_and_4() {
-        let die = vec![(1, Natural::ONE), (2, Natural::ONE), (3, Natural::ONE), (4, Natural::ONE)];
+        let die = vec![
+            (1, Natural::ONE),
+            (2, Natural::ONE),
+            (3, Natural::ONE),
+            (4, Natural::ONE),
+        ];
 
         let result = reroll(die, &[1, 4], 2);
 
         assert_eq!(result.len(), 4);
         assert_eq!(
             result,
-            vec![(1, 4u32.into()), (2, 28u32.into()), (3, 28u32.into()), (4, 4u32.into())]
+            vec![
+                (1, 4u32.into()),
+                (2, 28u32.into()),
+                (3, 28u32.into()),
+                (4, 4u32.into())
+            ]
         );
     }
 }
