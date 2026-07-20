@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import mdx from "@mdx-js/rollup";
+import rehypeKatex from "rehype-katex";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import { remarkAlert } from "remark-github-blockquote-alert";
+import remarkMath from "remark-math";
 import wasm from "vite-plugin-wasm";
 import { VitePWA } from "vite-plugin-pwa";
 
@@ -14,8 +16,8 @@ export default defineConfig({
     {
       enforce: "pre",
       ...mdx({
-        remarkPlugins: [remarkGfm, remarkAlert],
-        rehypePlugins: [rehypeSlug],
+        remarkPlugins: [remarkGfm, remarkAlert, remarkMath],
+        rehypePlugins: [rehypeKatex, rehypeSlug],
       }),
     },
     react({ include: /\.(jsx|js|mdx|md|tsx|ts)$/ }),
