@@ -2,7 +2,7 @@ name: Deploy to Cloudflare Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: ["**"]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
   deployments: write
 
 concurrency:
-  group: cloudflare-pages-production
+  group: cloudflare-pages-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     name: Build and deploy
     runs-on: ubuntu-latest
     environment:
-      name: production
+      name: ${{ github.ref_name == 'main' && 'production' || 'dev' }}
       url: ${{ steps.deploy.outputs.deployment-url }}
 
     steps:
@@ -52,5 +52,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy eurydice_www/dist --project-name=eurydice --branch=main
+          command: pages deploy eurydice_www/dist --project-name=eurydice --branch=${{ github.ref_name }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
