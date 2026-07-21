@@ -14,7 +14,7 @@ pub enum OutputValue {
     EnumList(EnumSequence),
     Distribution(Distribution),
     Tuple(TupleScalar),
-    TupleList(Vec<TupleScalar>),
+    TupleList(TupleSequence),
     TupleDistribution(TupleDistribution),
 }
 
@@ -41,20 +41,37 @@ pub struct Distribution {
     pub labels: Option<Vec<String>>,
 }
 
+/// Describes a single tuple field, shared by every outcome of a tuple output.
+///
+/// Field values in the outcomes themselves are always raw `i32`s; for an enum
+/// field the value is the member's ordinal, and the labels here map it back to
+/// a display name. Hoisting the schema up here keeps the (potentially large)
+/// list of outcomes free of repeated enum metadata.
 #[derive(Debug, Clone, Serialize)]
-pub struct TupleScalar {
-    pub values: Vec<TupleField>,
+pub enum TupleFieldSchema {
+    Int,
+    Enum {
+        enum_name: String,
+        labels: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub enum TupleField {
-    Int(i32),
-    Enum(EnumScalar),
+pub struct TupleScalar {
+    pub fields: Vec<TupleFieldSchema>,
+    pub values: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TupleSequence {
+    pub fields: Vec<TupleFieldSchema>,
+    pub values: Vec<Vec<i32>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TupleDistribution {
-    pub probabilities: Vec<(TupleScalar, f64)>,
+    pub fields: Vec<TupleFieldSchema>,
+    pub probabilities: Vec<(Vec<i32>, f64)>,
 }
 
 impl From<RuntimeValue> for OutputValue {
@@ -69,7 +86,10 @@ impl From<RuntimeValue> for OutputValue {
                 })
             }
             RuntimeValue::Scalar(ScalarValue::Tuple(values)) => {
-                OutputValue::Tuple(tuple_output(&values))
+                OutputValue::Tuple(TupleScalar {
+                    fields: tuple_schema(&values),
+                    values: tuple_values(&values),
+                })
             }
             RuntimeValue::List(values, _) => list_output(&values),
             RuntimeValue::Pool(pool, _) => pool_output(&pool),
@@ -77,27 +97,32 @@ impl From<RuntimeValue> for OutputValue {
     }
 }
 
-fn enum_output(value: i32, ty: &crate::eval::EnumType) -> EnumScalar {
-    EnumScalar {
-        value,
-        enum_name: ty.name.clone(),
-        labels: ty.members.clone(),
-    }
+/// Derives the shared per-field schema from a representative tuple. Since tuple
+/// pools and lists are homogeneous, any single outcome describes the whole set.
+fn tuple_schema(values: &[ScalarValue]) -> Vec<TupleFieldSchema> {
+    values
+        .iter()
+        .map(|value| match value {
+            ScalarValue::Int(_) => TupleFieldSchema::Int,
+            ScalarValue::Enum { ty, .. } => TupleFieldSchema::Enum {
+                enum_name: ty.name.clone(),
+                labels: ty.members.clone(),
+            },
+            ScalarValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
+        })
+        .collect()
 }
 
-fn tuple_output(values: &[ScalarValue]) -> TupleScalar {
-    TupleScalar {
-        values: values
-            .iter()
-            .map(|value| match value {
-                ScalarValue::Int(value) => TupleField::Int(*value),
-                ScalarValue::Enum { value, ty } => TupleField::Enum(enum_output(*value, ty)),
-                ScalarValue::Tuple(_) => {
-                    unreachable!("nested tuples are rejected by the evaluator")
-                }
-            })
-            .collect(),
-    }
+/// Flattens a tuple's fields to raw `i32`s; enum fields become their ordinal.
+fn tuple_values(values: &[ScalarValue]) -> Vec<i32> {
+    values
+        .iter()
+        .map(|value| match value {
+            ScalarValue::Int(value) => *value,
+            ScalarValue::Enum { value, .. } => *value,
+            ScalarValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
+        })
+        .collect()
 }
 
 fn list_output(values: &[ScalarValue]) -> OutputValue {
@@ -119,15 +144,16 @@ fn list_output(values: &[ScalarValue]) -> OutputValue {
             enum_name: ty.name.clone(),
             labels: ty.members.clone(),
         }),
-        Some(ScalarValue::Tuple(_)) => OutputValue::TupleList(
-            values
+        Some(ScalarValue::Tuple(first)) => OutputValue::TupleList(TupleSequence {
+            fields: tuple_schema(first),
+            values: values
                 .iter()
                 .map(|value| match value {
-                    ScalarValue::Tuple(fields) => tuple_output(fields),
+                    ScalarValue::Tuple(fields) => tuple_values(fields),
                     _ => unreachable!("homogeneous tuple sequence"),
                 })
                 .collect(),
-        ),
+        }),
     }
 }
 
@@ -164,11 +190,12 @@ fn pool_output(pool: &Pool<ScalarValue>) -> OutputValue {
             enum_name: Some(ty.name.clone()),
             labels: Some(ty.members.clone()),
         }),
-        Some(ScalarValue::Tuple(_)) => OutputValue::TupleDistribution(TupleDistribution {
+        Some(ScalarValue::Tuple(first)) => OutputValue::TupleDistribution(TupleDistribution {
+            fields: tuple_schema(first),
             probabilities: to_probabilities_generic(pool.ordered_outcomes())
                 .into_iter()
                 .map(|(value, probability)| match value {
-                    ScalarValue::Tuple(fields) => (tuple_output(&fields), probability),
+                    ScalarValue::Tuple(fields) => (tuple_values(&fields), probability),
                     _ => unreachable!("homogeneous tuple pool"),
                 })
                 .collect(),

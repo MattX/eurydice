@@ -1,7 +1,7 @@
 use eurydice_engine::{
     eval::{Evaluator, RuntimeValue, ScalarValue},
     grammar,
-    output::{Distribution, OutputValue},
+    output::{Distribution, OutputValue, TupleFieldSchema},
 };
 
 fn run(program: &str) -> Result<Vec<(RuntimeValue, String)>, String> {
@@ -203,4 +203,28 @@ fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
     assert_eq!(probabilities.len(), 2);
     assert_eq!(enum_name.as_deref(), Some("RESULT"));
     assert_eq!(labels.unwrap(), ["MISS", "HIT"]);
+}
+
+#[test]
+fn serialized_tuple_distribution_hoists_field_schema() {
+    let mut outputs =
+        run("enum: RESULT { MISS, HIT } A: d2 B: d{MISS, HIT} output [tuple A B]").unwrap();
+    let output = OutputValue::from(outputs.remove(0).0);
+    let OutputValue::TupleDistribution(dist) = output else {
+        panic!("expected tuple distribution");
+    };
+
+    // The per-field schema is stored once, not repeated on each outcome.
+    assert!(matches!(dist.fields[0], TupleFieldSchema::Int));
+    let TupleFieldSchema::Enum { enum_name, labels } = &dist.fields[1] else {
+        panic!("expected enum field schema");
+    };
+    assert_eq!(enum_name, "RESULT");
+    assert_eq!(labels, &["MISS", "HIT"]);
+
+    // Every outcome is a raw i32 vector matching the field count, and the
+    // probabilities form a valid distribution.
+    assert!(dist.probabilities.iter().all(|(values, _)| values.len() == 2));
+    let total: f64 = dist.probabilities.iter().map(|(_, p)| p).sum();
+    assert!((total - 1.0).abs() < 1e-9, "probabilities should sum to 1");
 }
