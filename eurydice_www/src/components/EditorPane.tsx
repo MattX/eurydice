@@ -100,10 +100,11 @@ export default function EditorPane(props: EditorPaneProps) {
         >
           Run
         </button>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
           {props.running && <Spinner />}
           {outputIcon}
           {errorIcon}
+          {props.exportButton}
         </div>
       </div>
       <div
@@ -134,6 +135,8 @@ export interface EditorPaneProps {
 
   error: { from: number; to: number; message: string } | null;
   printOutputs: [string, string][];
+
+  exportButton?: React.ReactNode;
 }
 
 const parserWithMetadata = parser.configure({

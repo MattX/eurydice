@@ -11,6 +11,7 @@ import {
   normalizeTupleDistribution,
 } from "./utils/tupleData";
 import OutputPane from "./components/OutputPane";
+import ExportModal from "./components/ExportModal";
 import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
 import Header from "./components/Header";
@@ -43,6 +44,7 @@ function AppInner() {
     [],
   );
   const [showTutorial, setShowTutorial] = React.useState(false);
+  const [showExportModal, setShowExportModal] = React.useState(false);
   const [isDesktopLayout, setIsDesktopLayout] = React.useState(() =>
     window.matchMedia("(min-width: 768px)").matches
   );
@@ -195,6 +197,20 @@ function AppInner() {
     />
   ) : null;
 
+  // Export lives in the shared toolbar rather than an output section so it's
+  // clearly a global action over every output, and never wraps onto its own
+  // line inside the results pane.
+  const canExport = output.length > 0 || tupleOutput.length > 0;
+  const exportButton = (
+    <button
+      className="btn btn-secondary"
+      disabled={!canExport}
+      onClick={() => setShowExportModal(true)}
+    >
+      Export
+    </button>
+  );
+
   const editorPane = (
     <div className="h-full p-4">
       {tutorial}
@@ -207,6 +223,7 @@ function AppInner() {
         run={() => run(editorText)}
         error={error}
         printOutputs={printOutputs}
+        exportButton={exportButton}
       />
     </div>
   );
@@ -251,6 +268,19 @@ function AppInner() {
           )}
         </div>
       </div>
+
+      <ExportModal
+        distributions={output.map(([name, distribution]) => ({
+          name,
+          distribution,
+        }))}
+        tuples={tupleOutput.map(([name, distribution]) => ({
+          name,
+          distribution,
+        }))}
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+      />
     </>
   );
 }
