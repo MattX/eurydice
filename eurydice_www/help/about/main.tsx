@@ -1,10 +1,17 @@
-import React, { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { StrictMode } from "react";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import About from "../../src/About.mdx";
 import "../index.css";
 
-createRoot(document.getElementById("root")!).render(
+const root = document.getElementById("root")!;
+const page = (
   <StrictMode>
     <About />
-  </StrictMode>,
+  </StrictMode>
 );
+
+if (root.hasChildNodes()) {
+  hydrateRoot(root, page);
+} else {
+  createRoot(root).render(page);
+}
