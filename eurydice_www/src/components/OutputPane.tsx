@@ -1,6 +1,6 @@
 import React from "react";
 import { Bar, Line } from "react-chartjs-2";
-import { Distribution, TupleDistribution, TupleFieldSchema } from "../util";
+import { Distribution, TupleDistribution } from "../util";
 import {
   fieldName,
   computeMarginals,
@@ -34,10 +34,6 @@ Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
   const [showExportModal, setShowExportModal] = React.useState(false);
-  const { sections } = React.useMemo(
-    () => partitionDistributions(props.distributions),
-    [props.distributions]
-  );
   const tupleDistributions = props.tupleDistributions ?? [];
 
   const exportButton = (
@@ -52,21 +48,10 @@ export default function OutputPane(props: OutputPaneProps) {
   return (
     <>
       <div className="flex flex-col gap-6">
-        {sections.map((section, index) =>
-          section.kind === "numeric" ? (
-            <NumericOutputSection
-              key="numeric"
-              distributions={section.distributions}
-              actions={index === 0 ? exportButton : undefined}
-            />
-          ) : (
-            <EnumOutputSection
-              key={`enum:${section.group.enumName}`}
-              group={section.group}
-              actions={index === 0 ? exportButton : undefined}
-            />
-          )
-        )}
+        <OutputSections
+          distributions={props.distributions}
+          exportButton={exportButton}
+        />
         {tupleDistributions.map(([name, distribution], index) => (
           <TupleOutputSection
             key={`tuple:${index}:${name}`}
@@ -84,6 +69,43 @@ export default function OutputPane(props: OutputPaneProps) {
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
       />
+    </>
+  );
+}
+
+/**
+ * Renders a set of named distributions as grouped numeric/enum sections. Shared
+ * by the top-level output and by tuple marginals, so marginals get the same
+ * full-featured numeric chart (display modes, bracketing, table view).
+ */
+function OutputSections({
+  distributions,
+  exportButton,
+}: {
+  distributions: [string, Distribution][];
+  exportButton?: React.ReactNode;
+}) {
+  const { sections } = React.useMemo(
+    () => partitionDistributions(distributions),
+    [distributions]
+  );
+  return (
+    <>
+      {sections.map((section, index) =>
+        section.kind === "numeric" ? (
+          <NumericOutputSection
+            key="numeric"
+            distributions={section.distributions}
+            actions={index === 0 ? exportButton : undefined}
+          />
+        ) : (
+          <EnumOutputSection
+            key={`enum:${section.group.enumName}`}
+            group={section.group}
+            actions={index === 0 ? exportButton : undefined}
+          />
+        )
+      )}
     </>
   );
 }
@@ -330,7 +352,6 @@ function TupleOutputSection({
   name: string;
   distribution: TupleDistribution;
 }) {
-  const isDarkMode = React.useContext(DarkModeContext);
   const arity = distribution.fields.length;
 
   // A 2-D joint fits a grid (heatmap / contingency table); higher arities fall
@@ -348,6 +369,12 @@ function TupleOutputSection({
         ];
   const [view, setView] = React.useState<TupleView>(views[0].id);
 
+  // The selected view is remembered across edits, but editing the program can
+  // change a tuple's arity and with it the available views (e.g. a 2-D heatmap
+  // becoming a 3-D list). Fall back to the default whenever the remembered
+  // choice is no longer offered, so the toggle and the body stay in sync.
+  const activeView = views.some((v) => v.id === view) ? view : views[0].id;
+
   return (
     <section aria-label={`Tuple outcomes: ${name}`}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -358,7 +385,7 @@ function TupleOutputSection({
           {views.map((v) => (
             <button
               key={v.id}
-              aria-pressed={view === v.id}
+              aria-pressed={activeView === v.id}
               onClick={() => setView(v.id)}
             >
               {v.label}
@@ -366,20 +393,15 @@ function TupleOutputSection({
           ))}
         </div>
       </div>
-      {(view === "heatmap" || view === "table") && (
+      {(activeView === "heatmap" || activeView === "table") && (
         <TupleGrid
           distribution={distribution}
-          variant={view === "heatmap" ? "heatmap" : "table"}
-          isDarkMode={isDarkMode}
+          variant={activeView === "heatmap" ? "heatmap" : "table"}
         />
       )}
-      {view === "list" && <TupleListTable distribution={distribution} />}
-      {view === "marginals" && (
-        <TupleMarginals
-          name={name}
-          distribution={distribution}
-          isDarkMode={isDarkMode}
-        />
+      {activeView === "list" && <TupleListTable distribution={distribution} />}
+      {activeView === "marginals" && (
+        <TupleMarginals distribution={distribution} />
       )}
     </section>
   );
@@ -388,23 +410,48 @@ function TupleOutputSection({
 /** Largest number of cells we're willing to lay out for the 2-D grid views. */
 const MAX_GRID_CELLS = 2500;
 
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ];
+/**
+ * Matt Zucker's polynomial approximation of the viridis colormap, for
+ * `t` in [0, 1]. Viridis is perceptually uniform and colour-vision-deficiency
+ * friendly, so it reads correctly in both light and dark themes. Returns an
+ * `[r, g, b]` triple in 0–255.
+ */
+function viridis(t: number): [number, number, number] {
+  const x = Math.min(1, Math.max(0, t));
+  const c0 = [0.2777273272234177, 0.005407344544966578, 0.3340998053353061];
+  const c1 = [0.1050930431085774, 1.404613529898575, 1.384590162594685];
+  const c2 = [-0.3308618287255563, 0.214847559468213, 0.09509516302823659];
+  const c3 = [-4.634230498983486, -5.799100973351585, -19.33244095627987];
+  const c4 = [6.228269936347081, 14.17993336680509, 56.69055260068105];
+  const c5 = [4.776384997670288, -13.74514537774601, -65.35303263337234];
+  const c6 = [-5.435455855934631, 4.645852612178535, 26.3124352495832];
+  return [0, 1, 2].map((i) => {
+    const v =
+      c0[i] +
+      x * (c1[i] + x * (c2[i] + x * (c3[i] + x * (c4[i] + x * (c5[i] + x * c6[i])))));
+    return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  }) as [number, number, number];
+}
+
+/** Black or white text, whichever contrasts better with the given colour. */
+function textOn([r, g, b]: [number, number, number]): string {
+  return 0.299 * r + 0.587 * g + 0.114 * b > 140 ? "#1a2431" : "#ffffff";
+}
+
+function viridisGradientCss(): string {
+  const stops = [0, 0.25, 0.5, 0.75, 1].map((t) => {
+    const [r, g, b] = viridis(t);
+    return `rgb(${r}, ${g}, ${b}) ${Math.round(t * 100)}%`;
+  });
+  return `linear-gradient(to right, ${stops.join(", ")})`;
 }
 
 function TupleGrid({
   distribution,
   variant,
-  isDarkMode,
 }: {
   distribution: TupleDistribution;
   variant: "heatmap" | "table";
-  isDarkMode: boolean;
 }) {
   const pivot = React.useMemo(
     () => computeTuplePivot(distribution),
@@ -424,7 +471,6 @@ function TupleGrid({
   }
 
   const heatmap = variant === "heatmap";
-  const accent = hexToRgb(isDarkMode ? "#3987e5" : "#2a78d6");
   const showCellText = !heatmap || cellCount <= 256;
 
   const cellBase = "px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap";
@@ -441,6 +487,16 @@ function TupleGrid({
       <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
         Columns: {fieldName(xField, 0)} · Rows: {fieldName(yField, 1)}
       </div>
+      {heatmap && (
+        <div className="flex items-center gap-2 px-3 pb-2 text-xs text-[var(--text-muted)]">
+          <span>0%</span>
+          <span
+            className="h-2 flex-1 rounded"
+            style={{ background: viridisGradientCss() }}
+          />
+          <span>{pct(maxCell)}%</span>
+        </div>
+      )}
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
@@ -459,15 +515,16 @@ function TupleGrid({
               <td className={rowHeader}>{yAxis.labels[yi]}</td>
               {xAxis.values.map((x, xi) => {
                 const p = pivot.cell(x, y);
-                const intensity = maxCell > 0 ? p / maxCell : 0;
-                const style = heatmap
-                  ? {
-                      backgroundColor: `rgba(${accent[0]}, ${accent[1]}, ${accent[2]}, ${(
-                        intensity * 0.9
-                      ).toFixed(3)})`,
-                      color: intensity > 0.5 ? "#ffffff" : undefined,
-                    }
-                  : undefined;
+                // Zero-probability cells stay on the surface so the reachable
+                // outcomes are the only ones that carry colour.
+                let style: React.CSSProperties | undefined;
+                if (heatmap && p > 0) {
+                  const rgb = viridis(maxCell > 0 ? p / maxCell : 0);
+                  style = {
+                    backgroundColor: `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`,
+                    color: textOn(rgb),
+                  };
+                }
                 return (
                   <td
                     key={x}
@@ -576,54 +633,29 @@ function TupleListTable({ distribution }: { distribution: TupleDistribution }) {
   );
 }
 
-function TupleMarginals({
-  name,
-  distribution,
-  isDarkMode,
-}: {
-  name: string;
-  distribution: TupleDistribution;
-  isDarkMode: boolean;
-}) {
+function TupleMarginals({ distribution }: { distribution: TupleDistribution }) {
+  // Each field's marginal is a plain 1-D distribution, so route them through
+  // the same section renderer as top-level outputs: numeric marginals overlay
+  // on one full-featured chart (display modes, bracketing, table), and enum
+  // marginals become categorical sections.
   const marginals = React.useMemo(
     () => computeMarginals(distribution),
     [distribution]
   );
-
-  return (
-    <div className="flex flex-col gap-6">
-      {distribution.fields.map((schema: TupleFieldSchema, i) => (
-        <div key={i}>
-          <h3 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">
-            {fieldName(schema, i)}
-          </h3>
-          {schema.kind === "enum" ? (
-            <CategoricalChart
-              group={{
-                enumName: schema.enumName,
-                labels: schema.labels,
-                distributions: [[name, marginals[i]]],
-              }}
-              isDarkMode={isDarkMode}
-            />
-          ) : (
-            <NumericChart
-              distributions={[[name, marginals[i]]]}
-              mode={DisplayMode.Distribution}
-              isDarkMode={isDarkMode}
-            />
-          )}
-        </div>
-      ))}
-    </div>
+  const named = React.useMemo(
+    (): [string, Distribution][] =>
+      marginals.map((marginal, i) => [`Field ${i + 1}`, marginal]),
+    [marginals]
   );
+
+  return <OutputSections distributions={named} />;
 }
 
 interface NumericChartProps {
   distributions: [string, Distribution][];
   mode: DisplayMode;
   isDarkMode: boolean;
-  plugin?: ChartJsRangeSelect;
+  plugin: ChartJsRangeSelect;
 }
 
 function NumericChart({ distributions, mode, isDarkMode, plugin }: NumericChartProps) {
@@ -702,7 +734,7 @@ function NumericChart({ distributions, mode, isDarkMode, plugin }: NumericChartP
             },
           },
         }}
-        plugins={plugin ? [plugin.plugin] : []}
+        plugins={[plugin.plugin]}
         width="100%"
         height="100%"
         style={{ userSelect: "none" }}
