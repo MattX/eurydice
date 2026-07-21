@@ -1,6 +1,6 @@
 mod utils;
 
-use eurydice_engine::{ast::ParseActionError, eval::RuntimeValue, output::OutputValue};
+use eurydice_engine::{ast::ParseActionError, eval::RuntimeValue, output::Distribution};
 use js_sys::Function;
 use lalrpop_util::ParseError;
 use serde::Serialize;
@@ -28,7 +28,7 @@ pub struct Error {
 fn run_inner(
     input: &str,
     print_callback: Box<dyn Fn(RuntimeValue, String)>,
-) -> Result<Vec<(String, OutputValue)>, Error> {
+) -> Result<Vec<(String, Distribution)>, Error> {
     let mut evaluator = eurydice_engine::eval::Evaluator::new();
     evaluator.set_print_callback(print_callback);
     let parser = eurydice_engine::grammar::BodyParser::new();
@@ -53,7 +53,7 @@ fn run_inner(
     Ok(evaluator
         .take_outputs()
         .into_iter()
-        .map(|(val, name)| (name, OutputValue::from(val)))
+        .map(|(value, name)| (name, Distribution::from(value)))
         .collect())
 }
 

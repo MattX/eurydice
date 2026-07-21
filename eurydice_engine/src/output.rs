@@ -7,27 +7,19 @@ use crate::dice::Pool;
 use crate::eval::RuntimeValue;
 
 #[derive(Debug, Clone, Serialize)]
-pub enum OutputValue {
-    Int(i32),
-    List(Vec<i32>),
-    Distribution(Distribution),
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct Distribution {
     pub probabilities: Vec<(i32, f64)>,
 }
 
-impl From<RuntimeValue> for OutputValue {
+impl From<RuntimeValue> for Distribution {
     fn from(value: RuntimeValue) -> Self {
-        match value {
-            RuntimeValue::Int(i) => OutputValue::Int(i),
-            RuntimeValue::List(is) => OutputValue::List(is.to_vec()),
-            RuntimeValue::Pool(d) => {
-                let probabilities = to_probabilities(d.sum().ordered_outcomes());
-                OutputValue::Distribution(Distribution { probabilities })
-            }
-        }
+        let pool = match value {
+            RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
+            RuntimeValue::List(values) => Pool::from_list(1, values.to_vec()),
+            RuntimeValue::Pool(pool) => pool.sum(),
+        };
+        let probabilities = to_probabilities(pool.ordered_outcomes());
+        Distribution { probabilities }
     }
 }
 
@@ -82,4 +74,52 @@ pub fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
     let min = probabilities.iter().map(|(outcome, _)| *outcome).min();
     let max = probabilities.iter().map(|(outcome, _)| *outcome).max();
     (min.unwrap(), max.unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::*;
+
+    #[test]
+    fn converts_int_to_distribution() {
+        let distribution = Distribution::from(RuntimeValue::Int(5));
+
+        assert_eq!(distribution.probabilities, vec![(5, 1.0)]);
+    }
+
+    #[test]
+    fn converts_list_to_distribution_and_combines_duplicates() {
+        let value = RuntimeValue::List(Rc::new(vec![
+            5, -1, 5, 0, 5, 1, 5, 2, 5, 3, 5, 4, 5, 5, 5, 5,
+        ]));
+
+        let distribution = Distribution::from(value);
+
+        assert_eq!(
+            distribution.probabilities,
+            vec![
+                (-1, 0.0625),
+                (0, 0.0625),
+                (1, 0.0625),
+                (2, 0.0625),
+                (3, 0.0625),
+                (4, 0.0625),
+                (5, 0.625),
+            ]
+        );
+    }
+
+    #[test]
+    fn converts_pool_to_distribution_by_summing_dice() {
+        let value = RuntimeValue::from(Pool::from_list(2, vec![1, 2]));
+
+        let distribution = Distribution::from(value);
+
+        assert_eq!(
+            distribution.probabilities,
+            vec![(2, 0.25), (3, 0.5), (4, 0.25)]
+        );
+    }
 }

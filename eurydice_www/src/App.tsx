@@ -66,22 +66,7 @@ function AppInner() {
         runningRef.current = false;
         setRunning(false);
         setError(null);
-        const chartData: [string, Distribution][] = [];
-        for (const [key, value] of event.data.Ok!) {
-          if (value.Distribution !== undefined) {
-            chartData.push([key, value.Distribution]);
-          } else if (value.Int !== undefined) {
-            chartData.push([key, { probabilities: [[value.Int, 1]] }]);
-          } else if (value.List !== undefined) {
-            const length = value.List.length;
-            chartData.push([
-              key,
-              {
-                probabilities: value.List.map((x) => [x, 1.0 / length]),
-              },
-            ]);
-          }
-        }
+        const chartData = event.data.Ok!;
 
         // Check if range is too large
         let minValue = Infinity;
@@ -226,7 +211,7 @@ function AppInner() {
 }
 
 interface EurydiceMessage {
-  Ok: [string, DistributionWrapper][] | undefined;
+  Ok: [string, Distribution][] | undefined;
   Err: EurydiceError | undefined;
   Print: [string, string] | undefined;
 }
@@ -235,10 +220,4 @@ interface EurydiceError {
   message: string;
   from: number;
   to: number;
-}
-
-interface DistributionWrapper {
-  Distribution: Distribution | undefined;
-  Int: number | undefined;
-  List: number[] | undefined;
 }

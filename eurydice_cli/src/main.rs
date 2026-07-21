@@ -1,5 +1,5 @@
 use eurydice_cli::print_diagnostic;
-use eurydice_engine::dice::Pool;
+use eurydice_engine::output::Distribution;
 use lalrpop_util::ParseError;
 
 fn main() {
@@ -35,15 +35,10 @@ fn main() {
             }
         }
         for (value, name) in evaluator.take_outputs() {
-            let d = match value {
-                eurydice_engine::eval::RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
-                eurydice_engine::eval::RuntimeValue::List(is) => Pool::from_list(1, is.to_vec()),
-                eurydice_engine::eval::RuntimeValue::Pool(d) => (*d).clone().sum(),
-            };
             let (width, _) = crossterm::terminal::size().unwrap_or((80, 0));
-            let dist = eurydice_engine::output::to_probabilities(d.ordered_outcomes());
+            let distribution = Distribution::from(value);
             println!("{}:", name);
-            display_distribution(&dist, width);
+            display_distribution(&distribution.probabilities, width);
         }
     }
 }
