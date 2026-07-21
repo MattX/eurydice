@@ -262,4 +262,40 @@ describe('csvExport', () => {
       expect(secondDistLine).toMatch(/^"output, with comma",\d+\.?\d*,\d+\.?\d*,1,2$/);
     });
   });
+
+  describe('tuple export', () => {
+    const tuples = [
+      {
+        name: 'joint',
+        distribution: {
+          fields: [
+            { kind: 'int' as const },
+            { kind: 'enum' as const, enumName: 'R', labels: ['MISS', 'HIT'] },
+          ],
+          probabilities: [
+            [[1, 1], 0.4],
+            [[1, 0], 0.1],
+            [[2, 0], 0.5],
+          ] as [number[], number][],
+        },
+      },
+    ];
+
+    it('appends a field-per-column block for each tuple', () => {
+      const result = generateSpreadsheetCSV([], tuples);
+      const lines = result.split('\n');
+
+      expect(lines[0]).toBe('joint');
+      expect(lines[1]).toBe('Field 1,R,Probability');
+      // Rows are emitted in lexicographic outcome order with enum labels.
+      expect(lines[2]).toBe('1,MISS,0.1');
+      expect(lines[3]).toBe('1,HIT,0.4');
+      expect(lines[4]).toBe('2,MISS,0.5');
+    });
+
+    it('places tuple blocks after scalar blocks', () => {
+      const result = generateSpreadsheetCSV(testDistributions, tuples);
+      expect(result.indexOf('Numeric outcomes')).toBeLessThan(result.indexOf('joint'));
+    });
+  });
 });

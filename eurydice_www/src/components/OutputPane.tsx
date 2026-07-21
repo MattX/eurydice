@@ -45,6 +45,11 @@ export default function OutputPane(props: OutputPaneProps) {
     </button>
   );
 
+  // The export control rides in the first section's toolbar so it never sits
+  // alone on its own line. Scalar sections render first when present; otherwise
+  // it goes on the first tuple section.
+  const hasScalarOutput = props.distributions.length > 0;
+
   return (
     <>
       <div className="flex flex-col gap-6">
@@ -57,12 +62,17 @@ export default function OutputPane(props: OutputPaneProps) {
             key={`tuple:${index}:${name}`}
             name={name}
             distribution={distribution}
+            actions={!hasScalarOutput && index === 0 ? exportButton : undefined}
           />
         ))}
       </div>
 
       <ExportModal
         distributions={props.distributions.map(([name, distribution]) => ({
+          name,
+          distribution,
+        }))}
+        tuples={tupleDistributions.map(([name, distribution]) => ({
           name,
           distribution,
         }))}
@@ -348,9 +358,11 @@ type TupleView = "heatmap" | "table" | "list" | "marginals";
 function TupleOutputSection({
   name,
   distribution,
+  actions,
 }: {
   name: string;
   distribution: TupleDistribution;
+  actions?: React.ReactNode;
 }) {
   const arity = distribution.fields.length;
 
@@ -392,6 +404,7 @@ function TupleOutputSection({
             </button>
           ))}
         </div>
+        {actions}
       </div>
       {(activeView === "heatmap" || activeView === "table") && (
         <TupleGrid
@@ -460,6 +473,28 @@ function TupleGrid({
   const { xAxis, yAxis, maxCell } = pivot;
   const [xField, yField] = distribution.fields;
   const cellCount = xAxis.values.length * yAxis.values.length;
+  const heatmap = variant === "heatmap";
+
+  // Whether a percentage fits in a heatmap cell depends on the pane width and
+  // the column count, so measure the scroll container and hide the in-cell text
+  // once columns get too narrow — the value stays available via the cell's
+  // hover tooltip.
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [textFits, setTextFits] = React.useState(true);
+  React.useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const ROW_LABEL_WIDTH = 72;
+      const perColumn =
+        (el.clientWidth - ROW_LABEL_WIDTH) / (xAxis.values.length + 1);
+      setTextFits(perColumn >= 46);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [xAxis.values.length]);
 
   if (cellCount > MAX_GRID_CELLS) {
     return (
@@ -470,34 +505,42 @@ function TupleGrid({
     );
   }
 
-  const heatmap = variant === "heatmap";
-  const showCellText = !heatmap || cellCount <= 256;
+  const showCellText = !heatmap || textFits;
 
-  const cellBase = "px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap";
+  const cellBase = "px-2.5 py-1.5 tabular-nums whitespace-nowrap";
+  const valueCell = `${cellBase} ${heatmap ? "text-center" : "text-right"}`;
   const colHeader =
     "px-2.5 py-1.5 text-right font-semibold whitespace-nowrap bg-[var(--surface-2)]";
   const rowHeader =
     "px-2.5 py-1.5 text-left font-semibold whitespace-nowrap bg-[var(--surface)]";
-  const marginalCell = `${cellBase} bg-[var(--surface-2)] text-[var(--text-muted)]`;
+  const marginalCell = `${cellBase} text-right bg-[var(--surface-2)] text-[var(--text-muted)]`;
 
   const pct = (p: number) => (p * 100).toFixed(2);
 
   return (
-    <div className="dice-table overflow-x-auto rounded-lg border">
-      <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
-        Columns: {fieldName(xField, 0)} · Rows: {fieldName(yField, 1)}
+    <div>
+      {/* Caption and legend sit outside the horizontal scroll area so they stay
+          in view while a wide grid scrolls. */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
+        <span>
+          Columns: {fieldName(xField, 0)} · Rows: {fieldName(yField, 1)}
+        </span>
+        {heatmap && (
+          <span className="flex items-center gap-2">
+            <span>0%</span>
+            <span
+              className="h-2 w-24 rounded"
+              style={{ background: viridisGradientCss() }}
+            />
+            <span>{pct(maxCell)}%</span>
+          </span>
+        )}
       </div>
-      {heatmap && (
-        <div className="flex items-center gap-2 px-3 pb-2 text-xs text-[var(--text-muted)]">
-          <span>0%</span>
-          <span
-            className="h-2 flex-1 rounded"
-            style={{ background: viridisGradientCss() }}
-          />
-          <span>{pct(maxCell)}%</span>
-        </div>
-      )}
-      <table className="w-full border-collapse text-sm">
+      <div
+        ref={scrollRef}
+        className="dice-table overflow-x-auto rounded-lg border"
+      >
+        <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
             <th className={rowHeader} />
@@ -528,13 +571,13 @@ function TupleGrid({
                 return (
                   <td
                     key={x}
-                    className={cellBase}
+                    className={valueCell}
                     style={style}
                     title={`${xAxis.labels[xi]}, ${yAxis.labels[yi]}: ${pct(p)}%`}
                   >
                     {showCellText && p > 0
                       ? heatmap
-                        ? (p * 100).toFixed(1)
+                        ? `${(p * 100).toFixed(1)}%`
                         : `${pct(p)}%`
                       : ""}
                   </td>
@@ -556,6 +599,7 @@ function TupleGrid({
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

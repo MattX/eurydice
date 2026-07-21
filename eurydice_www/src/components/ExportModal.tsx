@@ -5,42 +5,50 @@ import {
   generateAnyDiceFormatCSV,
   downloadCSV,
   DistributionData,
+  TupleData,
 } from "../utils/csvExport";
 
 interface ExportModalProps {
   distributions: DistributionData[];
+  tuples?: TupleData[];
   isOpen: boolean;
   onClose: () => void;
 }
 
-export default function ExportModal({ distributions, isOpen, onClose }: ExportModalProps) {
+export default function ExportModal({
+  distributions,
+  tuples = [],
+  isOpen,
+  onClose,
+}: ExportModalProps) {
   const [csvContent, setCsvContent] = React.useState("");
   const [csvFilename, setCsvFilename] = React.useState("");
   const [csvFormat, setCsvFormat] = React.useState<"spreadsheet" | "anydice">(
     "spreadsheet"
   );
   const dialogRef = React.useRef<HTMLDialogElement>(null);
-  const omittedFromAnyDice = distributions.filter(
-    ({ distribution }) => distribution.enum_name !== undefined
-  ).length;
+  // AnyDice format is numeric-only, so enum and tuple outputs are dropped there.
+  const omittedFromAnyDice =
+    distributions.filter(({ distribution }) => distribution.enum_name !== undefined)
+      .length + tuples.length;
 
-  // Update CSV content when format or distributions change
+  // Update CSV content when format or outputs change
   React.useEffect(() => {
-    if (distributions.length > 0) {
-      const generate = csvFormat === "spreadsheet"
-        ? generateSpreadsheetCSV
-        : generateAnyDiceFormatCSV;
+    if (distributions.length > 0 || tuples.length > 0) {
+      const csv =
+        csvFormat === "spreadsheet"
+          ? generateSpreadsheetCSV(distributions, tuples)
+          : generateAnyDiceFormatCSV(distributions);
       const filename = csvFormat === "spreadsheet"
         ? "distributions.csv"
         : "distributions_anydice.csv";
-      const csv = generate(distributions);
       setCsvContent(csv);
       setCsvFilename(filename);
     } else {
       setCsvContent("");
       setCsvFilename("");
     }
-  }, [csvFormat, distributions]);
+  }, [csvFormat, distributions, tuples]);
 
   // Handle modal open/close
   React.useEffect(() => {
