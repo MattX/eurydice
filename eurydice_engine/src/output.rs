@@ -4,32 +4,12 @@ use serde::Serialize;
 use std::fmt::Write;
 
 use crate::dice::Pool;
-use crate::eval::{sum_pool, RuntimeValue, ScalarValue};
+use crate::eval::{sum_pool, RuntimeValue, ScalarType, ScalarValue};
 
 #[derive(Debug, Clone, Serialize)]
 pub enum OutputValue {
-    Int(i32),
-    List(Vec<i32>),
-    EnumInt(EnumScalar),
-    EnumList(EnumSequence),
     Distribution(Distribution),
-    Tuple(TupleScalar),
-    TupleList(TupleSequence),
     TupleDistribution(TupleDistribution),
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct EnumScalar {
-    pub value: i32,
-    pub enum_name: String,
-    pub labels: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct EnumSequence {
-    pub values: Vec<i32>,
-    pub enum_name: String,
-    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,18 +37,6 @@ pub enum TupleFieldSchema {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct TupleScalar {
-    pub fields: Vec<TupleFieldSchema>,
-    pub values: Vec<i32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TupleSequence {
-    pub fields: Vec<TupleFieldSchema>,
-    pub values: Vec<Vec<i32>>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct TupleDistribution {
     pub fields: Vec<TupleFieldSchema>,
     pub probabilities: Vec<(Vec<i32>, f64)>,
@@ -77,40 +45,16 @@ pub struct TupleDistribution {
 impl From<RuntimeValue> for OutputValue {
     fn from(value: RuntimeValue) -> Self {
         match value {
-            RuntimeValue::Scalar(ScalarValue::Int(i)) => OutputValue::Int(i),
-            RuntimeValue::Scalar(ScalarValue::Enum { value, ty }) => {
-                OutputValue::EnumInt(EnumScalar {
-                    value,
-                    enum_name: ty.name.clone(),
-                    labels: ty.members.clone(),
-                })
+            RuntimeValue::Scalar(value) => {
+                let outcome_type = value.scalar_type();
+                pool_output(&Pool::from_list(1, vec![value]), &outcome_type, false)
             }
-            RuntimeValue::Scalar(ScalarValue::Tuple(values)) => {
-                OutputValue::Tuple(TupleScalar {
-                    fields: tuple_schema(&values),
-                    values: tuple_values(&values),
-                })
+            RuntimeValue::List(values, outcome_type) => {
+                pool_output(&Pool::from_list(1, values.to_vec()), &outcome_type, false)
             }
-            RuntimeValue::List(values, _) => list_output(&values),
-            RuntimeValue::Pool(pool, _) => pool_output(&pool),
+            RuntimeValue::Pool(pool, outcome_type) => pool_output(&pool, &outcome_type, true),
         }
     }
-}
-
-/// Derives the shared per-field schema from a representative tuple. Since tuple
-/// pools and lists are homogeneous, any single outcome describes the whole set.
-fn tuple_schema(values: &[ScalarValue]) -> Vec<TupleFieldSchema> {
-    values
-        .iter()
-        .map(|value| match value {
-            ScalarValue::Int(_) => TupleFieldSchema::Int,
-            ScalarValue::Enum { ty, .. } => TupleFieldSchema::Enum {
-                enum_name: ty.name.clone(),
-                labels: ty.members.clone(),
-            },
-            ScalarValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
-        })
-        .collect()
 }
 
 /// Flattens a tuple's fields to raw `i32`s; enum fields become their ordinal.
@@ -125,42 +69,10 @@ fn tuple_values(values: &[ScalarValue]) -> Vec<i32> {
         .collect()
 }
 
-fn list_output(values: &[ScalarValue]) -> OutputValue {
-    match values.first() {
-        None | Some(ScalarValue::Int(_)) => OutputValue::List(
-            values
-                .iter()
-                .map(|value| value.as_int().expect("homogeneous numeric sequence"))
-                .collect(),
-        ),
-        Some(ScalarValue::Enum { ty, .. }) => OutputValue::EnumList(EnumSequence {
-            values: values
-                .iter()
-                .map(|value| match value {
-                    ScalarValue::Enum { value, .. } => *value,
-                    _ => unreachable!("homogeneous enum sequence"),
-                })
-                .collect(),
-            enum_name: ty.name.clone(),
-            labels: ty.members.clone(),
-        }),
-        Some(ScalarValue::Tuple(first)) => OutputValue::TupleList(TupleSequence {
-            fields: tuple_schema(first),
-            values: values
-                .iter()
-                .map(|value| match value {
-                    ScalarValue::Tuple(fields) => tuple_values(fields),
-                    _ => unreachable!("homogeneous tuple sequence"),
-                })
-                .collect(),
-        }),
-    }
-}
-
-fn pool_output(pool: &Pool<ScalarValue>) -> OutputValue {
-    let pool = sum_pool(pool);
-    match pool.ordered_outcomes().first().map(|(value, _)| value) {
-        None | Some(ScalarValue::Int(_)) => OutputValue::Distribution(Distribution {
+fn pool_output(pool: &Pool<ScalarValue>, outcome_type: &ScalarType, sum: bool) -> OutputValue {
+    let pool = if sum { sum_pool(pool) } else { pool.clone() };
+    match outcome_type {
+        ScalarType::Int => OutputValue::Distribution(Distribution {
             probabilities: to_probabilities(
                 &pool
                     .ordered_outcomes()
@@ -176,7 +88,7 @@ fn pool_output(pool: &Pool<ScalarValue>) -> OutputValue {
             enum_name: None,
             labels: None,
         }),
-        Some(ScalarValue::Enum { ty, .. }) => OutputValue::Distribution(Distribution {
+        ScalarType::Enum(ty) => OutputValue::Distribution(Distribution {
             probabilities: to_probabilities(
                 &pool
                     .ordered_outcomes()
@@ -190,8 +102,20 @@ fn pool_output(pool: &Pool<ScalarValue>) -> OutputValue {
             enum_name: Some(ty.name.clone()),
             labels: Some(ty.members.clone()),
         }),
-        Some(ScalarValue::Tuple(first)) => OutputValue::TupleDistribution(TupleDistribution {
-            fields: tuple_schema(first),
+        ScalarType::Tuple(field_types) => OutputValue::TupleDistribution(TupleDistribution {
+            fields: field_types
+                .iter()
+                .map(|ty| match ty {
+                    ScalarType::Int => TupleFieldSchema::Int,
+                    ScalarType::Enum(ty) => TupleFieldSchema::Enum {
+                        enum_name: ty.name.clone(),
+                        labels: ty.members.clone(),
+                    },
+                    ScalarType::Tuple(_) => {
+                        unreachable!("nested tuples are rejected by the evaluator")
+                    }
+                })
+                .collect(),
             probabilities: to_probabilities_generic(pool.ordered_outcomes())
                 .into_iter()
                 .map(|(value, probability)| match value {
@@ -271,4 +195,59 @@ pub fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
     let min = probabilities.iter().map(|(outcome, _)| *outcome).min();
     let max = probabilities.iter().map(|(outcome, _)| *outcome).max();
     (min.unwrap(), max.unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::*;
+
+    #[test]
+    fn converts_int_to_distribution() {
+        let OutputValue::Distribution(distribution) = OutputValue::from(RuntimeValue::from(5))
+        else {
+            panic!("expected numeric distribution");
+        };
+
+        assert_eq!(distribution.probabilities, vec![(5, 1.0)]);
+    }
+
+    #[test]
+    fn converts_list_to_distribution_and_combines_duplicates() {
+        let value = RuntimeValue::from(Rc::new(vec![
+            5, -1, 5, 0, 5, 1, 5, 2, 5, 3, 5, 4, 5, 5, 5, 5,
+        ]));
+
+        let OutputValue::Distribution(distribution) = OutputValue::from(value) else {
+            panic!("expected numeric distribution");
+        };
+
+        assert_eq!(
+            distribution.probabilities,
+            vec![
+                (-1, 0.0625),
+                (0, 0.0625),
+                (1, 0.0625),
+                (2, 0.0625),
+                (3, 0.0625),
+                (4, 0.0625),
+                (5, 0.625),
+            ]
+        );
+    }
+
+    #[test]
+    fn converts_pool_to_distribution_by_summing_dice() {
+        let value = RuntimeValue::from(Pool::from_list(2, vec![1, 2]));
+
+        let OutputValue::Distribution(distribution) = OutputValue::from(value) else {
+            panic!("expected numeric distribution");
+        };
+
+        assert_eq!(
+            distribution.probabilities,
+            vec![(2, 0.25), (3, 0.5), (4, 0.25)]
+        );
+    }
 }

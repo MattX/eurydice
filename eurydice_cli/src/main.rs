@@ -1,6 +1,5 @@
 use eurydice_cli::print_diagnostic;
-use eurydice_engine::dice::Pool;
-use eurydice_engine::eval::{RuntimeValue, ScalarType, ScalarValue};
+use eurydice_engine::output::{OutputValue, TupleFieldSchema};
 use lalrpop_util::ParseError;
 
 fn main() {
@@ -36,38 +35,51 @@ fn main() {
             }
         }
         for (value, name) in evaluator.take_outputs() {
-            let outcome_type = match &value {
-                RuntimeValue::Scalar(value) => value.scalar_type(),
-                RuntimeValue::List(_, ty) | RuntimeValue::Pool(_, ty) => ty.clone(),
-            };
-            let labels = match &outcome_type {
-                ScalarType::Enum(ty) => Some(ty.members.clone()),
-                ScalarType::Int | ScalarType::Tuple(_) => None,
-            };
-            let d = match value {
-                RuntimeValue::Scalar(value) => Pool::from_list(1, vec![value]),
-                RuntimeValue::List(values, _) => Pool::from_list(1, values.to_vec()),
-                RuntimeValue::Pool(d, _) if outcome_type == ScalarType::Int => d
-                    .as_ref()
-                    .clone()
-                    .map_outcomes(|value| value.as_int().expect("numeric pool"))
-                    .sum()
-                    .map_outcomes(ScalarValue::Int),
-                RuntimeValue::Pool(d, _) => d.as_ref().clone(),
-            };
             let (width, _) = crossterm::terminal::size().unwrap_or((80, 0));
-            let dist = eurydice_engine::output::to_probabilities_generic(d.ordered_outcomes());
             println!("{}:", name);
-            display_distribution(&dist, labels.as_deref(), width);
+            let labeled_probabilities: Vec<(String, f64)> = match OutputValue::from(value) {
+                OutputValue::Distribution(distribution) => distribution
+                    .probabilities
+                    .into_iter()
+                    .map(|(outcome, probability)| {
+                        let label = distribution
+                            .labels
+                            .as_ref()
+                            .and_then(|labels| {
+                                usize::try_from(outcome).ok().and_then(|i| labels.get(i))
+                            })
+                            .cloned()
+                            .unwrap_or_else(|| outcome.to_string());
+                        (label, probability)
+                    })
+                    .collect(),
+                OutputValue::TupleDistribution(distribution) => distribution
+                    .probabilities
+                    .into_iter()
+                    .map(|(outcome, probability)| {
+                        let fields = outcome
+                            .iter()
+                            .zip(&distribution.fields)
+                            .map(|(value, schema)| match schema {
+                                TupleFieldSchema::Int => value.to_string(),
+                                TupleFieldSchema::Enum { labels, .. } => usize::try_from(*value)
+                                    .ok()
+                                    .and_then(|i| labels.get(i))
+                                    .cloned()
+                                    .unwrap_or_else(|| value.to_string()),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        (format!("({fields})"), probability)
+                    })
+                    .collect(),
+            };
+            display_distribution(&labeled_probabilities, width);
         }
     }
 }
 
-fn display_distribution(
-    distribution: &[(ScalarValue, f64)],
-    labels: Option<&[String]>,
-    max_width: u16,
-) {
+fn display_distribution(distribution: &[(String, f64)], max_width: u16) {
     if distribution.is_empty() {
         println!("Distribution is empty");
         return;
@@ -82,15 +94,6 @@ fn display_distribution(
     for (outcome, prob) in distribution {
         let bar_width = ((prob / max_prob) * (max_width - 20) as f64) as u16;
         let bar = "━".repeat(bar_width as usize);
-        let label = labels
-            .and_then(|labels| {
-                outcome
-                    .as_int()
-                    .and_then(|outcome| usize::try_from(outcome).ok())
-                    .and_then(|i| labels.get(i))
-            })
-            .cloned()
-            .unwrap_or_else(|| outcome.to_string());
-        println!("{:>12} {:8.3}% |{}", label, prob * 100.0, bar);
+        println!("{:>12} {:8.3}% |{}", outcome, prob * 100.0, bar);
     }
 }

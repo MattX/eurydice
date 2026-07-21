@@ -1,6 +1,7 @@
 use eurydice_engine::{
     eval::{Evaluator, RuntimeValue, ScalarValue},
     grammar,
+    output::OutputValue,
 };
 use malachite::Natural;
 
@@ -174,6 +175,25 @@ fn tuples_have_structural_equality_and_can_be_die_faces() {
     assert_eq!(
         tuple_distribution(&outputs[2].0),
         vec![(vec![1, 2], 1u32.into()), (vec![3, 4], 1u32.into()),]
+    );
+}
+
+#[test]
+fn tuple_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
+    let mut outputs =
+        run("output [tuple 1 2] output {[tuple 1 2], [tuple 3 4], [tuple 1 2]}").unwrap();
+
+    let OutputValue::TupleDistribution(scalar) = OutputValue::from(outputs.remove(0).0) else {
+        panic!("expected tuple scalar distribution");
+    };
+    assert_eq!(scalar.probabilities, [(vec![1, 2], 1.0)]);
+
+    let OutputValue::TupleDistribution(list) = OutputValue::from(outputs.remove(0).0) else {
+        panic!("expected tuple list distribution");
+    };
+    assert_eq!(
+        list.probabilities,
+        [(vec![1, 2], 2.0 / 3.0), (vec![3, 4], 1.0 / 3.0)]
     );
 }
 

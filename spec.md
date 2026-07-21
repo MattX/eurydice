@@ -679,6 +679,34 @@ The following functions are available in the top-level environment frame at the 
 
 Returns the absolute value of `N`.
 
+### `[choose FIRST:d if CONDITION:n else SECOND:d]`
+
+Returns `FIRST` when `CONDITION` is nonzero, and `SECOND` when it is zero.
+
+As with other number-typed function parameters, a pool passed as `CONDITION` causes the function to be evaluated for every possible value of the summed pool. The resulting distributions are combined according to the probabilities of those values.
+
+For example, this selects `d6` three quarters of the time and `2d6` one quarter of the time:
+
+```
+output [choose d6 if d{0, 1:3} else 2d6]
+```
+
+More generally, distributions with nonnegative integer weights `FIRST_WEIGHT` and `SECOND_WEIGHT` can be mixed with:
+
+```
+output [choose FIRST if d{0:SECOND_WEIGHT, 1:FIRST_WEIGHT} else SECOND]
+```
+
+> [!IMPORTANT]
+> The `[choose FIRST:d if CONDITION:n else SECOND:d]` function is not available in AnyDice. For compatible code, it can be defined as:
+>
+> ```
+> function: choose FIRST:d if CONDITION:n else SECOND:d {
+>   if CONDITION { result: FIRST }
+>   result: SECOND
+> }
+> ```
+
 ### `[SEQ:s contains N:n]`
 
 Returns `1` if `SEQ` contains `N`, or `0` otherwise. `SEQ` and `N` must have the same outcome type. This operation supports integers, enum members, and tuples.

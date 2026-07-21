@@ -206,6 +206,28 @@ fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
 }
 
 #[test]
+fn enum_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
+    let mut outputs = run(
+        "enum: RESULT { MISS, HIT } output HIT named \"scalar\" output {MISS, HIT, HIT} named \"list\"",
+    )
+    .unwrap();
+
+    let OutputValue::Distribution(scalar) = OutputValue::from(outputs.remove(0).0) else {
+        panic!("expected scalar distribution");
+    };
+    assert_eq!(scalar.probabilities, [(1, 1.0)]);
+    assert_eq!(scalar.enum_name.as_deref(), Some("RESULT"));
+    assert_eq!(scalar.labels.unwrap(), ["MISS", "HIT"]);
+
+    let OutputValue::Distribution(list) = OutputValue::from(outputs.remove(0).0) else {
+        panic!("expected list distribution");
+    };
+    assert_eq!(list.probabilities, [(0, 1.0 / 3.0), (1, 2.0 / 3.0)]);
+    assert_eq!(list.enum_name.as_deref(), Some("RESULT"));
+    assert_eq!(list.labels.unwrap(), ["MISS", "HIT"]);
+}
+
+#[test]
 fn serialized_tuple_distribution_hoists_field_schema() {
     let mut outputs =
         run("enum: RESULT { MISS, HIT } A: d2 B: d{MISS, HIT} output [tuple A B]").unwrap();
@@ -224,7 +246,10 @@ fn serialized_tuple_distribution_hoists_field_schema() {
 
     // Every outcome is a raw i32 vector matching the field count, and the
     // probabilities form a valid distribution.
-    assert!(dist.probabilities.iter().all(|(values, _)| values.len() == 2));
+    assert!(dist
+        .probabilities
+        .iter()
+        .all(|(values, _)| values.len() == 2));
     let total: f64 = dist.probabilities.iter().map(|(_, p)| p).sum();
     assert!((total - 1.0).abs() < 1e-9, "probabilities should sum to 1");
 }

@@ -3,11 +3,7 @@ import React, { useCallback, useEffect, useRef } from "react";
 import { WorkerWrapper } from "./worker-wrapper";
 import { Distribution, TupleDistribution } from "./util";
 import {
-  WireTupleScalar,
-  WireTupleSequence,
   WireTupleDistribution,
-  normalizeTupleScalar,
-  normalizeTupleSequence,
   normalizeTupleDistribution,
 } from "./utils/tupleData";
 import OutputPane from "./components/OutputPane";
@@ -83,42 +79,13 @@ function AppInner() {
         const chartData: [string, Distribution][] = [];
         const tupleData: [string, TupleDistribution][] = [];
         for (const [key, value] of event.data.Ok!) {
-          if (value.Tuple !== undefined) {
-            tupleData.push([key, normalizeTupleScalar(value.Tuple)]);
-          } else if (value.TupleList !== undefined) {
-            tupleData.push([key, normalizeTupleSequence(value.TupleList)]);
-          } else if (value.TupleDistribution !== undefined) {
+          if (value.TupleDistribution !== undefined) {
             tupleData.push([
               key,
               normalizeTupleDistribution(value.TupleDistribution),
             ]);
           } else if (value.Distribution !== undefined) {
             chartData.push([key, value.Distribution]);
-          } else if (value.Int !== undefined) {
-            chartData.push([key, { probabilities: [[value.Int, 1]] }]);
-          } else if (value.List !== undefined) {
-            const length = value.List.length;
-            chartData.push([
-              key,
-              {
-                probabilities: value.List.map((x) => [x, 1.0 / length]),
-              },
-            ]);
-          } else if (value.EnumInt !== undefined) {
-            chartData.push([key, {
-              probabilities: [[value.EnumInt.value, 1]],
-              enum_name: value.EnumInt.enum_name,
-              labels: value.EnumInt.labels,
-            }]);
-          } else if (value.EnumList !== undefined) {
-            const length = value.EnumList.values.length;
-            const counts = new Map<number, number>();
-            value.EnumList.values.forEach((x) => counts.set(x, (counts.get(x) ?? 0) + 1));
-            chartData.push([key, {
-              probabilities: Array.from(counts).map(([x, count]) => [x, count / length]),
-              enum_name: value.EnumList.enum_name,
-              labels: value.EnumList.labels,
-            }]);
           }
         }
 
@@ -286,7 +253,7 @@ function AppInner() {
 }
 
 interface EurydiceMessage {
-  Ok: [string, DistributionWrapper][] | undefined;
+  Ok: [string, OutputValue][] | undefined;
   Err: EurydiceError | undefined;
   Print: [string, string] | undefined;
 }
@@ -296,26 +263,7 @@ interface EurydiceError {
   from: number;
   to: number;
 }
-
-interface DistributionWrapper {
+interface OutputValue {
   Distribution: Distribution | undefined;
-  Int: number | undefined;
-  List: number[] | undefined;
-  EnumInt: EnumScalar | undefined;
-  EnumList: EnumSequence | undefined;
-  Tuple: WireTupleScalar | undefined;
-  TupleList: WireTupleSequence | undefined;
   TupleDistribution: WireTupleDistribution | undefined;
-}
-
-interface EnumScalar {
-  value: number;
-  enum_name: string;
-  labels: string[];
-}
-
-interface EnumSequence {
-  values: number[];
-  enum_name: string;
-  labels: string[];
 }

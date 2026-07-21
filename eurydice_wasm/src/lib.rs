@@ -53,7 +53,7 @@ fn run_inner(
     Ok(evaluator
         .take_outputs()
         .into_iter()
-        .map(|(val, name)| (name, OutputValue::from(val)))
+        .map(|(value, name)| (name, OutputValue::from(value)))
         .collect())
 }
 

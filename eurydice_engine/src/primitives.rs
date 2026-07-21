@@ -293,6 +293,29 @@ fn maximum_execute(
     }
 }
 
+fn choose_execute(
+    args: &[RuntimeValue],
+    _arg_ranges: &[ast::Range],
+    _explode_depth: usize,
+    _lowest_first: bool,
+    _function_range: ast::Range,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    if let (
+        RuntimeValue::Pool(first, first_type),
+        RuntimeValue::Scalar(ScalarValue::Int(condition)),
+        RuntimeValue::Pool(second, second_type),
+    ) = (&args[0], &args[1], &args[2])
+    {
+        Ok(if *condition == 0 {
+            RuntimeValue::Pool(second.clone(), second_type.clone())
+        } else {
+            RuntimeValue::Pool(first.clone(), first_type.clone())
+        })
+    } else {
+        panic!("wrong argument types to [choose if else]");
+    }
+}
+
 fn reverse_execute(
     args: &[RuntimeValue],
     _arg_ranges: &[ast::Range],
@@ -474,6 +497,15 @@ lazy_static! {
         accepts_non_numeric: false,
         execute: maximum_execute,
     };
+    pub static ref CHOOSE_PRIMITIVE: Primitive = Primitive {
+        arg_types: vec![
+            Some(StaticType::Pool),
+            Some(StaticType::Int),
+            Some(StaticType::Pool),
+        ],
+        accepts_non_numeric: true,
+        execute: choose_execute,
+    };
     pub static ref REVERSE_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::List)],
         accepts_non_numeric: true,
@@ -606,6 +638,10 @@ pub fn register_primitives(functions: &mut HashMap<String, Function>) {
     functions.insert(
         "maximum of {}".to_string(),
         Function::Primitive(&MAXIMUM_PRIMITIVE),
+    );
+    functions.insert(
+        "choose {} if {} else {}".to_string(),
+        Function::Primitive(&CHOOSE_PRIMITIVE),
     );
     functions.insert(
         "reverse {}".to_string(),
@@ -834,6 +870,52 @@ mod tests {
     }
 
     #[test]
+    fn test_choose_execute() {
+        let first = pool_value(Pool::ndn(2, 6));
+        let second = pool_value(Pool::ndn(1, 20));
+
+        let result = choose_execute(
+            &[first.clone(), int_value(-1), second.clone()],
+            &[],
+            0,
+            false,
+            dummy_range(),
+        )
+        .unwrap();
+        assert_eq!(result, first);
+
+        let result = choose_execute(
+            &[first, int_value(0), second.clone()],
+            &[],
+            0,
+            false,
+            dummy_range(),
+        )
+        .unwrap();
+        assert_eq!(result, second);
+    }
+
+    #[test]
+    fn test_choose_with_distribution_condition() {
+        let statements = crate::grammar::BodyParser::new()
+            .parse("output [choose d2 if d{0, 1:3} else d{10, 20}]")
+            .unwrap();
+        let mut evaluator = crate::eval::Evaluator::new();
+        for statement in statements {
+            evaluator.execute(&statement).unwrap();
+        }
+
+        let outputs = evaluator.take_outputs();
+        let [(RuntimeValue::Pool(result, _), _)] = outputs.as_slice() else {
+            panic!("Expected one pool output");
+        };
+        assert_eq!(
+            to_nat_list(result.ordered_outcomes()),
+            [(1, 3), (2, 3), (10, 1), (20, 1)]
+        );
+    }
+
+    #[test]
     fn test_reverse_execute() {
         let list = vec![1, 2, 3, 4, 5];
         let args = vec![list_value(list)];
@@ -949,6 +1031,7 @@ mod tests {
         assert!(functions.contains_key("highest of {} and {}"));
         assert!(functions.contains_key("lowest of {} and {}"));
         assert!(functions.contains_key("maximum of {}"));
+        assert!(functions.contains_key("choose {} if {} else {}"));
         assert!(functions.contains_key("reverse {}"));
         assert!(functions.contains_key("sort {}"));
         assert!(functions.contains_key("tuple {} {}"));
@@ -956,7 +1039,7 @@ mod tests {
         assert!(functions.contains_key("tuple {} {} {} {}"));
         assert!(functions.contains_key("element {} of {}"));
 
-        // Should have registered exactly 19 functions
-        assert_eq!(functions.len(), 19);
+        // Should have registered exactly 20 functions
+        assert_eq!(functions.len(), 20);
     }
 }
