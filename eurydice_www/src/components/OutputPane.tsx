@@ -39,6 +39,22 @@ import {
 } from "../utils/tableData";
 Chart.register(...registerables, MatrixController, MatrixElement);
 
+/** Shared light/dark palette for the Chart.js charts. */
+function chartTheme(isDarkMode: boolean) {
+  return {
+    gridColor: isDarkMode ? "#26323f" : "#e4eaf1",
+    textColor: isDarkMode ? "#94a3b8" : "#64748b",
+    tooltipBg: isDarkMode ? "#182230" : "#ffffff",
+    tooltipText: isDarkMode ? "#e5edf6" : "#1a2431",
+    tooltipBorder: isDarkMode ? "#3a4c60" : "#c2ccda",
+  };
+}
+
+/** Formats a probability in [0, 1] as a percentage string. */
+function formatPercent(probability: number, digits = 2): string {
+  return `${(probability * 100).toFixed(digits)}%`;
+}
+
 export default function OutputPane(props: OutputPaneProps) {
   const tupleDistributions = props.tupleDistributions ?? [];
 
@@ -462,10 +478,8 @@ function TupleHeatmap({
     );
   }
 
-  const textColor = isDarkMode ? "#94a3b8" : "#64748b";
-  const tooltipBg = isDarkMode ? "#182230" : "#ffffff";
-  const tooltipText = isDarkMode ? "#e5edf6" : "#1a2431";
-  const tooltipBorder = isDarkMode ? "#3a4c60" : "#c2ccda";
+  const { textColor, tooltipBg, tooltipText, tooltipBorder } =
+    chartTheme(isDarkMode);
 
   const data: ChartData<"matrix", HeatmapCell[]> = {
     datasets: [
@@ -512,7 +526,7 @@ function TupleHeatmap({
           title: () => "",
           label: (ctx: TooltipItem<"matrix">) => {
             const point = ctx.raw as HeatmapCell;
-            return `${point.x}, ${point.y}: ${(point.v * 100).toFixed(2)}%`;
+            return `${point.x}, ${point.y}: ${formatPercent(point.v)}`;
           },
         },
       },
@@ -546,7 +560,7 @@ function TupleHeatmap({
           className="h-2 w-24 rounded"
           style={{ background: viridisGradientCss() }}
         />
-        <span>{(maxCell * 100).toFixed(2)}%</span>
+        <span>{formatPercent(maxCell)}</span>
       </div>
       {/* Keying on the grid shape remounts the chart when the axis cardinality
           changes, so `maintainAspectRatio` recomputes the canvas height instead
@@ -594,8 +608,6 @@ function TupleContingencyTable({
     "px-2.5 py-1.5 text-left font-semibold whitespace-nowrap bg-[var(--surface)]";
   const marginalCell = `${cell} bg-[var(--surface-2)] text-[var(--text-muted)]`;
 
-  const pct = (p: number) => (p * 100).toFixed(2);
-
   return (
     <div>
       <div className="mb-2 text-xs text-[var(--text-muted)]">
@@ -624,13 +636,13 @@ function TupleContingencyTable({
                     <td
                       key={x}
                       className={cell}
-                      title={`${xAxis.labels[xi]}, ${yAxis.labels[yi]}: ${pct(p)}%`}
+                      title={`${xAxis.labels[xi]}, ${yAxis.labels[yi]}: ${formatPercent(p)}`}
                     >
-                      {p > 0 ? `${pct(p)}%` : ""}
+                      {p > 0 ? formatPercent(p) : ""}
                     </td>
                   );
                 })}
-                <td className={marginalCell}>{pct(pivot.yMarginal(y))}%</td>
+                <td className={marginalCell}>{formatPercent(pivot.yMarginal(y))}</td>
               </tr>
             ))}
           </tbody>
@@ -639,7 +651,7 @@ function TupleContingencyTable({
               <td className={`${rowHeader} text-[var(--text-muted)]`}>Σ</td>
               {xAxis.values.map((x) => (
                 <td key={x} className={marginalCell}>
-                  {pct(pivot.xMarginal(x))}%
+                  {formatPercent(pivot.xMarginal(x))}
                 </td>
               ))}
               <td className={marginalCell}>100.00%</td>
@@ -709,7 +721,7 @@ function TupleListTable({ distribution }: { distribution: TupleDistribution }) {
                     {label}
                   </td>
                 ))}
-                <td className={cell}>{(row.probability * 100).toFixed(2)}%</td>
+                <td className={cell}>{formatPercent(row.probability)}</td>
               </tr>
             ))}
           </tbody>
@@ -750,11 +762,8 @@ interface NumericChartProps {
 }
 
 function NumericChart({ distributions, mode, isDarkMode, plugin }: NumericChartProps) {
-  const gridColor = isDarkMode ? "#26323f" : "#e4eaf1";
-  const textColor = isDarkMode ? "#94a3b8" : "#64748b";
-  const tooltipBg = isDarkMode ? "#182230" : "#ffffff";
-  const tooltipText = isDarkMode ? "#e5edf6" : "#1a2431";
-  const tooltipBorder = isDarkMode ? "#3a4c60" : "#c2ccda";
+  const { gridColor, textColor, tooltipBg, tooltipText, tooltipBorder } =
+    chartTheme(isDarkMode);
   const grid = { color: gridColor, tickColor: gridColor };
   const datasets = prepareChartData(distributions, mode, isDarkMode);
 
@@ -841,11 +850,8 @@ function CategoricalChart({
   group: EnumDistributionGroup;
   isDarkMode: boolean;
 }) {
-  const gridColor = isDarkMode ? "#26323f" : "#e4eaf1";
-  const textColor = isDarkMode ? "#94a3b8" : "#64748b";
-  const tooltipBg = isDarkMode ? "#182230" : "#ffffff";
-  const tooltipText = isDarkMode ? "#e5edf6" : "#1a2431";
-  const tooltipBorder = isDarkMode ? "#3a4c60" : "#c2ccda";
+  const { gridColor, textColor, tooltipBg, tooltipText, tooltipBorder } =
+    chartTheme(isDarkMode);
   const height = Math.max(180, group.labels.length * 42 + 70);
 
   return (
