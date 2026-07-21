@@ -1,6 +1,13 @@
 import React from "react";
 import { Bar, Line } from "react-chartjs-2";
-import { Distribution } from "../util";
+import { Distribution, TupleDistribution, TupleFieldSchema } from "../util";
+import {
+  fieldName,
+  computeMarginals,
+  computeTuplePivot,
+  computeTupleRows,
+  TupleSort,
+} from "../utils/tupleData";
 import { Chart, registerables } from "chart.js";
 import { DarkModeContext } from "./DarkModeSwitcher";
 import ExportModal from "./ExportModal";
@@ -31,6 +38,7 @@ export default function OutputPane(props: OutputPaneProps) {
     () => partitionDistributions(props.distributions),
     [props.distributions]
   );
+  const tupleDistributions = props.tupleDistributions ?? [];
 
   const exportButton = (
     <button
@@ -59,6 +67,13 @@ export default function OutputPane(props: OutputPaneProps) {
             />
           )
         )}
+        {tupleDistributions.map(([name, distribution], index) => (
+          <TupleOutputSection
+            key={`tuple:${index}:${name}`}
+            name={name}
+            distribution={distribution}
+          />
+        ))}
       </div>
 
       <ExportModal
@@ -306,11 +321,309 @@ function EnumOutputSection({
   );
 }
 
+type TupleView = "heatmap" | "table" | "list" | "marginals";
+
+function TupleOutputSection({
+  name,
+  distribution,
+}: {
+  name: string;
+  distribution: TupleDistribution;
+}) {
+  const isDarkMode = React.useContext(DarkModeContext);
+  const arity = distribution.fields.length;
+
+  // A 2-D joint fits a grid (heatmap / contingency table); higher arities fall
+  // back to listing outcomes. Marginals are available for any arity.
+  const views: { id: TupleView; label: string }[] =
+    arity === 2
+      ? [
+          { id: "heatmap", label: "Heatmap" },
+          { id: "table", label: "Table" },
+          { id: "marginals", label: "Marginals" },
+        ]
+      : [
+          { id: "list", label: "Table" },
+          { id: "marginals", label: "Marginals" },
+        ];
+  const [view, setView] = React.useState<TupleView>(views[0].id);
+
+  return (
+    <section aria-label={`Tuple outcomes: ${name}`}>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h2 className="mr-auto text-sm font-semibold text-[var(--text-muted)]">
+          {name}
+        </h2>
+        <div className="segmented" role="group" aria-label="Tuple display mode">
+          {views.map((v) => (
+            <button
+              key={v.id}
+              aria-pressed={view === v.id}
+              onClick={() => setView(v.id)}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {(view === "heatmap" || view === "table") && (
+        <TupleGrid
+          distribution={distribution}
+          variant={view === "heatmap" ? "heatmap" : "table"}
+          isDarkMode={isDarkMode}
+        />
+      )}
+      {view === "list" && <TupleListTable distribution={distribution} />}
+      {view === "marginals" && (
+        <TupleMarginals
+          name={name}
+          distribution={distribution}
+          isDarkMode={isDarkMode}
+        />
+      )}
+    </section>
+  );
+}
+
+/** Largest number of cells we're willing to lay out for the 2-D grid views. */
+const MAX_GRID_CELLS = 2500;
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
+function TupleGrid({
+  distribution,
+  variant,
+  isDarkMode,
+}: {
+  distribution: TupleDistribution;
+  variant: "heatmap" | "table";
+  isDarkMode: boolean;
+}) {
+  const pivot = React.useMemo(
+    () => computeTuplePivot(distribution),
+    [distribution]
+  );
+  const { xAxis, yAxis, maxCell } = pivot;
+  const [xField, yField] = distribution.fields;
+  const cellCount = xAxis.values.length * yAxis.values.length;
+
+  if (cellCount > MAX_GRID_CELLS) {
+    return (
+      <p className="rounded-lg border p-4 text-sm text-[var(--text-muted)]">
+        This joint distribution has {xAxis.values.length}×{yAxis.values.length}{" "}
+        cells — too many to lay out as a grid. Switch to the Marginals view.
+      </p>
+    );
+  }
+
+  const heatmap = variant === "heatmap";
+  const accent = hexToRgb(isDarkMode ? "#3987e5" : "#2a78d6");
+  const showCellText = !heatmap || cellCount <= 256;
+
+  const cellBase = "px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap";
+  const colHeader =
+    "px-2.5 py-1.5 text-right font-semibold whitespace-nowrap bg-[var(--surface-2)]";
+  const rowHeader =
+    "px-2.5 py-1.5 text-left font-semibold whitespace-nowrap bg-[var(--surface)]";
+  const marginalCell = `${cellBase} bg-[var(--surface-2)] text-[var(--text-muted)]`;
+
+  const pct = (p: number) => (p * 100).toFixed(2);
+
+  return (
+    <div className="dice-table overflow-x-auto rounded-lg border">
+      <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
+        Columns: {fieldName(xField, 0)} · Rows: {fieldName(yField, 1)}
+      </div>
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th className={rowHeader} />
+            {xAxis.values.map((x, i) => (
+              <th key={x} className={colHeader}>
+                {xAxis.labels[i]}
+              </th>
+            ))}
+            <th className={colHeader}>Σ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {yAxis.values.map((y, yi) => (
+            <tr key={y} className="dice-row">
+              <td className={rowHeader}>{yAxis.labels[yi]}</td>
+              {xAxis.values.map((x, xi) => {
+                const p = pivot.cell(x, y);
+                const intensity = maxCell > 0 ? p / maxCell : 0;
+                const style = heatmap
+                  ? {
+                      backgroundColor: `rgba(${accent[0]}, ${accent[1]}, ${accent[2]}, ${(
+                        intensity * 0.9
+                      ).toFixed(3)})`,
+                      color: intensity > 0.5 ? "#ffffff" : undefined,
+                    }
+                  : undefined;
+                return (
+                  <td
+                    key={x}
+                    className={cellBase}
+                    style={style}
+                    title={`${xAxis.labels[xi]}, ${yAxis.labels[yi]}: ${pct(p)}%`}
+                  >
+                    {showCellText && p > 0
+                      ? heatmap
+                        ? (p * 100).toFixed(1)
+                        : `${pct(p)}%`
+                      : ""}
+                  </td>
+                );
+              })}
+              <td className={marginalCell}>{pct(pivot.yMarginal(y))}%</td>
+            </tr>
+          ))}
+        </tbody>
+        <tbody>
+          <tr className="dice-row">
+            <td className={`${rowHeader} text-[var(--text-muted)]`}>Σ</td>
+            {xAxis.values.map((x) => (
+              <td key={x} className={marginalCell}>
+                {pct(pivot.xMarginal(x))}%
+              </td>
+            ))}
+            <td className={marginalCell}>100.00%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Largest number of rows the list-out table renders before truncating. */
+const MAX_LIST_ROWS = 1000;
+
+function TupleListTable({ distribution }: { distribution: TupleDistribution }) {
+  const [sort, setSort] = React.useState<TupleSort>("probability");
+  const rows = React.useMemo(
+    () => computeTupleRows(distribution, sort),
+    [distribution, sort]
+  );
+  const shown = rows.slice(0, MAX_LIST_ROWS);
+  const truncated = rows.length - shown.length;
+
+  const cell = "px-3 py-1.5 text-right tabular-nums whitespace-nowrap";
+  const fieldCell = "px-3 py-1.5 text-left whitespace-nowrap";
+  const colHeader =
+    "px-3 py-1.5 text-left font-semibold whitespace-nowrap sticky top-0 z-10 bg-[var(--surface-2)]";
+  const probHeader =
+    "px-3 py-1.5 text-right font-semibold whitespace-nowrap sticky top-0 z-10 bg-[var(--surface-2)]";
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-sm text-[var(--text-muted)]">Sort by</span>
+        <div className="segmented" role="group" aria-label="Sort order">
+          <button
+            aria-pressed={sort === "probability"}
+            onClick={() => setSort("probability")}
+          >
+            Probability
+          </button>
+          <button
+            aria-pressed={sort === "lexicographic"}
+            onClick={() => setSort("lexicographic")}
+          >
+            Outcome
+          </button>
+        </div>
+      </div>
+      <div className="dice-table overflow-x-auto rounded-lg border">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              {distribution.fields.map((schema, i) => (
+                <th key={i} className={colHeader}>
+                  {fieldName(schema, i)}
+                </th>
+              ))}
+              <th className={probHeader}>Probability</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((row, index) => (
+              <tr key={index} className="dice-row">
+                {row.labels.map((label, i) => (
+                  <td key={i} className={fieldCell}>
+                    {label}
+                  </td>
+                ))}
+                <td className={cell}>{(row.probability * 100).toFixed(2)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {truncated > 0 && (
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
+          Showing the {MAX_LIST_ROWS} most probable of {rows.length} outcomes.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TupleMarginals({
+  name,
+  distribution,
+  isDarkMode,
+}: {
+  name: string;
+  distribution: TupleDistribution;
+  isDarkMode: boolean;
+}) {
+  const marginals = React.useMemo(
+    () => computeMarginals(distribution),
+    [distribution]
+  );
+
+  return (
+    <div className="flex flex-col gap-6">
+      {distribution.fields.map((schema: TupleFieldSchema, i) => (
+        <div key={i}>
+          <h3 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">
+            {fieldName(schema, i)}
+          </h3>
+          {schema.kind === "enum" ? (
+            <CategoricalChart
+              group={{
+                enumName: schema.enumName,
+                labels: schema.labels,
+                distributions: [[name, marginals[i]]],
+              }}
+              isDarkMode={isDarkMode}
+            />
+          ) : (
+            <NumericChart
+              distributions={[[name, marginals[i]]]}
+              mode={DisplayMode.Distribution}
+              isDarkMode={isDarkMode}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface NumericChartProps {
   distributions: [string, Distribution][];
   mode: DisplayMode;
   isDarkMode: boolean;
-  plugin: ChartJsRangeSelect;
+  plugin?: ChartJsRangeSelect;
 }
 
 function NumericChart({ distributions, mode, isDarkMode, plugin }: NumericChartProps) {
@@ -389,7 +702,7 @@ function NumericChart({ distributions, mode, isDarkMode, plugin }: NumericChartP
             },
           },
         }}
-        plugins={[plugin.plugin]}
+        plugins={plugin ? [plugin.plugin] : []}
         width="100%"
         height="100%"
         style={{ userSelect: "none" }}
@@ -473,6 +786,7 @@ function CategoricalChart({
 
 export interface OutputPaneProps {
   distributions: [string, Distribution][];
+  tupleDistributions?: [string, TupleDistribution][];
 }
 
 interface CombinedProbabilityTableProps {

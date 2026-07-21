@@ -1,7 +1,15 @@
 import React, { useCallback, useEffect, useRef } from "react";
 
 import { WorkerWrapper } from "./worker-wrapper";
-import { Distribution } from "./util";
+import { Distribution, TupleDistribution } from "./util";
+import {
+  WireTupleScalar,
+  WireTupleSequence,
+  WireTupleDistribution,
+  normalizeTupleScalar,
+  normalizeTupleSequence,
+  normalizeTupleDistribution,
+} from "./utils/tupleData";
 import OutputPane from "./components/OutputPane";
 import EditorPane from "./components/EditorPane";
 import Tutorial from "./components/Tutorial";
@@ -25,6 +33,9 @@ export default function App() {
 function AppInner() {
   const [editorText, setEditorText] = React.useState("");
   const [output, setOutput] = React.useState<[string, Distribution][]>([]);
+  const [tupleOutput, setTupleOutput] = React.useState<
+    [string, TupleDistribution][]
+  >([]);
   const [error, setError] = React.useState<EurydiceError | null>(null);
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
@@ -68,8 +79,18 @@ function AppInner() {
         setRunning(false);
         setError(null);
         const chartData: [string, Distribution][] = [];
+        const tupleData: [string, TupleDistribution][] = [];
         for (const [key, value] of event.data.Ok!) {
-          if (value.Distribution !== undefined) {
+          if (value.Tuple !== undefined) {
+            tupleData.push([key, normalizeTupleScalar(value.Tuple)]);
+          } else if (value.TupleList !== undefined) {
+            tupleData.push([key, normalizeTupleSequence(value.TupleList)]);
+          } else if (value.TupleDistribution !== undefined) {
+            tupleData.push([
+              key,
+              normalizeTupleDistribution(value.TupleDistribution),
+            ]);
+          } else if (value.Distribution !== undefined) {
             chartData.push([key, value.Distribution]);
           } else if (value.Int !== undefined) {
             chartData.push([key, { probabilities: [[value.Int, 1]] }]);
@@ -98,6 +119,8 @@ function AppInner() {
             }]);
           }
         }
+
+        setTupleOutput(tupleData);
 
         // Categorical outcomes use enum member ordinals, not a numeric axis.
         const range = numericOutcomeRange(chartData);
@@ -190,7 +213,7 @@ function AppInner() {
 
   const outputPane = (
     <div className="output-pane h-full p-4">
-      <OutputPane distributions={output} />
+      <OutputPane distributions={output} tupleDistributions={tupleOutput} />
     </div>
   );
 
@@ -250,6 +273,9 @@ interface DistributionWrapper {
   List: number[] | undefined;
   EnumInt: EnumScalar | undefined;
   EnumList: EnumSequence | undefined;
+  Tuple: WireTupleScalar | undefined;
+  TupleList: WireTupleSequence | undefined;
+  TupleDistribution: WireTupleDistribution | undefined;
 }
 
 interface EnumScalar {
