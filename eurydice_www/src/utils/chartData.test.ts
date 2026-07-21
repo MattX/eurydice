@@ -267,6 +267,23 @@ describe('chartData', () => {
       expect(result.numeric.map(([name]) => name)).toEqual(['numeric']);
       expect(result.enumGroups.map((group) => group.enumName)).toEqual(['RESULT', 'WEATHER']);
       expect(result.enumGroups[0].distributions.map(([name]) => name)).toEqual(['attack', 'defend']);
+      expect(result.sections.map((section) =>
+        section.kind === 'numeric' ? 'numeric' : section.group.enumName
+      )).toEqual(['numeric', 'RESULT', 'WEATHER']);
+    });
+
+    it('orders sections by the first output of each compatible type', () => {
+      const reordered = [
+        mixedDistributions[1],
+        mixedDistributions[3],
+        mixedDistributions[0],
+        mixedDistributions[2],
+      ];
+      const { sections } = partitionDistributions(reordered);
+
+      expect(sections.map((section) =>
+        section.kind === 'numeric' ? 'numeric' : section.group.enumName
+      )).toEqual(['RESULT', 'WEATHER', 'numeric']);
     });
 
     it('uses declaration order and fills missing enum members with zero', () => {

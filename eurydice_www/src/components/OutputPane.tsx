@@ -26,6 +26,60 @@ import {
 Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
+  const [showExportModal, setShowExportModal] = React.useState(false);
+  const { sections } = React.useMemo(
+    () => partitionDistributions(props.distributions),
+    [props.distributions]
+  );
+
+  const exportButton = (
+    <button
+      onClick={() => setShowExportModal(true)}
+      className="btn btn-secondary"
+    >
+      Export
+    </button>
+  );
+
+  return (
+    <>
+      <div className="flex flex-col gap-6">
+        {sections.map((section, index) =>
+          section.kind === "numeric" ? (
+            <NumericOutputSection
+              key="numeric"
+              distributions={section.distributions}
+              actions={index === 0 ? exportButton : undefined}
+            />
+          ) : (
+            <EnumOutputSection
+              key={`enum:${section.group.enumName}`}
+              group={section.group}
+              actions={index === 0 ? exportButton : undefined}
+            />
+          )
+        )}
+      </div>
+
+      <ExportModal
+        distributions={props.distributions.map(([name, distribution]) => ({
+          name,
+          distribution,
+        }))}
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+      />
+    </>
+  );
+}
+
+function NumericOutputSection({
+  distributions,
+  actions,
+}: {
+  distributions: [string, Distribution][];
+  actions?: React.ReactNode;
+}) {
   const [displayMode, setDisplayMode] = React.useState(
     DisplayMode.Distribution
   );
@@ -33,12 +87,6 @@ export default function OutputPane(props: OutputPaneProps) {
   const [showBracketing, setShowBracketing] = React.useState(false);
   const [lowerBound, setLowerBound] = React.useState(0);
   const [upperBound, setUpperBound] = React.useState(0);
-  const [showExportModal, setShowExportModal] = React.useState(false);
-  const { numeric, enumGroups } = React.useMemo(
-    () => partitionDistributions(props.distributions),
-    [props.distributions]
-  );
-  const hasNumeric = numeric.length > 0;
 
   // The plugin is a ref because we can't recreate it every time the distributions change.
   const plugin = React.useRef<ChartJsRangeSelect>(
@@ -56,51 +104,28 @@ export default function OutputPane(props: OutputPaneProps) {
     })
   );
 
-  React.useEffect(() => {
-    if (!hasNumeric) {
-      setDisplayMode(DisplayMode.Distribution);
-      setShowBracketing(false);
-      plugin.current.setActive(false);
-    }
-  }, [hasNumeric]);
-
   // Keep the range selection plugin's offset in sync with the minimum numeric outcome.
   React.useEffect(() => {
-    const outcomes = numeric.flatMap(([, distribution]) =>
+    const outcomes = distributions.flatMap(([, distribution]) =>
       distribution.probabilities.map(([outcome]) => outcome)
     );
     if (outcomes.length > 0) {
       plugin.current.setOffset(Math.min(...outcomes));
     }
-  }, [numeric]);
+  }, [distributions]);
 
-  // Keep plugin enabled state in sync with numeric availability and display mode.
+  // Keep plugin enabled state in sync with the display mode.
   React.useEffect(() => {
-    plugin.current.setEnabled(
-      hasNumeric && displayMode !== DisplayMode.Transposed
-    );
-  }, [displayMode, hasNumeric]);
+    plugin.current.setEnabled(displayMode !== DisplayMode.Transposed);
+  }, [displayMode]);
 
   const isDarkMode = React.useContext(DarkModeContext);
-  const unavailableMessage = "Only available for numeric outcomes";
-  const bracketUnavailableMessage = !hasNumeric
-    ? unavailableMessage
-    : displayMode === DisplayMode.Transposed
+  const bracketUnavailableMessage =
+    displayMode === DisplayMode.Transposed
       ? "Not available in transposed mode"
       : undefined;
 
-  function numericModeButtonProps(available: boolean) {
-    if (available) return {};
-    return {
-      "aria-disabled": true,
-      "aria-describedby": "numeric-controls-unavailable",
-      "data-tooltip": unavailableMessage,
-      className: "tooltip-control",
-    } as const;
-  }
-
   const setNumericDisplayMode = (mode: DisplayMode) => {
-    if (!hasNumeric) return;
     setDisplayMode(mode);
     if (mode === DisplayMode.Transposed && showBracketing) {
       setShowBracketing(false);
@@ -109,11 +134,8 @@ export default function OutputPane(props: OutputPaneProps) {
   };
 
   return (
-    <>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span id="numeric-controls-unavailable" className="sr-only">
-          {unavailableMessage}
-        </span>
+    <section aria-label="Numeric outcomes">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <span id="bracket-transposed-unavailable" className="sr-only">
           Not available in transposed mode
         </span>
@@ -125,21 +147,18 @@ export default function OutputPane(props: OutputPaneProps) {
             Distribution
           </button>
           <button
-            {...numericModeButtonProps(hasNumeric)}
             aria-pressed={displayMode === DisplayMode.AtLeast}
             onClick={() => setNumericDisplayMode(DisplayMode.AtLeast)}
           >
             At least
           </button>
           <button
-            {...numericModeButtonProps(hasNumeric)}
             aria-pressed={displayMode === DisplayMode.AtMost}
             onClick={() => setNumericDisplayMode(DisplayMode.AtMost)}
           >
             At most
           </button>
           <button
-            {...numericModeButtonProps(hasNumeric)}
             aria-pressed={displayMode === DisplayMode.Transposed}
             onClick={() => setNumericDisplayMode(DisplayMode.Transposed)}
           >
@@ -153,21 +172,19 @@ export default function OutputPane(props: OutputPaneProps) {
         >
           Table
         </button>
-        <div className="relative ml-auto flex gap-2">
+        <div className="relative">
           <button
             onClick={() => {
-              if (!hasNumeric || displayMode === DisplayMode.Transposed) return;
+              if (displayMode === DisplayMode.Transposed) return;
               setShowBracketing(!showBracketing);
               plugin.current.setActive(!showBracketing);
               plugin.current.setRange(lowerBound, upperBound);
             }}
             aria-disabled={bracketUnavailableMessage !== undefined}
             aria-describedby={
-              !hasNumeric
-                ? "numeric-controls-unavailable"
-                : displayMode === DisplayMode.Transposed
-                  ? "bracket-transposed-unavailable"
-                  : undefined
+              displayMode === DisplayMode.Transposed
+                ? "bracket-transposed-unavailable"
+                : undefined
             }
             data-tooltip={bracketUnavailableMessage}
             className={`btn-toggle${bracketUnavailableMessage ? " tooltip-control" : ""}`}
@@ -175,16 +192,11 @@ export default function OutputPane(props: OutputPaneProps) {
           >
             Bracket {showBracketing ? "▲" : "▼"}
           </button>
-          <button
-            onClick={() => setShowExportModal(true)}
-            className="btn btn-secondary"
-          >
-            Export
-          </button>
         </div>
+        {actions && <div className="ml-auto">{actions}</div>}
       </div>
       <div>
-        {hasNumeric && showBracketing && displayMode !== DisplayMode.Transposed && (
+        {showBracketing && displayMode !== DisplayMode.Transposed && (
           <div>
             <div className="mb-4 flex flex-wrap items-center gap-4">
               <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
@@ -220,7 +232,10 @@ export default function OutputPane(props: OutputPaneProps) {
                       lowerBound
                     );
                     setLowerBound(newLowerBound);
-                    plugin.current.setRange(newLowerBound, Number(e.target.value));
+                    plugin.current.setRange(
+                      newLowerBound,
+                      Number(e.target.value)
+                    );
                   }}
                   className="field"
                   style={{ width: "5em" }}
@@ -228,64 +243,66 @@ export default function OutputPane(props: OutputPaneProps) {
               </label>
             </div>
             <BracketingTable
-              distributions={numeric}
+              distributions={distributions}
               lowerBound={lowerBound}
               upperBound={upperBound}
             />
           </div>
         )}
       </div>
-      <div className="flex flex-col gap-5">
-        {hasNumeric && (
-          <section>
-            {enumGroups.length > 0 && (
-              <h2 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">
-                Numeric outcomes
-              </h2>
-            )}
-            {tableMode ? (
-              <CombinedProbabilityTable
-                distributions={numeric}
-                mode={displayMode}
-              />
-            ) : (
-              <NumericChart
-                distributions={numeric}
-                mode={displayMode}
-                isDarkMode={isDarkMode}
-                plugin={plugin.current}
-              />
-            )}
-          </section>
-        )}
-        {enumGroups.map((group) => (
-          <section key={group.enumName}>
-            <h2 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">
-              {group.enumName}
-            </h2>
-            {tableMode ? (
-              <CombinedProbabilityTable
-                distributions={group.distributions}
-                mode={DisplayMode.Distribution}
-                outcomes={group.labels.map((_, index) => index)}
-                showStatistics={false}
-              />
-            ) : (
-              <CategoricalChart
-                group={group}
-                isDarkMode={isDarkMode}
-              />
-            )}
-          </section>
-        ))}
+      {tableMode ? (
+        <CombinedProbabilityTable
+          distributions={distributions}
+          mode={displayMode}
+        />
+      ) : (
+        <NumericChart
+          distributions={distributions}
+          mode={displayMode}
+          isDarkMode={isDarkMode}
+          plugin={plugin.current}
+        />
+      )}
+    </section>
+  );
+}
+
+function EnumOutputSection({
+  group,
+  actions,
+}: {
+  group: EnumDistributionGroup;
+  actions?: React.ReactNode;
+}) {
+  const [tableMode, setTableMode] = React.useState(false);
+  const isDarkMode = React.useContext(DarkModeContext);
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h2 className="mr-auto text-sm font-semibold text-[var(--text-muted)]">
+          {group.enumName}
+        </h2>
+        <button
+          className="btn-toggle"
+          aria-pressed={tableMode}
+          onClick={() => setTableMode(!tableMode)}
+        >
+          Table
+        </button>
+        {actions}
       </div>
-      
-      <ExportModal 
-        distributions={props.distributions.map(([name, distribution]) => ({ name, distribution }))}
-        isOpen={showExportModal}
-        onClose={() => setShowExportModal(false)}
-      />
-    </>
+      {tableMode ? (
+        <CombinedProbabilityTable
+          distributions={group.distributions}
+          mode={DisplayMode.Distribution}
+          outcomes={group.labels.map((_, index) => index)}
+          showStatistics={false}
+        />
+      ) : (
+        <CategoricalChart group={group} isDarkMode={isDarkMode} />
+      )}
+    </section>
   );
 }
 

@@ -12,7 +12,12 @@ export interface EnumDistributionGroup {
 export interface PartitionedDistributions {
   numeric: NamedDistribution[];
   enumGroups: EnumDistributionGroup[];
+  sections: OutputSection[];
 }
+
+export type OutputSection =
+  | { kind: "numeric"; distributions: NamedDistribution[] }
+  | { kind: "enum"; group: EnumDistributionGroup };
 
 export enum DisplayMode {
   Distribution,
@@ -89,10 +94,16 @@ export function partitionDistributions(
 ): PartitionedDistributions {
   const numeric: NamedDistribution[] = [];
   const enumGroups = new Map<string, EnumDistributionGroup>();
+  const sections: OutputSection[] = [];
+  let hasNumericSection = false;
 
   for (const namedDistribution of distributions) {
     const [, distribution] = namedDistribution;
     if (distribution.enum_name === undefined) {
+      if (!hasNumericSection) {
+        sections.push({ kind: "numeric", distributions: numeric });
+        hasNumericSection = true;
+      }
       numeric.push(namedDistribution);
       continue;
     }
@@ -105,11 +116,16 @@ export function partitionDistributions(
         distributions: [],
       };
       enumGroups.set(distribution.enum_name, group);
+      sections.push({ kind: "enum", group });
     }
     group.distributions.push(namedDistribution);
   }
 
-  return { numeric, enumGroups: Array.from(enumGroups.values()) };
+  return {
+    numeric,
+    enumGroups: Array.from(enumGroups.values()),
+    sections,
+  };
 }
 
 export function numericOutcomeRange(
@@ -250,4 +266,3 @@ function outcomeLabel(chartData: NamedDistribution[], outcome: number): string {
   }
   return outcome.toString();
 }
-
