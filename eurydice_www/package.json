@@ -19,6 +19,7 @@
     "@uiw/codemirror-theme-github": "4.23.12",
     "@uiw/react-codemirror": "4.23.12",
     "chart.js": "4.4.9",
+    "chartjs-chart-matrix": "^3.0.5",
     "eurydice_wasm": "file:../eurydice_wasm/pkg",
     "katex": "^0.18.1",
     "react": "19.1.0",
