@@ -10,7 +10,6 @@ import {
 } from "../utils/tupleData";
 import { Chart, registerables } from "chart.js";
 import { DarkModeContext } from "./DarkModeSwitcher";
-import ExportModal from "./ExportModal";
 import {
   ChartJsRangeSelect,
   makeChartJsRangeSelect,
@@ -33,53 +32,19 @@ import {
 Chart.register(...registerables);
 
 export default function OutputPane(props: OutputPaneProps) {
-  const [showExportModal, setShowExportModal] = React.useState(false);
   const tupleDistributions = props.tupleDistributions ?? [];
 
-  const exportButton = (
-    <button
-      onClick={() => setShowExportModal(true)}
-      className="btn btn-secondary"
-    >
-      Export
-    </button>
-  );
-
-  // The export control rides in the first section's toolbar so it never sits
-  // alone on its own line. Scalar sections render first when present; otherwise
-  // it goes on the first tuple section.
-  const hasScalarOutput = props.distributions.length > 0;
-
   return (
-    <>
-      <div className="flex flex-col gap-6">
-        <OutputSections
-          distributions={props.distributions}
-          exportButton={exportButton}
+    <div className="flex flex-col gap-6">
+      <OutputSections distributions={props.distributions} />
+      {tupleDistributions.map(([name, distribution], index) => (
+        <TupleOutputSection
+          key={`tuple:${index}:${name}`}
+          name={name}
+          distribution={distribution}
         />
-        {tupleDistributions.map(([name, distribution], index) => (
-          <TupleOutputSection
-            key={`tuple:${index}:${name}`}
-            name={name}
-            distribution={distribution}
-            actions={!hasScalarOutput && index === 0 ? exportButton : undefined}
-          />
-        ))}
-      </div>
-
-      <ExportModal
-        distributions={props.distributions.map(([name, distribution]) => ({
-          name,
-          distribution,
-        }))}
-        tuples={tupleDistributions.map(([name, distribution]) => ({
-          name,
-          distribution,
-        }))}
-        isOpen={showExportModal}
-        onClose={() => setShowExportModal(false)}
-      />
-    </>
+      ))}
+    </div>
   );
 }
 
@@ -90,10 +55,8 @@ export default function OutputPane(props: OutputPaneProps) {
  */
 function OutputSections({
   distributions,
-  exportButton,
 }: {
   distributions: [string, Distribution][];
-  exportButton?: React.ReactNode;
 }) {
   const { sections } = React.useMemo(
     () => partitionDistributions(distributions),
@@ -101,18 +64,16 @@ function OutputSections({
   );
   return (
     <>
-      {sections.map((section, index) =>
+      {sections.map((section) =>
         section.kind === "numeric" ? (
           <NumericOutputSection
             key="numeric"
             distributions={section.distributions}
-            actions={index === 0 ? exportButton : undefined}
           />
         ) : (
           <EnumOutputSection
             key={`enum:${section.group.enumName}`}
             group={section.group}
-            actions={index === 0 ? exportButton : undefined}
           />
         )
       )}
@@ -122,10 +83,8 @@ function OutputSections({
 
 function NumericOutputSection({
   distributions,
-  actions,
 }: {
   distributions: [string, Distribution][];
-  actions?: React.ReactNode;
 }) {
   const [displayMode, setDisplayMode] = React.useState(
     DisplayMode.Distribution
@@ -240,7 +199,6 @@ function NumericOutputSection({
             Bracket {showBracketing ? "▲" : "▼"}
           </button>
         </div>
-        {actions && <div className="ml-auto">{actions}</div>}
       </div>
       <div>
         {showBracketing && displayMode !== DisplayMode.Transposed && (
@@ -314,13 +272,7 @@ function NumericOutputSection({
   );
 }
 
-function EnumOutputSection({
-  group,
-  actions,
-}: {
-  group: EnumDistributionGroup;
-  actions?: React.ReactNode;
-}) {
+function EnumOutputSection({ group }: { group: EnumDistributionGroup }) {
   const [tableMode, setTableMode] = React.useState(false);
   const isDarkMode = React.useContext(DarkModeContext);
 
@@ -337,7 +289,6 @@ function EnumOutputSection({
         >
           Table
         </button>
-        {actions}
       </div>
       {tableMode ? (
         <CombinedProbabilityTable
@@ -358,11 +309,9 @@ type TupleView = "heatmap" | "table" | "list" | "marginals";
 function TupleOutputSection({
   name,
   distribution,
-  actions,
 }: {
   name: string;
   distribution: TupleDistribution;
-  actions?: React.ReactNode;
 }) {
   const arity = distribution.fields.length;
 
@@ -404,7 +353,6 @@ function TupleOutputSection({
             </button>
           ))}
         </div>
-        {actions}
       </div>
       {(activeView === "heatmap" || activeView === "table") && (
         <TupleGrid
