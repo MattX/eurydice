@@ -18,7 +18,7 @@ use thiserror::Error;
 use crate::{
     ast::{
         self, BareListItem, BinaryOp, EnumDefinition, Expression, FunctionDefinition, ListItem,
-        PositionOrder, SetParam, Statement, StaticType, TypeConstraint, UnaryOp, WithRange,
+        PositionOrder, SetParam, Statement, StaticType, UnaryOp, WithRange,
     },
     dice::{MultisetCrossProductIterator, Pool},
     primitives::{register_primitives, Primitive},
@@ -624,13 +624,12 @@ impl Evaluator {
                     .args
                     .iter()
                     .map(|arg| {
-                        arg.value
-                            .ty
-                            .as_ref()
-                            .map(|ty| self.resolve_type_constraint(ty, arg.range))
-                            .transpose()
+                        arg.value.ty.map(|shape| ResolvedArgType {
+                            shape,
+                            outcome: None,
+                        })
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect();
                 self.functions.insert(
                     fd.name.value.clone(),
                     Function::UserDefined(Rc::new(UserFunction {
@@ -755,27 +754,6 @@ impl Evaluator {
             }
         }
         Ok(None)
-    }
-
-    fn resolve_type_constraint(
-        &self,
-        constraint: &TypeConstraint,
-        range: ast::Range,
-    ) -> Result<ResolvedArgType, RuntimeError> {
-        let outcome = match constraint.outcome.as_deref() {
-            None => None,
-            Some("int") => Some(ScalarType::Int),
-            Some(name) => Some(ScalarType::Enum(self.enums.get(name).cloned().ok_or_else(
-                || RuntimeError::EnumTypeError {
-                    range: range.into(),
-                    message: format!("enum type {name} is not defined"),
-                },
-            )?)),
-        };
-        Ok(ResolvedArgType {
-            shape: constraint.shape,
-            outcome,
-        })
     }
 
     fn evaluate(

@@ -57,25 +57,6 @@ fn rejects_mixed_enum_list() {
 }
 
 #[test]
-fn checks_numeric_and_named_constraints() {
-    let numeric_error = run(r#"
-        enum: RESULT { MISS, HIT }
-        function: numeric X:int { result: X }
-        output [numeric HIT]
-        "#)
-    .unwrap_err();
-    assert!(numeric_error.contains("expected int"), "{numeric_error}");
-
-    let enum_error = run(r#"
-        enum: RESULT { MISS, HIT }
-        function: typed X:RESULT { result: X }
-        output [typed 1]
-        "#)
-    .unwrap_err();
-    assert!(enum_error.contains("expected RESULT"), "{enum_error}");
-}
-
-#[test]
 fn enum_names_and_members_are_immutable() {
     for program in [
         "enum: RESULT { MISS, HIT } MISS: 3",
@@ -103,8 +84,8 @@ fn enum_names_do_not_replace_or_get_reused_by_other_bindings() {
 fn supports_enum_shape_constraints_and_safe_operations() {
     let outputs = run(r#"
         enum: RESULT { MISS, HIT }
-        function: pool D:d<RESULT> { result: D }
-        function: sequence S:s<RESULT> { result: [reverse S] }
+        function: pool D:d { result: D }
+        function: sequence S:s { result: [reverse S] }
         function: generic scalar X:n { result: X }
         output [pool d{MISS, HIT}]
         output [generic scalar d{MISS, HIT}]
@@ -159,32 +140,9 @@ fn equality_aware_operations_require_the_same_enum_type() {
 }
 
 #[test]
-fn named_types_must_be_declared_before_functions() {
-    let error = run("function: typed X:RESULT { result: X } enum: RESULT { A }").unwrap_err();
-    assert!(error.contains("RESULT is not defined"), "{error}");
-}
-
-#[test]
-fn numeric_container_constraints_reject_enums() {
-    for annotation in ["s<int>", "d<int>"] {
-        let program = format!(
-            "enum: RESULT {{ A, B }} function: typed X:{annotation} {{ result: X }} output [typed {{A, B}}]"
-        );
-        let error = run(&program).unwrap_err();
-        assert!(error.contains("expected int"), "{error}");
-    }
-}
-
-#[test]
-fn untyped_empty_values_do_not_infer_an_enum_type() {
-    let error =
-        run("enum: RESULT { A } function: typed X:s<RESULT> { result: X } output [typed {}]")
-            .unwrap_err();
-    assert!(error.contains("expected RESULT, found int"), "{error}");
-
+fn shape_constraints_accept_typed_empty_enum_values() {
     let outputs =
-        run("enum: RESULT { A } function: typed X:s<RESULT> { result: X } output [typed {A:0}]")
-            .unwrap();
+        run("enum: RESULT { A } function: typed X:s { result: X } output [typed {A:0}]").unwrap();
     assert!(matches!(outputs[0].0, RuntimeValue::List(_, _)));
 }
 

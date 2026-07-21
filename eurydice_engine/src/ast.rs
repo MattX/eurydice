@@ -249,15 +249,7 @@ pub enum FunctionDefinitionItem {
 #[derive(Debug, Clone, Serialize)]
 pub struct ArgWithType {
     pub name: String,
-    pub ty: Option<TypeConstraint>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TypeConstraint {
-    pub shape: StaticType,
-    /// `None` means any homogeneous outcome type. `int` and enum names are
-    /// resolved by the evaluator when the function is defined.
-    pub outcome: Option<String>,
+    pub ty: Option<StaticType>,
 }
 
 pub fn make_function_definition(
@@ -393,7 +385,7 @@ mod tests {
             .parse(text)
             .unwrap();
         assert_eq!(serde_lexpr::to_string(&ast).unwrap(), "((name (value . \"explode {}\")) \
-            (args ((value (name . \"DIE\") (ty ((shape . Pool) (outcome)))))) (body ((value Return (value (value Reference . \"DIE\"))))))");
+            (args ((value (name . \"DIE\") (ty Pool)))) (body ((value Return (value (value Reference . \"DIE\"))))))");
     }
 
     #[test]

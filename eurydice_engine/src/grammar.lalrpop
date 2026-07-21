@@ -198,19 +198,10 @@ SingleArg: FunctionDefinitionItem = {
     <id:VariableIdentifier> => FunctionDefinitionItem::ArgWithType(ArgWithType { name: id, ty: None }),
 };
 
-TypeConstraint: TypeConstraint = {
-    "n" => TypeConstraint { shape: StaticType::Int, outcome: None },
-    "s" => TypeConstraint { shape: StaticType::List, outcome: None },
-    "d" => TypeConstraint { shape: StaticType::Pool, outcome: None },
-    "int" => TypeConstraint { shape: StaticType::Int, outcome: Some("int".to_string()) },
-    "s" "<" <t:OutcomeTypeName> ">" => TypeConstraint { shape: StaticType::List, outcome: Some(t) },
-    "d" "<" <t:OutcomeTypeName> ">" => TypeConstraint { shape: StaticType::Pool, outcome: Some(t) },
-    <t:VariableIdentifier> => TypeConstraint { shape: StaticType::Int, outcome: Some(t) },
-};
-
-OutcomeTypeName: String = {
-    "int" => "int".to_string(),
-    <t:VariableIdentifier> => t,
+TypeConstraint: StaticType = {
+    "n" => StaticType::Int,
+    "s" => StaticType::List,
+    "d" => StaticType::Pool,
 };
 
 // TOOD: avoid unwrap here

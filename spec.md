@@ -637,7 +637,7 @@ Assigning to the name of an enum type or enum member is an error. Enum names als
 EnumDefinitionStatement = 'enum' ':' VariableName '{' VariableName {',' VariableName} '}'.
 ```
 
-Enum definitions are executed sequentially and are only valid at the top level. Consequently, an enum type used by a function annotation must be declared before that function definition is executed.
+Enum definitions are executed sequentially and are only valid at the top level.
 
 ### Function definition
 
@@ -648,8 +648,7 @@ Function definitions are executed sequentially, like other statements. A functio
 ```
 FunctionDefinitionStatement = 'function' ':' (Word | Parameter)+ Block.
 Parameter = VariableName [':' Type].
-Type = 'n' | 's' | 'd' | OutcomeType | 's' '<' OutcomeType '>' | 'd' '<' OutcomeType '>'.
-OutcomeType = 'int' | VariableName.
+Type = 'n' | 's' | 'd'.
 ```
 
 > [!IMPORTANT]
@@ -657,7 +656,7 @@ OutcomeType = 'int' | VariableName.
 
 The function's identifier is the sequence of words and argument positions in the name. It is valid for a function identifier to contain no words, or to contain no argument positions.
 
-Each argument name can optionally be annotated with a type. `n`, `s`, and `d` constrain only the value's shape to scalar, sequence, and pool respectively; their outcomes may be integers, members of any one enum, or tuples. `int`, `s<int>`, and `d<int>` additionally require numeric outcomes. An enum name, `s<ENUM>`, or `d<ENUM>` requires outcomes of that particular enum. There is currently no annotation for requiring a particular tuple type. Specifying a shape causes the usual argument coercion and pool-based evaluation, while incompatible outcome types produce an error.
+Each argument name can optionally be annotated with a shape: `n` for a scalar, `s` for a sequence, or `d` for a pool. The value's outcomes may be integers, members of any one enum, or tuples; function declarations cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
 
 An enum or tuple scalar may be coerced to a singleton sequence or pool. A dimension-one enum or tuple pool may be expanded for a scalar or sequence parameter. Non-numeric sequences cannot be summed into scalars, and non-numeric pools always have dimension one.
 

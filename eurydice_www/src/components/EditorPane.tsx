@@ -156,7 +156,7 @@ const parserWithMetadata = parser.configure({
       // Some of these are missing otherwise I get an error: !, /, *, !=, @
       "# - ^ + = < <= > >= & |": t.operator,
       d: t.operatorKeyword,
-      "ty-n ty-s ty-int": t.typeName,
+      "ty-n ty-s": t.typeName,
     }),
     indentNodeProp.add({
       Block: (context) =>

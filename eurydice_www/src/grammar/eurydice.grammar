@@ -160,11 +160,5 @@ Repeat { ":" Expression }
 Type {
     ty<"n", "ty-n"> |
     ty<"s", "ty-s"> |
-    kw<"d"> |
-    ty<"int", "ty-int"> |
-    VariableIdentifier |
-    ty<"s", "ty-s"> "<" OutcomeType ">" |
-    kw<"d"> "<" OutcomeType ">"
+    kw<"d">
 }
-
-OutcomeType { ty<"int", "ty-int"> | VariableIdentifier }
