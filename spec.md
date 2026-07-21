@@ -33,7 +33,7 @@ _Block comments_ start and end with backslashes: `\ this is a comment \`.
 _Line comments_ start with a triple backslashes: `\\\ this is a line comment`.
 
 > [!Important]
-> Anydice does not support line comments.
+> AnyDice does not support line comments.
 
 Comments are treated as whitespace, and can be used to separate tokens, e.g. `[hello\a comment\world]` is equivalent to `[hello world]`.
 
@@ -662,6 +662,9 @@ The maximum number of rerolls is controlled by the `"explode depth"` [global set
 output [reroll d6]  \ Rerolls on 6s, keeping only the reroll result \
 ```
 
+> [!IMPORTANT]
+> The `[reroll POOL:d]` function is not available in AnyDice.
+
 ### `[reroll POOL:d on COND:s]`
 
 This is similar to `[reroll POOL:d]`, but instead of rerolling on the highest face value, it rerolls on any value contained in the `COND` list.
@@ -672,6 +675,9 @@ The maximum number of rerolls is controlled by the `"explode depth"` [global set
 output [reroll d6 on {1, 6}]  \ Rerolls on both 1s and 6s \
 output [reroll d{1, 2, 3, 4} on {1, 4}]  \ Rerolls on 1s and 4s \
 ```
+
+> [!IMPORTANT]
+> The `[reroll POOL:d on COND:n]` function is not available in AnyDice.
 
 ### `[highest COUNT:n of POOL:d]`, `[lowest COUNT:n of POOL:d]`, `[middle COUNT:n of POOL:d]`
 
