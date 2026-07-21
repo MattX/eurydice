@@ -1,9 +1,15 @@
-import { Distribution } from "../util";
+import { Distribution, TupleDistribution } from "../util";
 import { type NamedDistribution, partitionDistributions } from "./chartData";
+import { computeTupleRows, fieldName } from "./tupleData";
 
 export interface DistributionData {
   name: string;
   distribution: Distribution;
+}
+
+export interface TupleData {
+  name: string;
+  distribution: TupleDistribution;
 }
 
 export function escapeCSVField(field: string): string {
@@ -43,13 +49,28 @@ function generateWideBlock(
   return rows.join("\n");
 }
 
-export function generateSpreadsheetCSV(distributions: DistributionData[]): string {
+/** One CSV block per tuple: a field-per-column joint table. */
+function generateTupleBlock({ name, distribution }: TupleData): string {
+  const header = [
+    ...distribution.fields.map((schema, i) => escapeCSVField(fieldName(schema, i))),
+    "Probability",
+  ].join(",");
+  const rows = computeTupleRows(distribution, "lexicographic").map((row) =>
+    [...row.labels.map(escapeCSVField), row.probability.toString()].join(",")
+  );
+  return [escapeCSVField(name), header, ...rows].join("\n");
+}
+
+export function generateSpreadsheetCSV(
+  distributions: DistributionData[],
+  tuples: TupleData[] = []
+): string {
   const namedDistributions: NamedDistribution[] = distributions.map(
     ({ name, distribution }) => [name, distribution]
   );
   const { sections } = partitionDistributions(namedDistributions);
 
-  return sections
+  const blocks = sections
     .map((section) => {
       if (section.kind === "numeric") {
         const outcomes = Array.from(
@@ -83,8 +104,9 @@ export function generateSpreadsheetCSV(distributions: DistributionData[]): strin
         outcomes,
         (outcome) => section.group.labels[outcome] ?? outcome.toString()
       );
-    })
-    .join("\n\n");
+    });
+
+  return [...blocks, ...tuples.map(generateTupleBlock)].join("\n\n");
 }
 
 export function generateAnyDiceFormatCSV(distributions: DistributionData[]): string {
