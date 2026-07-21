@@ -1,7 +1,7 @@
 import React from "react";
 import toast from "react-hot-toast";
 import {
-  generateValuesOnlyCSV,
+  generateSpreadsheetCSV,
   generateAnyDiceFormatCSV,
   downloadCSV,
   DistributionData,
@@ -16,17 +16,29 @@ interface ExportModalProps {
 export default function ExportModal({ distributions, isOpen, onClose }: ExportModalProps) {
   const [csvContent, setCsvContent] = React.useState("");
   const [csvFilename, setCsvFilename] = React.useState("");
-  const [csvFormat, setCsvFormat] = React.useState<"values" | "anydice">("values");
+  const [csvFormat, setCsvFormat] = React.useState<"spreadsheet" | "anydice">(
+    "spreadsheet"
+  );
   const dialogRef = React.useRef<HTMLDialogElement>(null);
+  const omittedFromAnyDice = distributions.filter(
+    ({ distribution }) => distribution.enum_name !== undefined
+  ).length;
 
   // Update CSV content when format or distributions change
   React.useEffect(() => {
     if (distributions.length > 0) {
-      const generate = csvFormat === "values" ? generateValuesOnlyCSV : generateAnyDiceFormatCSV;
-      const filename = csvFormat === "values" ? "distributions_values.csv" : "distributions_anydice.csv";
+      const generate = csvFormat === "spreadsheet"
+        ? generateSpreadsheetCSV
+        : generateAnyDiceFormatCSV;
+      const filename = csvFormat === "spreadsheet"
+        ? "distributions.csv"
+        : "distributions_anydice.csv";
       const csv = generate(distributions);
       setCsvContent(csv);
       setCsvFilename(filename);
+    } else {
+      setCsvContent("");
+      setCsvFilename("");
     }
   }, [csvFormat, distributions]);
 
@@ -76,10 +88,10 @@ export default function ExportModal({ distributions, isOpen, onClose }: ExportMo
       <h2 className="mb-3 text-lg font-semibold">Export distributions</h2>
       <div className="segmented mb-4" role="group" aria-label="Export format">
         <button
-          aria-pressed={csvFormat === "values"}
-          onClick={() => setCsvFormat("values")}
+          aria-pressed={csvFormat === "spreadsheet"}
+          onClick={() => setCsvFormat("spreadsheet")}
         >
-          Value table
+          Spreadsheet
         </button>
         <button
           aria-pressed={csvFormat === "anydice"}
@@ -88,16 +100,31 @@ export default function ExportModal({ distributions, isOpen, onClose }: ExportMo
           AnyDice format
         </button>
       </div>
+      {csvFormat === "anydice" && omittedFromAnyDice > 0 && (
+        <p className="mb-3 text-sm text-[var(--text-muted)]">
+          AnyDice format supports numeric outputs only. {omittedFromAnyDice}{" "}
+          non-numeric {omittedFromAnyDice === 1 ? "output is" : "outputs are"}{" "}
+          omitted.
+        </p>
+      )}
       <textarea
         value={csvContent}
         readOnly
         className="field h-48 w-full resize-none font-mono"
       />
       <div className="mt-4 flex gap-2">
-        <button onClick={handleCopyToClipboard} className="btn btn-primary">
+        <button
+          onClick={handleCopyToClipboard}
+          className="btn btn-primary"
+          disabled={csvContent.length === 0}
+        >
           Copy to clipboard
         </button>
-        <button onClick={handleDownload} className="btn btn-secondary">
+        <button
+          onClick={handleDownload}
+          className="btn btn-secondary"
+          disabled={csvContent.length === 0}
+        >
           Download
         </button>
         <button onClick={onClose} className="btn btn-ghost ml-auto">

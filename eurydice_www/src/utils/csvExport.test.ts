@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateValuesOnlyCSV, generateAnyDiceFormatCSV, escapeCSVField, DistributionData } from './csvExport';
+import { generateSpreadsheetCSV, generateAnyDiceFormatCSV, escapeCSVField, DistributionData } from './csvExport';
 
 describe('csvExport', () => {
   const testDistributions: DistributionData[] = [
@@ -31,40 +31,91 @@ describe('csvExport', () => {
     }
   ];
 
-  describe('generateValuesOnlyCSV', () => {
-    it('should generate CSV with outcome header and distribution names', () => {
-      const result = generateValuesOnlyCSV(testDistributions);
+  describe('generateSpreadsheetCSV', () => {
+    it('should generate a numeric section with outcome header and distribution names', () => {
+      const result = generateSpreadsheetCSV(testDistributions);
       const lines = result.split('\n');
-      
-      expect(lines[0]).toBe('Outcome,output 1,output 2');
+
+      expect(lines[0]).toBe('Numeric outcomes');
+      expect(lines[1]).toBe('Outcome,output 1,output 2');
     });
 
     it('should include all unique outcomes sorted', () => {
-      const result = generateValuesOnlyCSV(testDistributions);
+      const result = generateSpreadsheetCSV(testDistributions);
       const lines = result.split('\n');
-      
-      expect(lines[1].split(',')[0]).toBe('2');
-      expect(lines[2].split(',')[0]).toBe('3');
-      expect(lines[3].split(',')[0]).toBe('4');
-      expect(lines[4].split(',')[0]).toBe('5');
-      expect(lines[5].split(',')[0]).toBe('6');
-      expect(lines[6].split(',')[0]).toBe('7');
-      expect(lines[7].split(',')[0]).toBe('8');
-      expect(lines[8].split(',')[0]).toBe('9');
+
+      expect(lines[2].split(',')[0]).toBe('2');
+      expect(lines[3].split(',')[0]).toBe('3');
+      expect(lines[4].split(',')[0]).toBe('4');
+      expect(lines[5].split(',')[0]).toBe('5');
+      expect(lines[6].split(',')[0]).toBe('6');
+      expect(lines[7].split(',')[0]).toBe('7');
+      expect(lines[8].split(',')[0]).toBe('8');
+      expect(lines[9].split(',')[0]).toBe('9');
     });
 
     it('should include probabilities for each distribution', () => {
-      const result = generateValuesOnlyCSV(testDistributions);
+      const result = generateSpreadsheetCSV(testDistributions);
       const lines = result.split('\n');
-      
+
       // Check outcome 2 (exists in dist 1, not in dist 2)
-      expect(lines[1]).toBe('2,0.111111111111,0');
-      
+      expect(lines[2]).toBe('2,0.111111111111,0');
+
       // Check outcome 3 (exists in both)
-      expect(lines[2]).toBe('3,0.222222222222,0.037037037037');
-      
+      expect(lines[3]).toBe('3,0.222222222222,0.037037037037');
+
       // Check outcome 9 (doesn't exist in dist 1, exists in dist 2)
-      expect(lines[8]).toBe('9,0,0.037037037037');
+      expect(lines[9]).toBe('9,0,0.037037037037');
+    });
+
+    it('separates incompatible output types into ordered blocks', () => {
+      const mixed: DistributionData[] = [
+        {
+          name: 'attack',
+          distribution: {
+            probabilities: [[0, 0.25], [1, 0.75]],
+            enum_name: 'RESULT',
+            labels: ['MISS', 'HIT'],
+          },
+        },
+        testDistributions[0],
+        {
+          name: 'defend',
+          distribution: {
+            probabilities: [[1, 1]],
+            enum_name: 'RESULT',
+            labels: ['MISS', 'HIT'],
+          },
+        },
+        {
+          name: 'weather',
+          distribution: {
+            probabilities: [[0, 1]],
+            enum_name: 'WEATHER',
+            labels: ['SUN', 'RAIN'],
+          },
+        },
+      ];
+
+      expect(generateSpreadsheetCSV(mixed)).toBe([
+        'RESULT',
+        'Outcome,attack,defend',
+        'MISS,0.25,0',
+        'HIT,0.75,1',
+        '',
+        'Numeric outcomes',
+        'Outcome,output 1',
+        '2,0.111111111111',
+        '3,0.222222222222',
+        '4,0.333333333333',
+        '5,0.222222222222',
+        '6,0.111111111111',
+        '',
+        'WEATHER',
+        'Outcome,weather',
+        'SUN,1',
+        'RAIN,0',
+      ].join('\n'));
     });
   });
 
@@ -131,6 +182,25 @@ describe('csvExport', () => {
       // Should have #,% headers for both
       expect(lines.filter(line => line === '#,%').length).toBe(2);
     });
+
+    it('omits categorical outputs', () => {
+      const categorical: DistributionData = {
+        name: 'attack',
+        distribution: {
+          probabilities: [[0, 0.25], [1, 0.75]],
+          enum_name: 'RESULT',
+          labels: ['MISS', 'HIT'],
+        },
+      };
+      const result = generateAnyDiceFormatCSV([
+        categorical,
+        testDistributions[0],
+      ]);
+
+      expect(result).toMatch(/^output 1/);
+      expect(result).not.toContain('attack');
+      expect(result).not.toContain('RESULT');
+    });
   });
 
   describe('escapeCSVField', () => {
@@ -174,11 +244,11 @@ describe('csvExport', () => {
       }
     ];
 
-    it('should handle special characters in generateValuesOnlyCSV', () => {
-      const result = generateValuesOnlyCSV(specialDistributions);
+    it('should handle special characters in generateSpreadsheetCSV', () => {
+      const result = generateSpreadsheetCSV(specialDistributions);
       const lines = result.split('\n');
-      
-      expect(lines[0]).toBe('Outcome,"output ""with quotes""","output, with comma"');
+
+      expect(lines[1]).toBe('Outcome,"output ""with quotes""","output, with comma"');
     });
 
     it('should handle special characters in generateAnyDiceFormatCSV', () => {

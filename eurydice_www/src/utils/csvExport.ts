@@ -1,4 +1,5 @@
 import { Distribution } from "../util";
+import { type NamedDistribution, partitionDistributions } from "./chartData";
 
 export interface DistributionData {
   name: string;
@@ -15,49 +16,86 @@ export function escapeCSVField(field: string): string {
   return field;
 }
 
-export function generateValuesOnlyCSV(distributions: DistributionData[]): string {
-  const allOutcomes = new Set<number>();
-  distributions.forEach(({ distribution }) => {
-    distribution.probabilities.forEach(([outcome]) => allOutcomes.add(outcome));
-  });
-  const sortedOutcomes = Array.from(allOutcomes).sort((a, b) => a - b);
+function generateWideBlock(
+  title: string,
+  distributions: NamedDistribution[],
+  outcomes: number[],
+  outcomeLabel: (outcome: number) => string
+): string {
+  const rows = [
+    escapeCSVField(title),
+    ["Outcome", ...distributions.map(([name]) => escapeCSVField(name))].join(","),
+  ];
 
-  let csv = 'Outcome';
-  distributions.forEach(({ name }) => {
-    csv += ',' + escapeCSVField(name);
-  });
-  csv += '\n';
+  for (const outcome of outcomes) {
+    rows.push(
+      [
+        escapeCSVField(outcomeLabel(outcome)),
+        ...distributions.map(([, distribution]) =>
+          (
+            distribution.probabilities.find(([value]) => value === outcome)?.[1] ?? 0
+          ).toString()
+        ),
+      ].join(",")
+    );
+  }
 
-  sortedOutcomes.forEach(outcome => {
-    const label = distributions
-      .map(({ distribution }) => distribution.labels?.[outcome])
-      .find((value) => value !== undefined);
-    csv += escapeCSVField(label ?? outcome.toString());
-    distributions.forEach(({ distribution }) => {
-      const prob = distribution.probabilities.find(([o]) => o === outcome)?.[1] || 0;
-      csv += ',' + prob.toString();
-    });
-    csv += '\n';
-  });
+  return rows.join("\n");
+}
 
-  return csv;
+export function generateSpreadsheetCSV(distributions: DistributionData[]): string {
+  const namedDistributions: NamedDistribution[] = distributions.map(
+    ({ name, distribution }) => [name, distribution]
+  );
+  const { sections } = partitionDistributions(namedDistributions);
+
+  return sections
+    .map((section) => {
+      if (section.kind === "numeric") {
+        const outcomes = Array.from(
+          new Set(
+            section.distributions.flatMap(([, distribution]) =>
+              distribution.probabilities.map(([outcome]) => outcome)
+            )
+          )
+        ).sort((a, b) => a - b);
+        return generateWideBlock(
+          "Numeric outcomes",
+          section.distributions,
+          outcomes,
+          (outcome) => outcome.toString()
+        );
+      }
+
+      const probabilityOutcomes = section.group.distributions.flatMap(
+        ([, distribution]) =>
+          distribution.probabilities.map(([outcome]) => outcome)
+      );
+      const outcomes = Array.from(
+        new Set([
+          ...section.group.labels.map((_, index) => index),
+          ...probabilityOutcomes,
+        ])
+      ).sort((a, b) => a - b);
+      return generateWideBlock(
+        section.group.enumName,
+        section.group.distributions,
+        outcomes,
+        (outcome) => section.group.labels[outcome] ?? outcome.toString()
+      );
+    })
+    .join("\n\n");
 }
 
 export function generateAnyDiceFormatCSV(distributions: DistributionData[]): string {
   let csv = '';
-  
-  distributions.forEach(({ name, distribution }, index) => {
+
+  const numericDistributions = distributions.filter(
+    ({ distribution }) => distribution.enum_name === undefined
+  );
+
+  numericDistributions.forEach(({ name, distribution }, index) => {
     if (index > 0) csv += '\n';
-    
-    if (distribution.enum_name !== undefined) {
-      csv += `${escapeCSVField(name)},${escapeCSVField(distribution.enum_name)}\n`;
-      csv += 'Outcome,%\n';
-      distribution.probabilities.forEach(([outcome, probability]) => {
-        const label = distribution.labels?.[outcome] ?? outcome.toString();
-        csv += `${escapeCSVField(label)},${(probability * 100).toFixed(10)}\n`;
-      });
-      return;
-    }
 
     const outcomes = distribution.probabilities.map(([outcome]) => outcome);
     const probabilities = distribution.probabilities.map(([, probability]) => probability);
@@ -65,8 +103,8 @@ export function generateAnyDiceFormatCSV(distributions: DistributionData[]): str
     const mean = outcomes.reduce((sum, val, i) => sum + val * probabilities[i], 0);
     const variance = outcomes.reduce((sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i], 0);
     const stdDev = Math.sqrt(variance);
-    const min = Math.min(...outcomes);
-    const max = Math.max(...outcomes);
+    const min = outcomes.length > 0 ? Math.min(...outcomes) : 0;
+    const max = outcomes.length > 0 ? Math.max(...outcomes) : 0;
     
     csv += `${escapeCSVField(name)},${mean},${stdDev},${min},${max}\n`;
     csv += '#,%\n';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DisplayMode, prepareChartData } from "./chartData";
-import { generateAnyDiceFormatCSV, generateValuesOnlyCSV } from "./csvExport";
+import { generateAnyDiceFormatCSV, generateSpreadsheetCSV } from "./csvExport";
 import { computeTableData } from "./tableData";
 import { Distribution } from "../util";
 
@@ -20,10 +20,9 @@ describe("enum output metadata", () => {
 
   it("exports enum member names without numeric statistics", () => {
     const distributions = [{ name: "attack", distribution: resultDistribution }];
-    expect(generateValuesOnlyCSV(distributions)).toContain("MISS,0.25");
-    const anyDice = generateAnyDiceFormatCSV(distributions);
-    expect(anyDice).toContain("attack,RESULT");
-    expect(anyDice).toContain("HIT,75.0000000000");
-    expect(anyDice).not.toContain("0.75,0.433");
+    expect(generateSpreadsheetCSV(distributions)).toBe(
+      "RESULT\nOutcome,attack\nMISS,0.25\nHIT,0.75"
+    );
+    expect(generateAnyDiceFormatCSV(distributions)).toBe("");
   });
 });
