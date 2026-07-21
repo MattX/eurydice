@@ -1,5 +1,6 @@
 import React from "react";
-import { Bar, Line } from "react-chartjs-2";
+import { Bar, Line, Chart as ReactChart } from "react-chartjs-2";
+import { MatrixController, MatrixElement } from "chartjs-chart-matrix";
 import { Distribution, TupleDistribution } from "../util";
 import {
   fieldName,
@@ -8,7 +9,14 @@ import {
   computeTupleRows,
   TupleSort,
 } from "../utils/tupleData";
-import { Chart, registerables } from "chart.js";
+import {
+  Chart,
+  registerables,
+  ChartData,
+  ChartOptions,
+  ScriptableContext,
+  TooltipItem,
+} from "chart.js";
 import { DarkModeContext } from "./DarkModeSwitcher";
 import {
   ChartJsRangeSelect,
@@ -29,7 +37,7 @@ import {
   calculateBracketingProbabilities,
   DistributionStatistics,
 } from "../utils/tableData";
-Chart.register(...registerables);
+Chart.register(...registerables, MatrixController, MatrixElement);
 
 export default function OutputPane(props: OutputPaneProps) {
   const tupleDistributions = props.tupleDistributions ?? [];
@@ -313,6 +321,7 @@ function TupleOutputSection({
   name: string;
   distribution: TupleDistribution;
 }) {
+  const isDarkMode = React.useContext(DarkModeContext);
   const arity = distribution.fields.length;
 
   // A 2-D joint fits a grid (heatmap / contingency table); higher arities fall
@@ -354,11 +363,11 @@ function TupleOutputSection({
           ))}
         </div>
       </div>
-      {(activeView === "heatmap" || activeView === "table") && (
-        <TupleGrid
-          distribution={distribution}
-          variant={activeView === "heatmap" ? "heatmap" : "table"}
-        />
+      {activeView === "heatmap" && (
+        <TupleHeatmap distribution={distribution} isDarkMode={isDarkMode} />
+      )}
+      {activeView === "table" && (
+        <TupleContingencyTable distribution={distribution} />
       )}
       {activeView === "list" && <TupleListTable distribution={distribution} />}
       {activeView === "marginals" && (
@@ -368,8 +377,11 @@ function TupleOutputSection({
   );
 }
 
-/** Largest number of cells we're willing to lay out for the 2-D grid views. */
-const MAX_GRID_CELLS = 2500;
+/** Largest number of cells we're willing to lay out in the DOM contingency table. */
+const MAX_TABLE_CELLS = 2500;
+
+/** Beyond this many cells even a canvas heatmap stops being worthwhile. */
+const MAX_HEATMAP_CELLS = 40000;
 
 /**
  * Matt Zucker's polynomial approximation of the viridis colormap, for
@@ -394,11 +406,6 @@ function viridis(t: number): [number, number, number] {
   }) as [number, number, number];
 }
 
-/** Black or white text, whichever contrasts better with the given colour. */
-function textOn([r, g, b]: [number, number, number]): string {
-  return 0.299 * r + 0.587 * g + 0.114 * b > 140 ? "#1a2431" : "#ffffff";
-}
-
 function viridisGradientCss(): string {
   const stops = [0, 0.25, 0.5, 0.75, 1].map((t) => {
     const [r, g, b] = viridis(t);
@@ -407,12 +414,23 @@ function viridisGradientCss(): string {
   return `linear-gradient(to right, ${stops.join(", ")})`;
 }
 
-function TupleGrid({
+interface HeatmapCell {
+  x: string;
+  y: string;
+  v: number;
+}
+
+/**
+ * Canvas heatmap of a 2-D joint distribution. Unlike the contingency table it
+ * reads as a graphic — coloured cells, no in-cell numbers, exact values on
+ * hover — and it scales to grids far larger than the DOM table can handle.
+ */
+function TupleHeatmap({
   distribution,
-  variant,
+  isDarkMode,
 }: {
   distribution: TupleDistribution;
-  variant: "heatmap" | "table";
+  isDarkMode: boolean;
 }) {
   const pivot = React.useMemo(
     () => computeTuplePivot(distribution),
@@ -420,133 +438,205 @@ function TupleGrid({
   );
   const { xAxis, yAxis, maxCell } = pivot;
   const [xField, yField] = distribution.fields;
-  const cellCount = xAxis.values.length * yAxis.values.length;
-  const heatmap = variant === "heatmap";
+  const xCount = xAxis.values.length;
+  const yCount = yAxis.values.length;
 
-  // Whether a percentage fits in a heatmap cell depends on the pane width and
-  // the column count, so measure the scroll container and hide the in-cell text
-  // once columns get too narrow — the value stays available via the cell's
-  // hover tooltip.
-  const scrollRef = React.useRef<HTMLDivElement>(null);
-  const [textFits, setTextFits] = React.useState(true);
-  React.useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const update = () => {
-      const ROW_LABEL_WIDTH = 72;
-      const perColumn =
-        (el.clientWidth - ROW_LABEL_WIDTH) / (xAxis.values.length + 1);
-      setTextFits(perColumn >= 46);
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [xAxis.values.length]);
+  const points = React.useMemo(() => {
+    const out: HeatmapCell[] = [];
+    xAxis.values.forEach((xv, xi) => {
+      yAxis.values.forEach((yv, yi) => {
+        const p = pivot.cell(xv, yv);
+        // Only reachable outcomes get a cell; the rest stay as the background.
+        if (p > 0) out.push({ x: xAxis.labels[xi], y: yAxis.labels[yi], v: p });
+      });
+    });
+    return out;
+  }, [pivot, xAxis, yAxis]);
 
-  if (cellCount > MAX_GRID_CELLS) {
+  if (xCount * yCount > MAX_HEATMAP_CELLS) {
     return (
       <p className="rounded-lg border p-4 text-sm text-[var(--text-muted)]">
-        This joint distribution has {xAxis.values.length}×{yAxis.values.length}{" "}
-        cells — too many to lay out as a grid. Switch to the Marginals view.
+        This joint distribution has {xCount}×{yCount} cells — too many to draw.
+        Switch to the Marginals view.
       </p>
     );
   }
 
-  const showCellText = !heatmap || textFits;
+  const textColor = isDarkMode ? "#94a3b8" : "#64748b";
+  const tooltipBg = isDarkMode ? "#182230" : "#ffffff";
+  const tooltipText = isDarkMode ? "#e5edf6" : "#1a2431";
+  const tooltipBorder = isDarkMode ? "#3a4c60" : "#c2ccda";
 
-  const cellBase = "px-2.5 py-1.5 tabular-nums whitespace-nowrap";
-  const valueCell = `${cellBase} ${heatmap ? "text-center" : "text-right"}`;
+  const data: ChartData<"matrix", HeatmapCell[]> = {
+    datasets: [
+      {
+        label: "joint",
+        data: points,
+        backgroundColor: (ctx: ScriptableContext<"matrix">) => {
+          const value = (ctx.raw as HeatmapCell | undefined)?.v ?? 0;
+          const [r, g, b] = viridis(maxCell > 0 ? value / maxCell : 0);
+          return `rgb(${r}, ${g}, ${b})`;
+        },
+        borderWidth: 0,
+        // Fill each category slot, leaving a 1px seam between cells.
+        width: (ctx) => {
+          const area = ctx.chart.chartArea;
+          return area ? area.width / xCount - 1 : 0;
+        },
+        height: (ctx) => {
+          const area = ctx.chart.chartArea;
+          return area ? area.height / yCount - 1 : 0;
+        },
+      },
+    ],
+  };
+
+  const options: ChartOptions<"matrix"> = {
+    // Square-ish cells, clamped so a very lopsided grid can't grow absurdly tall.
+    maintainAspectRatio: true,
+    aspectRatio: Math.min(5, Math.max(0.6, xCount / yCount)),
+    animation: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: tooltipBg,
+        titleColor: tooltipText,
+        bodyColor: tooltipText,
+        borderColor: tooltipBorder,
+        borderWidth: 1,
+        padding: 10,
+        cornerRadius: 8,
+        displayColors: false,
+        callbacks: {
+          title: () => "",
+          label: (ctx: TooltipItem<"matrix">) => {
+            const point = ctx.raw as HeatmapCell;
+            return `${point.x}, ${point.y}: ${(point.v * 100).toFixed(2)}%`;
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        type: "category",
+        labels: xAxis.labels,
+        offset: true,
+        title: { display: true, text: fieldName(xField, 0), color: textColor },
+        ticks: { color: textColor, font: { size: 11 }, autoSkipPadding: 8 },
+        grid: { display: false },
+      },
+      y: {
+        type: "category",
+        // Reverse so the first field value sits at the top, as in the table.
+        labels: [...yAxis.labels].reverse(),
+        offset: true,
+        title: { display: true, text: fieldName(yField, 1), color: textColor },
+        ticks: { color: textColor, font: { size: 11 }, autoSkipPadding: 8 },
+        grid: { display: false },
+      },
+    },
+  };
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+        <span>0%</span>
+        <span
+          className="h-2 w-24 rounded"
+          style={{ background: viridisGradientCss() }}
+        />
+        <span>{(maxCell * 100).toFixed(2)}%</span>
+      </div>
+      <ReactChart type="matrix" data={data} options={options} />
+    </div>
+  );
+}
+
+/**
+ * DOM contingency table for a 2-D joint distribution: exact per-cell
+ * probabilities with row/column (Σ) marginals. Capped to a modest cell count;
+ * larger joints belong in the heatmap or marginals views.
+ */
+function TupleContingencyTable({
+  distribution,
+}: {
+  distribution: TupleDistribution;
+}) {
+  const pivot = React.useMemo(
+    () => computeTuplePivot(distribution),
+    [distribution]
+  );
+  const { xAxis, yAxis } = pivot;
+  const [xField, yField] = distribution.fields;
+
+  if (xAxis.values.length * yAxis.values.length > MAX_TABLE_CELLS) {
+    return (
+      <p className="rounded-lg border p-4 text-sm text-[var(--text-muted)]">
+        This joint distribution has {xAxis.values.length}×{yAxis.values.length}{" "}
+        cells — too many for a table. Switch to the Heatmap or Marginals view.
+      </p>
+    );
+  }
+
+  const cell = "px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap";
   const colHeader =
     "px-2.5 py-1.5 text-right font-semibold whitespace-nowrap bg-[var(--surface-2)]";
   const rowHeader =
     "px-2.5 py-1.5 text-left font-semibold whitespace-nowrap bg-[var(--surface)]";
-  const marginalCell = `${cellBase} text-right bg-[var(--surface-2)] text-[var(--text-muted)]`;
+  const marginalCell = `${cell} bg-[var(--surface-2)] text-[var(--text-muted)]`;
 
   const pct = (p: number) => (p * 100).toFixed(2);
 
   return (
     <div>
-      {/* Caption and legend sit outside the horizontal scroll area so they stay
-          in view while a wide grid scrolls. */}
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
-        <span>
-          Columns: {fieldName(xField, 0)} · Rows: {fieldName(yField, 1)}
-        </span>
-        {heatmap && (
-          <span className="flex items-center gap-2">
-            <span>0%</span>
-            <span
-              className="h-2 w-24 rounded"
-              style={{ background: viridisGradientCss() }}
-            />
-            <span>{pct(maxCell)}%</span>
-          </span>
-        )}
+      <div className="mb-2 text-xs text-[var(--text-muted)]">
+        Columns: {fieldName(xField, 0)} · Rows: {fieldName(yField, 1)}
       </div>
-      <div
-        ref={scrollRef}
-        className="dice-table overflow-x-auto rounded-lg border"
-      >
+      <div className="dice-table overflow-x-auto rounded-lg border">
         <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr>
-            <th className={rowHeader} />
-            {xAxis.values.map((x, i) => (
-              <th key={x} className={colHeader}>
-                {xAxis.labels[i]}
-              </th>
-            ))}
-            <th className={colHeader}>Σ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {yAxis.values.map((y, yi) => (
-            <tr key={y} className="dice-row">
-              <td className={rowHeader}>{yAxis.labels[yi]}</td>
-              {xAxis.values.map((x, xi) => {
-                const p = pivot.cell(x, y);
-                // Zero-probability cells stay on the surface so the reachable
-                // outcomes are the only ones that carry colour.
-                let style: React.CSSProperties | undefined;
-                if (heatmap && p > 0) {
-                  const rgb = viridis(maxCell > 0 ? p / maxCell : 0);
-                  style = {
-                    backgroundColor: `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`,
-                    color: textOn(rgb),
-                  };
-                }
-                return (
-                  <td
-                    key={x}
-                    className={valueCell}
-                    style={style}
-                    title={`${xAxis.labels[xi]}, ${yAxis.labels[yi]}: ${pct(p)}%`}
-                  >
-                    {showCellText && p > 0
-                      ? heatmap
-                        ? `${(p * 100).toFixed(1)}%`
-                        : `${pct(p)}%`
-                      : ""}
-                  </td>
-                );
-              })}
-              <td className={marginalCell}>{pct(pivot.yMarginal(y))}%</td>
+          <thead>
+            <tr>
+              <th className={rowHeader} />
+              {xAxis.values.map((x, i) => (
+                <th key={x} className={colHeader}>
+                  {xAxis.labels[i]}
+                </th>
+              ))}
+              <th className={colHeader}>Σ</th>
             </tr>
-          ))}
-        </tbody>
-        <tbody>
-          <tr className="dice-row">
-            <td className={`${rowHeader} text-[var(--text-muted)]`}>Σ</td>
-            {xAxis.values.map((x) => (
-              <td key={x} className={marginalCell}>
-                {pct(pivot.xMarginal(x))}%
-              </td>
+          </thead>
+          <tbody>
+            {yAxis.values.map((y, yi) => (
+              <tr key={y} className="dice-row">
+                <td className={rowHeader}>{yAxis.labels[yi]}</td>
+                {xAxis.values.map((x, xi) => {
+                  const p = pivot.cell(x, y);
+                  return (
+                    <td
+                      key={x}
+                      className={cell}
+                      title={`${xAxis.labels[xi]}, ${yAxis.labels[yi]}: ${pct(p)}%`}
+                    >
+                      {p > 0 ? `${pct(p)}%` : ""}
+                    </td>
+                  );
+                })}
+                <td className={marginalCell}>{pct(pivot.yMarginal(y))}%</td>
+              </tr>
             ))}
-            <td className={marginalCell}>100.00%</td>
-          </tr>
-        </tbody>
-      </table>
+          </tbody>
+          <tbody>
+            <tr className="dice-row">
+              <td className={`${rowHeader} text-[var(--text-muted)]`}>Σ</td>
+              {xAxis.values.map((x) => (
+                <td key={x} className={marginalCell}>
+                  {pct(pivot.xMarginal(x))}%
+                </td>
+              ))}
+              <td className={marginalCell}>100.00%</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );
