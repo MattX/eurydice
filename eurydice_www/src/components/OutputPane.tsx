@@ -478,14 +478,15 @@ function TupleHeatmap({
           return `rgb(${r}, ${g}, ${b})`;
         },
         borderWidth: 0,
-        // Fill each category slot, leaving a 1px seam between cells.
+        // Fill each category slot edge-to-edge. The extra pixel overlaps
+        // neighbours just enough to hide antialiasing seams between cells.
         width: (ctx) => {
           const area = ctx.chart.chartArea;
-          return area ? area.width / xCount - 1 : 0;
+          return area ? area.width / xCount + 1 : 0;
         },
         height: (ctx) => {
           const area = ctx.chart.chartArea;
-          return area ? area.height / yCount - 1 : 0;
+          return area ? area.height / yCount + 1 : 0;
         },
       },
     ],
@@ -547,7 +548,15 @@ function TupleHeatmap({
         />
         <span>{(maxCell * 100).toFixed(2)}%</span>
       </div>
-      <ReactChart type="matrix" data={data} options={options} />
+      {/* Keying on the grid shape remounts the chart when the axis cardinality
+          changes, so `maintainAspectRatio` recomputes the canvas height instead
+          of keeping the previous dimensions' size. */}
+      <ReactChart
+        key={`${xCount}x${yCount}`}
+        type="matrix"
+        data={data}
+        options={options}
+      />
     </div>
   );
 }
