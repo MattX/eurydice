@@ -39,6 +39,12 @@ impl std::fmt::Display for Pool<i32> {
         if self.dimension != 1 {
             write!(f, "{}", self.dimension)?;
         }
+        if self.ordered_outcomes.is_empty() {
+            return write!(f, "d{{}}");
+        }
+        if self.ordered_outcomes == [(0, Natural::ONE)] {
+            return write!(f, "d0");
+        }
         if self
             .ordered_outcomes
             .iter()
@@ -1431,6 +1437,9 @@ mod tests {
         assert_eq!(format!("{}", pool), "2d3");
         let pool = Pool::from_list(2, vec![-1, -2, -3]);
         assert_eq!(format!("{}", pool), "2d{-3, -2, -1}");
+        assert_eq!(Pool::from_list(1, vec![]).to_string(), "d{}");
+        assert_eq!(Pool::from_list(2, vec![]).to_string(), "2d{}");
+        assert_eq!(Pool::from_list(1, vec![0]).to_string(), "d0");
     }
 
     #[test]
