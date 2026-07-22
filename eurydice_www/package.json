@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "wasm-pack build ../eurydice_wasm",
     "dev": "vite",
     "build": "tsc -b && vite build --ssr help/entry-server.tsx && vite build",
     "lint": "eslint .",
