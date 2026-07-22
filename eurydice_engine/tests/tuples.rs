@@ -38,6 +38,13 @@ fn tuple_distribution(value: &RuntimeValue) -> Vec<(Vec<i32>, Natural)> {
         .collect()
 }
 
+fn tuple_output_distribution(value: RuntimeValue) -> Vec<(Vec<i32>, f64)> {
+    let OutputValue::TupleDistribution(distribution) = OutputValue::from(value) else {
+        panic!("expected tuple output distribution");
+    };
+    distribution.probabilities
+}
+
 #[test]
 fn constructs_and_projects_tuples() {
     let outputs = run(r#"
@@ -179,6 +186,98 @@ fn tuples_have_structural_equality_and_can_be_die_faces() {
 }
 
 #[test]
+fn integer_tuples_support_vector_arithmetic() {
+    let outputs = run(r#"
+        output [tuple 1 2] + [tuple 3 4]
+        output [tuple 10 20 30] - [tuple 1 2 3]
+        output -[tuple 1 (-2) 3 0]
+        output [tuple 2 (-3)] * 4
+        output -2 * [tuple 2 (-3)]
+        output [tuple 7 (-7)] / 3
+        "#)
+    .unwrap();
+
+    let expected = [
+        vec![4, 6],
+        vec![9, 18, 27],
+        vec![-1, 2, -3, 0],
+        vec![8, -12],
+        vec![-4, 6],
+        vec![2, -2],
+    ];
+    for ((value, _), expected) in outputs.iter().zip(expected) {
+        assert_eq!(
+            tuple_ints(match value {
+                RuntimeValue::Scalar(value) => value,
+                _ => panic!("expected tuple scalar"),
+            }),
+            expected
+        );
+    }
+}
+
+#[test]
+fn tuple_sequences_sum_during_arithmetic_and_scalar_coercion() {
+    let outputs = run(r#"
+        function: identity VALUE:n { result: VALUE }
+        output {[tuple 1 2], [tuple 3 4]} + [tuple 10 20]
+        output [identity {[tuple 1 2], [tuple 3 4]}]
+        output {1, 2}@{[tuple 1 2], [tuple 3 4]}
+        "#)
+    .unwrap();
+
+    assert_eq!(
+        outputs
+            .iter()
+            .map(|(value, _)| match value {
+                RuntimeValue::Scalar(value) => tuple_ints(value),
+                RuntimeValue::Pool(_, _) => tuple_output_distribution(value.clone())[0].0.clone(),
+                _ => panic!("expected summed tuple"),
+            })
+            .collect::<Vec<_>>(),
+        [vec![14, 26], vec![4, 6], vec![4, 6]]
+    );
+}
+
+#[test]
+fn multidimensional_tuple_dice_sum_componentwise() {
+    let outputs = run(r#"
+        output 2d{[tuple 1 0], [tuple 0 1]}
+        A: d{[tuple 1 0], [tuple 0 1]}
+        B: d{[tuple 1 0], [tuple 0 1]}
+        output A + B
+        output 0d{[tuple 1 2], [tuple 3 4]}
+        output -2d{[tuple 1 0], [tuple 0 1]}
+        "#)
+    .unwrap();
+
+    let expected = vec![(vec![0, 2], 0.25), (vec![1, 1], 0.5), (vec![2, 0], 0.25)];
+    assert_eq!(tuple_output_distribution(outputs[0].0.clone()), expected);
+    assert_eq!(tuple_output_distribution(outputs[1].0.clone()), expected);
+    assert_eq!(
+        tuple_output_distribution(outputs[2].0.clone()),
+        [(vec![0, 0], 1.0)]
+    );
+    assert_eq!(
+        tuple_output_distribution(outputs[3].0.clone()),
+        vec![
+            (vec![-2, 0], 0.25),
+            (vec![-1, -1], 0.5),
+            (vec![0, -2], 0.25),
+        ]
+    );
+}
+
+#[test]
+fn typed_empty_tuple_pool_sums_to_the_zero_tuple() {
+    let outputs = run("output d{[tuple 5 6]:0}").unwrap();
+    assert_eq!(
+        tuple_output_distribution(outputs[0].0.clone()),
+        [(vec![0, 0], 1.0)]
+    );
+}
+
+#[test]
 fn tuple_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
     let mut outputs =
         run("output [tuple 1 2] output {[tuple 1 2], [tuple 3 4], [tuple 1 2]}").unwrap();
@@ -204,9 +303,14 @@ fn rejects_invalid_tuple_operations() {
         "output [element 0 of [tuple 1 2]]",
         "output [element -2147483648 of [tuple 1 2]]",
         "output [element 3 of [tuple 1 2]]",
-        "output [tuple 1 2] + [tuple 3 4]",
+        "output [tuple 1 2] + 3",
+        "output 3 / [tuple 1 2]",
+        "output [tuple 1 2] + [tuple 1 2 3]",
+        "output [tuple 1 2] / 0",
+        "output [tuple 2147483647 0] + [tuple 1 0]",
+        "enum: RESULT { A } output [tuple 1 A] * 2",
         "output [tuple 1 2] = [tuple 1 2 3]",
-        "output 2d{[tuple 1 2], [tuple 3 4]}",
+        "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]}",
     ] {
         assert!(run(program).is_err(), "expected error for {program}");
     }

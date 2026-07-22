@@ -99,20 +99,14 @@ impl Pool<i32> {
 
     /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
     pub fn sum(&self) -> Pool<i32> {
-        if self.is_empty() {
-            return Pool {
-                dimension: 1,
-                ordered_outcomes: vec![(0, Natural::ONE)],
-            };
-        } else if self.dimension == 1 {
+        if self.dimension == 1 && !self.is_empty() {
             return self.clone();
         }
-        let keep_list = vec![true; self.dimension as usize];
-        self.apply(SUM_MAPPER, &keep_list).into_iter().collect()
+        self.sum_by(0, sum_mapper)
     }
 
     pub fn sum_with_keep_list(&self, keep_list: &[bool]) -> Pool<i32> {
-        self.apply(SUM_MAPPER, keep_list).into_iter().collect()
+        self.sum_with_keep_list_by(keep_list, 0, sum_mapper)
     }
 
     pub fn add(&self, other: &Pool<i32>) -> Pool<i32> {
@@ -170,6 +164,21 @@ where
             ordered_outcomes: new_outcomes.into_iter().collect(),
             dimension: self.dimension,
         }
+    }
+
+    /// Fallible counterpart to `map_outcomes`.
+    pub fn try_map_outcomes<U, E>(self, f: impl Fn(T) -> Result<U, E>) -> Result<Pool<U>, E>
+    where
+        U: Clone + Ord,
+    {
+        let mut new_outcomes = BTreeMap::new();
+        for (outcome, weight) in self.ordered_outcomes {
+            *new_outcomes.entry(f(outcome)?).or_insert(Natural::ZERO) += weight;
+        }
+        Ok(Pool {
+            ordered_outcomes: new_outcomes.into_iter().collect(),
+            dimension: self.dimension,
+        })
     }
 
     /// Maps the weights of the pool using the given function.
@@ -275,6 +284,48 @@ where
 
     pub fn ordered_outcomes(&self) -> &[(T, Natural)] {
         &self.ordered_outcomes
+    }
+
+    /// Sums every die in this pool using an arbitrary additive state.
+    ///
+    /// `add_scaled` receives the current state, one face, and the number of
+    /// dice showing that face. This keeps the Icepool summation path generic
+    /// without requiring the face type itself to implement numeric traits.
+    pub(crate) fn sum_by<S, F>(&self, identity: S, add_scaled: F) -> Pool<S>
+    where
+        S: Clone + Eq + Hash + Ord,
+        F: Fn(&S, &T, u32) -> S,
+    {
+        if self.is_empty() {
+            return Pool::from_list(1, vec![identity]);
+        }
+        let keep_list = vec![true; self.dimension as usize];
+        self.sum_with_keep_list_by(&keep_list, identity, add_scaled)
+    }
+
+    /// The generic counterpart of `sum_with_keep_list`.
+    pub(crate) fn sum_with_keep_list_by<S, F>(
+        &self,
+        keep_list: &[bool],
+        identity: S,
+        add_scaled: F,
+    ) -> Pool<S>
+    where
+        S: Clone + Eq + Hash + Ord,
+        F: Fn(&S, &T, u32) -> S,
+    {
+        if self.is_empty() {
+            return Pool::from_list(1, vec![identity]);
+        }
+        self.apply(
+            StateMapper {
+                initial_state: identity,
+                f: add_scaled,
+            },
+            keep_list,
+        )
+        .into_iter()
+        .collect()
     }
 
     pub fn multiset_iterator(&self) -> PoolMultisetIterator<'_, T> {

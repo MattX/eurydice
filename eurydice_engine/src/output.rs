@@ -70,7 +70,11 @@ fn tuple_values(values: &[ScalarValue]) -> Vec<i32> {
 }
 
 fn pool_output(pool: &Pool<ScalarValue>, outcome_type: &ScalarType, sum: bool) -> OutputValue {
-    let pool = if sum { sum_pool(pool) } else { pool.clone() };
+    let pool = if sum {
+        sum_pool(pool, outcome_type)
+    } else {
+        pool.clone()
+    };
     match outcome_type {
         ScalarType::Int => OutputValue::Distribution(Distribution {
             probabilities: to_probabilities(

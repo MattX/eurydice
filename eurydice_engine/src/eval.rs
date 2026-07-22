@@ -69,6 +69,29 @@ impl ScalarType {
             ),
         }
     }
+
+    fn additive_identity(&self) -> Option<ScalarValue> {
+        match self {
+            ScalarType::Int => Some(ScalarValue::Int(0)),
+            ScalarType::Tuple(fields)
+                if fields.iter().all(|field| matches!(field, ScalarType::Int)) =>
+            {
+                Some(ScalarValue::Tuple(
+                    fields
+                        .iter()
+                        .map(|_| ScalarValue::Int(0))
+                        .collect::<Vec<_>>()
+                        .into(),
+                ))
+            }
+            ScalarType::Enum(_) | ScalarType::Tuple(_) => None,
+        }
+    }
+
+    fn is_additive(&self) -> bool {
+        matches!(self, ScalarType::Int)
+            || matches!(self, ScalarType::Tuple(fields) if fields.iter().all(|field| matches!(field, ScalarType::Int)))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -105,6 +128,65 @@ impl ScalarValue {
             ScalarValue::Enum { ty, .. } => Some(Rc::clone(ty)),
             ScalarValue::Int(_) | ScalarValue::Tuple(_) => None,
         }
+    }
+
+    fn add_scaled(&self, other: &Self, count: u32) -> Self {
+        match (self, other) {
+            (ScalarValue::Int(left), ScalarValue::Int(right)) => {
+                let count = i32::try_from(count).expect("pool dimension fits in i32");
+                ScalarValue::Int(left + right * count)
+            }
+            (ScalarValue::Tuple(left), ScalarValue::Tuple(right)) => ScalarValue::Tuple(
+                left.iter()
+                    .zip(right.iter())
+                    .map(|(left, right)| left.add_scaled(right, count))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            _ => unreachable!("additive values have matching scalar types"),
+        }
+    }
+
+    fn try_map_ints(&self, f: &impl Fn(i32) -> Result<i32, String>) -> Result<Self, String> {
+        match self {
+            ScalarValue::Int(value) => Ok(ScalarValue::Int(f(*value)?)),
+            ScalarValue::Tuple(fields) => Ok(ScalarValue::Tuple(
+                fields
+                    .iter()
+                    .map(|field| field.try_map_ints(f))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            )),
+            ScalarValue::Enum { .. } => unreachable!("enum values are not additive"),
+        }
+    }
+
+    fn try_zip_ints(
+        &self,
+        other: &Self,
+        f: &impl Fn(i32, i32) -> Result<i32, String>,
+    ) -> Result<Self, String> {
+        match (self, other) {
+            (ScalarValue::Int(left), ScalarValue::Int(right)) => {
+                Ok(ScalarValue::Int(f(*left, *right)?))
+            }
+            (ScalarValue::Tuple(left), ScalarValue::Tuple(right)) => Ok(ScalarValue::Tuple(
+                left.iter()
+                    .zip(right.iter())
+                    .map(|(left, right)| left.try_zip_ints(right, f))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            )),
+            _ => unreachable!("tuple arithmetic operands have matching types"),
+        }
+    }
+
+    fn checked_neg(&self) -> Result<Self, String> {
+        self.try_map_ints(&|value| {
+            value
+                .checked_neg()
+                .ok_or_else(|| format!("Negation overflow: -{value}"))
+        })
     }
 }
 
@@ -200,12 +282,16 @@ impl RuntimeValue {
         self.outcome_type() == ScalarType::Int
     }
 
+    fn is_additive(&self) -> bool {
+        self.outcome_type().is_additive()
+    }
+
     fn to_list(&self, repeat: usize) -> Vec<ScalarValue> {
         match self {
             RuntimeValue::Scalar(value) => vec![value.clone(); repeat],
             RuntimeValue::List(list, _) => (0..repeat).flat_map(|_| list.iter().cloned()).collect(),
             RuntimeValue::Pool(pool, _) => {
-                let outcomes = sum_pool(pool)
+                let outcomes = sum_pool(pool, &self.outcome_type())
                     .into_die_iter()
                     .map(|(outcome, _)| outcome)
                     .collect::<Vec<_>>();
@@ -235,8 +321,8 @@ impl RuntimeValue {
     fn to_pool(&self) -> Pool<ScalarValue> {
         match self {
             RuntimeValue::Scalar(value) => Pool::from_list(1, vec![value.clone()]),
-            RuntimeValue::List(list, _) if self.is_numeric() => {
-                Pool::from_list(1, vec![ScalarValue::Int(list.iter().map(expect_int).sum())])
+            RuntimeValue::List(list, outcome_type) if self.is_additive() => {
+                Pool::from_list(1, vec![sum_scalars(list, outcome_type)])
             }
             RuntimeValue::List(list, _) => Pool::from_list(1, (**list).clone()),
             RuntimeValue::Pool(pool, _) => (**pool).clone(),
@@ -250,17 +336,24 @@ fn expect_int(value: &ScalarValue) -> i32 {
         .expect("numeric operation received a non-numeric scalar")
 }
 
-pub(crate) fn sum_pool(pool: &Pool<ScalarValue>) -> Pool<ScalarValue> {
-    if pool.is_empty() {
-        return Pool::from_list(1, vec![ScalarValue::Int(0)]);
-    }
-    if pool.dimension() == 1 {
+fn sum_scalars(values: &[ScalarValue], outcome_type: &ScalarType) -> ScalarValue {
+    values.iter().fold(
+        outcome_type
+            .additive_identity()
+            .expect("only additive sequences can be summed"),
+        |sum, value| sum.add_scaled(value, 1),
+    )
+}
+
+pub(crate) fn sum_pool(pool: &Pool<ScalarValue>, outcome_type: &ScalarType) -> Pool<ScalarValue> {
+    if pool.dimension() == 1 && !pool.is_empty() {
         return pool.clone();
     }
-    pool.clone()
-        .map_outcomes(|outcome| expect_int(&outcome))
-        .sum()
-        .map_outcomes(ScalarValue::Int)
+    let Some(identity) = outcome_type.additive_identity() else {
+        debug_assert!(pool.dimension() <= 1, "non-additive pool has multiple dice");
+        return pool.clone();
+    };
+    pool.sum_by(identity, ScalarValue::add_scaled)
 }
 
 impl From<i32> for RuntimeValue {
@@ -990,17 +1083,17 @@ impl Evaluator {
                 "function evaluations returned incompatible outcome types",
             )?;
             match &result {
-                RuntimeValue::List(values, _) if !result.is_numeric() && values.len() != 1 => {
+                RuntimeValue::List(values, _) if !result.is_additive() && values.len() != 1 => {
                     return Err(RuntimeError::EnumTypeError {
                         range: function.range.into(),
                         message:
-                            "a non-numeric sequence returned during pool evaluation cannot be summed"
+                            "a non-additive sequence returned during pool evaluation cannot be summed"
                                 .to_string(),
                     });
                 }
                 _ => {}
             }
-            let summed = sum_pool(&result.to_pool());
+            let summed = sum_pool(&result.to_pool(), &result.outcome_type());
             let total_count = summed
                 .ordered_outcomes()
                 .iter()
@@ -1076,13 +1169,18 @@ fn apply_unary_op(
 ) -> Result<RuntimeValue, RuntimeError> {
     match op.value {
         UnaryOp::D => make_d(None, operand, op.range),
-        UnaryOp::Negate | UnaryOp::Invert if !operand.is_numeric() => {
-            Err(RuntimeError::EnumTypeError {
-                range: op.range.into(),
-                message: format!("operator {} is not defined for this scalar type", op.value),
-            })
-        }
-        UnaryOp::Negate => Ok(operand.map_numeric_outcomes(|o| -o)),
+        UnaryOp::Negate if !operand.is_additive() => Err(RuntimeError::EnumTypeError {
+            range: op.range.into(),
+            message: format!("operator {} is not defined for this scalar type", op.value),
+        }),
+        UnaryOp::Invert if !operand.is_numeric() => Err(RuntimeError::EnumTypeError {
+            range: op.range.into(),
+            message: format!("operator {} is not defined for this scalar type", op.value),
+        }),
+        UnaryOp::Negate => negate_value(operand).map_err(|message| RuntimeError::MathError {
+            range: op.range.into(),
+            message,
+        }),
         UnaryOp::Invert => Ok(operand.map_numeric_outcomes(|o| if o == 0 { 1 } else { 0 })),
         UnaryOp::Length => Ok(match operand {
             RuntimeValue::Scalar(ScalarValue::Int(i)) => i32::try_from(i.abs().to_string().len())
@@ -1102,6 +1200,134 @@ fn apply_unary_op(
     }
 }
 
+fn negate_value(value: &RuntimeValue) -> Result<RuntimeValue, String> {
+    match value {
+        RuntimeValue::Scalar(value) => Ok(RuntimeValue::Scalar(value.checked_neg()?)),
+        RuntimeValue::List(values, outcome_type) => Ok(RuntimeValue::Scalar(
+            sum_scalars(values, outcome_type).checked_neg()?,
+        )),
+        RuntimeValue::Pool(pool, outcome_type) => Ok(RuntimeValue::Pool(
+            Rc::new(
+                (**pool)
+                    .clone()
+                    .try_map_outcomes(|outcome| outcome.checked_neg())?,
+            ),
+            outcome_type.clone(),
+        )),
+    }
+}
+
+fn math_result_type(op: BinaryOp, left: &ScalarType, right: &ScalarType) -> Option<ScalarType> {
+    match op {
+        BinaryOp::Add | BinaryOp::Sub if left == right && left.is_additive() => Some(left.clone()),
+        BinaryOp::Mul if left == &ScalarType::Int && right.is_additive() => Some(right.clone()),
+        BinaryOp::Mul if right == &ScalarType::Int && left.is_additive() => Some(left.clone()),
+        BinaryOp::Div if right == &ScalarType::Int && left.is_additive() => Some(left.clone()),
+        BinaryOp::Pow | BinaryOp::Or | BinaryOp::And
+            if left == &ScalarType::Int && right == &ScalarType::Int =>
+        {
+            Some(ScalarType::Int)
+        }
+        _ => None,
+    }
+}
+
+fn apply_scalar_math(
+    op: BinaryOp,
+    left: &ScalarValue,
+    right: &ScalarValue,
+) -> Result<ScalarValue, String> {
+    match op {
+        BinaryOp::Pow => {
+            let (ScalarValue::Int(left), ScalarValue::Int(right)) = (left, right) else {
+                unreachable!("power operands were type checked")
+            };
+            if *right < 0 {
+                Err(format!("Cannot raise {} to negative power {}", left, right))
+            } else {
+                left.checked_pow(right.unsigned_abs())
+                    .map(ScalarValue::Int)
+                    .ok_or_else(|| format!("Power overflow: {} ^ {}", left, right))
+            }
+        }
+        BinaryOp::Add => left.try_zip_ints(right, &|left, right| {
+            left.checked_add(right)
+                .ok_or_else(|| format!("Addition overflow: {} + {}", left, right))
+        }),
+        BinaryOp::Sub => left.try_zip_ints(right, &|left, right| {
+            left.checked_sub(right)
+                .ok_or_else(|| format!("Subtraction overflow: {} - {}", left, right))
+        }),
+        BinaryOp::Mul => match (left, right) {
+            (ScalarValue::Int(left), ScalarValue::Int(right)) => left
+                .checked_mul(*right)
+                .map(ScalarValue::Int)
+                .ok_or_else(|| format!("Multiplication overflow: {} * {}", left, right)),
+            (ScalarValue::Tuple(_), ScalarValue::Int(scalar)) => left.try_map_ints(&|value| {
+                value
+                    .checked_mul(*scalar)
+                    .ok_or_else(|| format!("Multiplication overflow: {} * {}", value, scalar))
+            }),
+            (ScalarValue::Int(scalar), ScalarValue::Tuple(_)) => right.try_map_ints(&|value| {
+                scalar
+                    .checked_mul(value)
+                    .ok_or_else(|| format!("Multiplication overflow: {} * {}", scalar, value))
+            }),
+            _ => unreachable!("multiplication operands were type checked"),
+        },
+        BinaryOp::Div => {
+            let ScalarValue::Int(divisor) = right else {
+                unreachable!("division divisor was type checked")
+            };
+            if *divisor == 0 {
+                return Err(format!("Cannot divide {} by zero", left));
+            }
+            left.try_map_ints(&|value| {
+                value
+                    .checked_div(*divisor)
+                    .ok_or_else(|| format!("Division overflow: {} / {}", value, divisor))
+            })
+        }
+        BinaryOp::Or | BinaryOp::And => {
+            let (ScalarValue::Int(left), ScalarValue::Int(right)) = (left, right) else {
+                unreachable!("logical operands were type checked")
+            };
+            let result = match op {
+                BinaryOp::Or => *left != 0 || *right != 0,
+                BinaryOp::And => *left != 0 && *right != 0,
+                _ => unreachable!(),
+            };
+            Ok(ScalarValue::Int(i32::from(result)))
+        }
+        _ => unreachable!("non-mathematical operator passed to scalar math"),
+    }
+}
+
+fn apply_math_op(
+    op: &WithRange<BinaryOp>,
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+) -> Result<RuntimeValue, RuntimeError> {
+    let result_type = math_result_type(op.value, &left.outcome_type(), &right.outcome_type())
+        .ok_or_else(|| RuntimeError::EnumTypeError {
+            range: op.range.into(),
+            message: format!(
+                "operator {} is not defined for these scalar types",
+                op.value
+            ),
+        })?;
+    lift_math_binary_op(
+        left,
+        right,
+        |left, right| apply_scalar_math(op.value, left, right),
+        result_type,
+    )
+    .map_err(|message| RuntimeError::MathError {
+        range: op.range.into(),
+        message,
+    })
+}
+
 fn apply_binary_op(
     op: &WithRange<BinaryOp>,
     left: &RuntimeValue,
@@ -1109,12 +1335,10 @@ fn apply_binary_op(
     right: &RuntimeValue,
     lowest_first: bool,
 ) -> Result<RuntimeValue, RuntimeError> {
-    let has_non_numeric = !left.is_numeric() || !right.is_numeric();
-    if has_non_numeric
-        && !matches!(
-            op.value,
-            BinaryOp::D | BinaryOp::At | BinaryOp::Eq | BinaryOp::Ne
-        )
+    if matches!(
+        op.value,
+        BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
+    ) && (!left.is_numeric() || !right.is_numeric())
     {
         return Err(RuntimeError::EnumTypeError {
             range: op.range.into(),
@@ -1159,31 +1383,37 @@ fn apply_binary_op(
             };
             match right {
                 RuntimeValue::Scalar(ScalarValue::Int(i)) => {
-                    let digits: Vec<i32> = i
+                    let digits = i
                         .abs()
                         .to_string()
                         .chars()
                         // Unwrap here is ok as all chars for a *positive* integer are valid digits.
                         .map(|c| {
-                            i32::try_from(c.to_digit(10).unwrap()).expect("digit fits in i32")
-                                * i.signum()
+                            ScalarValue::Int(
+                                i32::try_from(c.to_digit(10).unwrap()).expect("digit fits in i32")
+                                    * i.signum(),
+                            )
                         })
-                        .collect();
-                    Ok(select_positions(&left, &digits, lowest_first).into())
+                        .collect::<Vec<_>>();
+                    Ok(RuntimeValue::Scalar(select_positions(
+                        &left,
+                        &digits,
+                        &ScalarType::Int,
+                        lowest_first,
+                    )))
                 }
-                RuntimeValue::List(lst, _) if right.is_numeric() => Ok(select_positions(
-                    &left,
-                    &lst.iter().map(expect_int).collect::<Vec<_>>(),
-                    false,
-                )
-                .into()),
-                RuntimeValue::Pool(p, _) if right.is_numeric() => Ok(RuntimeValue::Pool(
-                    Rc::new(select_in_dice(&left, p, lowest_first)),
-                    ScalarType::Int,
-                )),
+                RuntimeValue::List(lst, outcome_type) if right.is_additive() => Ok(
+                    RuntimeValue::Scalar(select_positions(&left, lst, outcome_type, false)),
+                ),
+                RuntimeValue::Pool(p, outcome_type) if right.is_additive() => {
+                    Ok(RuntimeValue::Pool(
+                        Rc::new(select_in_dice(&left, p, outcome_type, lowest_first)),
+                        outcome_type.clone(),
+                    ))
+                }
                 RuntimeValue::List(lst, _) => {
                     if left.len() != 1 {
-                        return Err(RuntimeError::EnumTypeError { range: op.range.into(), message: "selecting multiple non-numeric positions would require summing their values".to_string() });
+                        return Err(RuntimeError::EnumTypeError { range: op.range.into(), message: "selecting multiple non-additive positions would require summing their values".to_string() });
                     }
                     let index = left[0];
                     if index < 1 || index > i32::try_from(lst.len()).unwrap_or(i32::MAX) {
@@ -1203,53 +1433,13 @@ fn apply_binary_op(
                 }),
             }
         }
-        BinaryOp::Pow => math_binary_op(left, right, |a, b| {
-            if b < 0 {
-                Err(format!("Cannot raise {} to negative power {}", a, b))
-            } else {
-                a.checked_pow(b.unsigned_abs())
-                    .ok_or_else(|| format!("Power overflow: {} ^ {}", a, b))
-            }
-        })
-        .map_err(|msg| RuntimeError::MathError {
-            range: op.range.into(),
-            message: msg,
-        }),
-        BinaryOp::Add => math_binary_op(left, right, |a, b| {
-            a.checked_add(b)
-                .ok_or_else(|| format!("Addition overflow: {} + {}", a, b))
-        })
-        .map_err(|msg| RuntimeError::MathError {
-            range: op.range.into(),
-            message: msg,
-        }),
-        BinaryOp::Sub => math_binary_op(left, right, |a, b| {
-            a.checked_sub(b)
-                .ok_or_else(|| format!("Subtraction overflow: {} - {}", a, b))
-        })
-        .map_err(|msg| RuntimeError::MathError {
-            range: op.range.into(),
-            message: msg,
-        }),
-        BinaryOp::Mul => math_binary_op(left, right, |a, b| {
-            a.checked_mul(b)
-                .ok_or_else(|| format!("Multiplication overflow: {} * {}", a, b))
-        })
-        .map_err(|msg| RuntimeError::MathError {
-            range: op.range.into(),
-            message: msg,
-        }),
-        BinaryOp::Div => math_binary_op(left, right, |a, b| {
-            if b == 0 {
-                Err(format!("Cannot divide {} by zero", a))
-            } else {
-                Ok(a / b)
-            }
-        })
-        .map_err(|msg| RuntimeError::MathError {
-            range: op.range.into(),
-            message: msg,
-        }),
+        BinaryOp::Pow
+        | BinaryOp::Add
+        | BinaryOp::Sub
+        | BinaryOp::Mul
+        | BinaryOp::Div
+        | BinaryOp::Or
+        | BinaryOp::And => apply_math_op(op, left, right),
         BinaryOp::Eq => Ok(equality_binary_op(left, right, true)),
         BinaryOp::Ne => Ok(equality_binary_op(left, right, false)),
         BinaryOp::Lt => Ok(comp_binary_op(
@@ -1276,79 +1466,95 @@ fn apply_binary_op(
             |a, b| if a >= b { 1 } else { 0 },
             |a, b| if a >= b { 1 } else { 0 },
         )),
-        BinaryOp::Or => {
-            math_binary_op(left, right, |a, b| Ok(if a != 0 || b != 0 { 1 } else { 0 })).map_err(
-                |msg| RuntimeError::MathError {
-                    range: op.range.into(),
-                    message: msg,
-                },
-            )
-        }
-        BinaryOp::And => {
-            math_binary_op(left, right, |a, b| Ok(if a != 0 && b != 0 { 1 } else { 0 })).map_err(
-                |msg| RuntimeError::MathError {
-                    range: op.range.into(),
-                    message: msg,
-                },
-            )
-        }
     }
 }
 
-fn select_positions(indices: &[i32], vec: &[i32], lowest_first: bool) -> i32 {
-    indices
-        .iter()
-        .map(|&i| {
-            if i < 1 || i > i32::try_from(vec.len()).expect("vector length fits in i32") {
-                return 0;
-            }
-            let i = usize::try_from(i)
-                .expect("i is positive, and a positive i32 should fit in a usize");
-            let i = if lowest_first { vec.len() - i } else { i - 1 };
-            vec.get(i).copied().unwrap_or(0)
-        })
-        .sum()
+fn select_positions(
+    indices: &[i32],
+    values: &[ScalarValue],
+    outcome_type: &ScalarType,
+    lowest_first: bool,
+) -> ScalarValue {
+    indices.iter().fold(
+        outcome_type
+            .additive_identity()
+            .expect("position selection requires additive outcomes"),
+        |sum, &index| {
+            let selected = index
+                .checked_sub(1)
+                .and_then(|index| usize::try_from(index).ok())
+                .filter(|&index| index < values.len())
+                .map(|index| {
+                    if lowest_first {
+                        values.len() - index - 1
+                    } else {
+                        index
+                    }
+                })
+                .and_then(|index| values.get(index));
+            selected.map_or(sum.clone(), |value| sum.add_scaled(value, 1))
+        },
+    )
 }
 
 fn select_in_dice(
     indices: &[i32],
     pool: &Pool<ScalarValue>,
+    outcome_type: &ScalarType,
     lowest_first: bool,
 ) -> Pool<ScalarValue> {
     let dimension = usize::try_from(pool.dimension()).expect("usize is at least 32 bits");
     let mut keep_list = vec![false; dimension];
-    for &i in indices {
-        if i < 1 || i > i32::try_from(dimension).expect("vector length fits in i32") {
+    for &index in indices {
+        if index < 1 || index > i32::try_from(dimension).expect("pool dimension fits in i32") {
             continue;
         }
-        let i =
-            usize::try_from(i).expect("i is positive, and a positive i32 should fit in a usize");
-        let i = if !lowest_first { dimension - i } else { i - 1 };
-        keep_list[i] = true;
+        let index = usize::try_from(index).expect("positive i32 fits in usize");
+        let index = if !lowest_first {
+            dimension - index
+        } else {
+            index - 1
+        };
+        keep_list[index] = true;
     }
-    pool.clone()
-        .map_outcomes(|outcome| expect_int(&outcome))
-        .sum_with_keep_list(&keep_list)
-        .map_outcomes(ScalarValue::Int)
+    pool.sum_with_keep_list_by(
+        &keep_list,
+        outcome_type
+            .additive_identity()
+            .expect("position selection requires additive outcomes"),
+        ScalarValue::add_scaled,
+    )
 }
 
-fn math_binary_op(
+fn lift_math_binary_op(
     left: &RuntimeValue,
     right: &RuntimeValue,
-    f: impl Fn(i32, i32) -> Result<i32, String>,
+    f: impl Fn(&ScalarValue, &ScalarValue) -> Result<ScalarValue, String>,
+    result_type: ScalarType,
 ) -> Result<RuntimeValue, String> {
-    let left = flatten_list(left);
-    let right = flatten_list(right);
-    let (left_pool, right_pool) = match (left, right) {
-        (DLeftSide::Int(a), DLeftSide::Int(b)) => return Ok(f(a, b)?.into()),
-        (left, right) => (left.to_pool().sum(), right.to_pool().sum()),
+    let sum_operand = |operand: &RuntimeValue| match operand {
+        RuntimeValue::Scalar(value) => RuntimeValue::Scalar(value.clone()),
+        RuntimeValue::List(values, outcome_type) => {
+            RuntimeValue::Scalar(sum_scalars(values, outcome_type))
+        }
+        RuntimeValue::Pool(pool, outcome_type) => {
+            RuntimeValue::Pool(Rc::new(sum_pool(pool, outcome_type)), outcome_type.clone())
+        }
+    };
+    let left = sum_operand(left);
+    let right = sum_operand(right);
+    let (left_pool, right_pool) = match (&left, &right) {
+        (RuntimeValue::Scalar(a), RuntimeValue::Scalar(b)) => {
+            return Ok(RuntimeValue::Scalar(f(a, b)?));
+        }
+        _ => (left.to_pool(), right.to_pool()),
     };
 
     // For pool operations, we need to handle errors during mapping
     let mut results = Vec::new();
     for (left_outcome, left_weight) in left_pool.ordered_outcomes() {
         for (right_outcome, right_weight) in right_pool.ordered_outcomes() {
-            match f(*left_outcome, *right_outcome) {
+            match f(left_outcome, right_outcome) {
                 Ok(result) => results.push((result, left_weight * right_weight)),
                 Err(err) => return Err(err),
             }
@@ -1360,7 +1566,10 @@ fn math_binary_op(
         *pool_map.entry(outcome).or_insert(Natural::ZERO) += weight;
     }
 
-    Ok(Pool::from(pool_map.into_iter().collect::<Vec<_>>()).into())
+    Ok(RuntimeValue::Pool(
+        Rc::new(Pool::from(pool_map.into_iter().collect::<Vec<_>>())),
+        result_type,
+    ))
 }
 
 /// Binary ops behave differently depending on the types of their arguments.
@@ -1395,8 +1604,8 @@ fn comp_binary_op(
             .into(),
         _ => {
             // At least one is a pool
-            let left_pool = sum_pool(&left.to_pool());
-            let right_pool = sum_pool(&right.to_pool());
+            let left_pool = sum_pool(&left.to_pool(), &ScalarType::Int);
+            let right_pool = sum_pool(&right.to_pool(), &ScalarType::Int);
             RuntimeValue::Pool(
                 Rc::new(left_pool.flat_map(|left_outcome| {
                     right_pool
@@ -1427,8 +1636,9 @@ fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) ->
             b.iter().map(|b| compare(a, b)).sum::<i32>().into()
         }
         _ => {
-            let left_pool = sum_pool(&left.to_pool());
-            let right_pool = sum_pool(&right.to_pool());
+            let outcome_type = left.outcome_type();
+            let left_pool = sum_pool(&left.to_pool(), &outcome_type);
+            let right_pool = sum_pool(&right.to_pool(), &outcome_type);
             RuntimeValue::Pool(
                 Rc::new(left_pool.flat_map(|left_outcome| {
                     right_pool
@@ -1444,18 +1654,9 @@ fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) ->
     }
 }
 
-enum DLeftSide {
+enum DiceCount {
     Int(i32),
     Pool(Rc<Pool<i32>>),
-}
-
-impl DLeftSide {
-    fn to_pool(&self) -> Rc<Pool> {
-        match self {
-            DLeftSide::Int(i) => Rc::new(Pool::from_list(1, vec![*i])),
-            DLeftSide::Pool(p) => Rc::clone(p),
-        }
-    }
 }
 
 enum DRightSide {
@@ -1463,11 +1664,11 @@ enum DRightSide {
     Pool(Rc<Pool<ScalarValue>>),
 }
 
-fn flatten_list(arg: &RuntimeValue) -> DLeftSide {
+fn normalize_dice_count(arg: &RuntimeValue) -> DiceCount {
     match arg {
-        RuntimeValue::Scalar(ScalarValue::Int(i)) => DLeftSide::Int(*i),
-        RuntimeValue::List(list, _) => DLeftSide::Int(list.iter().map(expect_int).sum()),
-        RuntimeValue::Pool(pool, _) => DLeftSide::Pool(Rc::new(
+        RuntimeValue::Scalar(ScalarValue::Int(i)) => DiceCount::Int(*i),
+        RuntimeValue::List(list, _) => DiceCount::Int(list.iter().map(expect_int).sum()),
+        RuntimeValue::Pool(pool, _) => DiceCount::Pool(Rc::new(
             (**pool)
                 .clone()
                 .map_outcomes(|outcome| expect_int(&outcome)),
@@ -1490,7 +1691,7 @@ fn make_d(
             message: "only numeric values can be used as dice counts".to_string(),
         });
     }
-    let repeat = left.map_or(DLeftSide::Int(1), flatten_list);
+    let repeat = left.map_or(DiceCount::Int(1), normalize_dice_count);
     let outcome_type = right.outcome_type();
     let right = match right {
         RuntimeValue::Scalar(ScalarValue::Int(sides)) => {
@@ -1512,29 +1713,57 @@ fn make_d(
             })
         }
     };
-    if outcome_type != ScalarType::Int && !matches!(&repeat, DLeftSide::Int(1)) {
+    if !outcome_type.is_additive() && !matches!(&repeat, DiceCount::Int(1)) {
         return Err(RuntimeError::EnumTypeError {
             range: range.into(),
-            message: "non-numeric pools must have dimension one".to_string(),
+            message: "non-additive pools must have dimension one".to_string(),
         });
     }
     let result: RuntimeValue = match (repeat, right) {
-        (DLeftSide::Int(i), DRightSide::List(list)) => {
-            RuntimeValue::Pool(Rc::new(make_pool(i, list)), outcome_type.clone())
-        }
-        (DLeftSide::Int(i), DRightSide::Pool(p)) => {
+        (DiceCount::Int(i), DRightSide::List(list)) => RuntimeValue::Pool(
+            Rc::new(
+                make_pool(i, list).map_err(|message| RuntimeError::MathError {
+                    range: range.into(),
+                    message,
+                })?,
+            ),
+            outcome_type.clone(),
+        ),
+        (DiceCount::Int(i), DRightSide::Pool(p)) => {
             let mut new_pool = (*p).clone();
             if i < 0 {
-                new_pool = new_pool.map_outcomes(|outcome| ScalarValue::Int(-expect_int(&outcome)));
+                new_pool = new_pool
+                    .try_map_outcomes(|outcome| outcome.checked_neg())
+                    .map_err(|message| RuntimeError::MathError {
+                        range: range.into(),
+                        message,
+                    })?;
             }
             new_pool.set_dimension(new_pool.dimension() * i.unsigned_abs());
             RuntimeValue::Pool(Rc::new(new_pool), outcome_type.clone())
         }
-        (DLeftSide::Pool(left_p), right) => {
+        (DiceCount::Pool(left_p), right) => {
             let left_p = (*left_p).sum();
             let right = match right {
                 DRightSide::List(list) => Pool::from_list(1, list),
-                DRightSide::Pool(p) => sum_pool(&p),
+                DRightSide::Pool(p) => sum_pool(&p, &outcome_type),
+            };
+            let negated_right = if left_p
+                .ordered_outcomes()
+                .iter()
+                .any(|(multiplier, _)| *multiplier < 0)
+            {
+                Some(
+                    right
+                        .clone()
+                        .try_map_outcomes(|outcome| outcome.checked_neg())
+                        .map_err(|message| RuntimeError::MathError {
+                            range: range.into(),
+                            message,
+                        })?,
+                )
+            } else {
+                None
             };
             // At this point both |left_p| and |right| have a count of 1.
             // For each outcome in the left pool, sum the right pool with itself k times
@@ -1546,30 +1775,34 @@ fn make_d(
                         "summed distribution has count of {}",
                         count.len()
                     );
-                    let mut dup_right = right.clone();
                     let multiplier = count[0];
-                    if multiplier < 0 {
-                        dup_right = dup_right
-                            .map_outcomes(|outcome| ScalarValue::Int(-expect_int(&outcome)));
-                    }
+                    let mut dup_right = if multiplier < 0 {
+                        negated_right
+                            .clone()
+                            .expect("negative outcomes have a negated right-hand pool")
+                    } else {
+                        right.clone()
+                    };
                     dup_right.set_dimension(dup_right.dimension() * multiplier.unsigned_abs());
-                    sum_pool(&dup_right).into()
+                    sum_pool(&dup_right, &outcome_type).into()
                 })),
-                ScalarType::Int,
+                outcome_type.clone(),
             )
         }
     };
     Ok(result)
 }
 
-fn make_pool(mut n: i32, mut sides: Vec<ScalarValue>) -> Pool<ScalarValue> {
-    if n < 0 {
-        for side in sides.iter_mut() {
-            *side = ScalarValue::Int(-expect_int(side));
-        }
-        n = -n;
-    }
-    Pool::from_list(u32::try_from(n).expect("n is positive"), sides)
+fn make_pool(n: i32, sides: Vec<ScalarValue>) -> Result<Pool<ScalarValue>, String> {
+    let sides = if n < 0 {
+        sides
+            .into_iter()
+            .map(|side| side.checked_neg())
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        sides
+    };
+    Ok(Pool::from_list(n.unsigned_abs(), sides))
 }
 
 fn merge_outcome_type(
@@ -1625,12 +1858,14 @@ fn coerce_arg(
                 outcome_type,
             ))
         }
-        (RuntimeValue::List(list, _), StaticType::Int) if actual_outcome == ScalarType::Int => Ok(
-            RuntimeValue::Scalar(ScalarValue::Int(list.iter().map(expect_int).sum())),
-        ),
+        (RuntimeValue::List(list, outcome_type), StaticType::Int)
+            if actual_outcome.is_additive() =>
+        {
+            Ok(RuntimeValue::Scalar(sum_scalars(&list, &outcome_type)))
+        }
         (RuntimeValue::List(_, _), StaticType::Int) => Err(RuntimeError::EnumTypeError {
             range: range.into(),
-            message: "a non-numeric sequence cannot be summed into a scalar".to_string(),
+            message: "a non-additive sequence cannot be summed into a scalar".to_string(),
         }),
         (value @ RuntimeValue::List(_, _), StaticType::List) => Ok(value),
         (RuntimeValue::List(list, outcome_type), StaticType::Pool) => Ok(RuntimeValue::Pool(
@@ -1638,7 +1873,8 @@ fn coerce_arg(
             outcome_type,
         )),
         (RuntimeValue::Pool(pool, outcome_type), StaticType::Int) => {
-            Ok(RuntimeValue::Pool(Rc::new(sum_pool(&pool)), outcome_type))
+            let summed = sum_pool(&pool, &outcome_type);
+            Ok(RuntimeValue::Pool(Rc::new(summed), outcome_type))
         }
         (value @ RuntimeValue::Pool(_, _), _) => Ok(value),
     }
