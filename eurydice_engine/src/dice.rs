@@ -1320,14 +1320,24 @@ mod tests {
 
     #[test]
     fn test_reroll_d4_on_1_and_4() {
-        let die = vec![(1, Natural::ONE), (2, Natural::ONE), (3, Natural::ONE), (4, Natural::ONE)];
+        let die = vec![
+            (1, Natural::ONE),
+            (2, Natural::ONE),
+            (3, Natural::ONE),
+            (4, Natural::ONE),
+        ];
 
         let result = reroll(die, &[1, 4], 2);
 
         assert_eq!(result.len(), 4);
         assert_eq!(
             result,
-            vec![(1, 4u32.into()), (2, 28u32.into()), (3, 28u32.into()), (4, 4u32.into())]
+            vec![
+                (1, 4u32.into()),
+                (2, 28u32.into()),
+                (3, 28u32.into()),
+                (4, 4u32.into())
+            ]
         );
     }
 }

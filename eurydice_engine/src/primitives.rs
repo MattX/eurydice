@@ -775,7 +775,16 @@ mod tests {
             // 1 stays as 1, 2 explodes to 2+reroll, 3 explodes to 3+reroll
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
-                [(1, 9), (3, 3), (4, 3), (5, 1), (6, 3), (7, 4), (8, 3), (9, 1)]
+                [
+                    (1, 9),
+                    (3, 3),
+                    (4, 3),
+                    (5, 1),
+                    (6, 3),
+                    (7, 4),
+                    (8, 3),
+                    (9, 1)
+                ]
             );
         } else {
             panic!("Expected pool result");
