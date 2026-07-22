@@ -32,6 +32,14 @@ export function makeChartJsRangeSelect(
 
   let isDragging = false;
 
+  const updateChart = () => {
+    // React can detach the canvas before react-chartjs-2 destroys the chart.
+    // Updating during that gap makes Chart.js inspect a null parent element.
+    if (chart?.canvas.isConnected) {
+      chart.update();
+    }
+  };
+
   const setEnabled = (newEnabled: boolean) => {
     enabled = newEnabled;
   };
@@ -42,25 +50,20 @@ export function makeChartJsRangeSelect(
     }
 
     active = newActive;
-    chart?.update();
+    updateChart();
   };
 
   const setRange = (newStartValue: number, newEndValue: number) => {
     startValue = newStartValue - offset;
     endValue = newEndValue - offset;
-    chart?.update();
+    updateChart();
   };
 
   const setOffset = (newOffset: number) => {
     startValue = startValue + offset - newOffset;
     endValue = endValue + offset - newOffset;
     offset = newOffset;
-    try {
-      chart?.update();
-    } catch (error) {
-      // This can happen if the chart has changed I guess
-      console.error("Error updating chart:", error);
-    }
+    updateChart();
   };
 
   const mouseDown = (event: MouseEvent) => {
@@ -108,11 +111,15 @@ export function makeChartJsRangeSelect(
       chart.canvas.addEventListener("mousemove", mouseMove);
     },
 
-    stop: (chart) => {
-      chart.canvas?.removeEventListener("mousedown", mouseDown);
-      chart.canvas?.removeEventListener("mouseup", mouseUp);
-      chart.canvas?.removeEventListener("mouseleave", mouseUp);
-      chart.canvas?.removeEventListener("mousemove", mouseMove);
+    stop: (stoppedChart) => {
+      stoppedChart.canvas?.removeEventListener("mousedown", mouseDown);
+      stoppedChart.canvas?.removeEventListener("mouseup", mouseUp);
+      stoppedChart.canvas?.removeEventListener("mouseleave", mouseUp);
+      stoppedChart.canvas?.removeEventListener("mousemove", mouseMove);
+      if (chart === stoppedChart) {
+        chart = null;
+        isDragging = false;
+      }
     },
 
     beforeDraw: (chart) => {
