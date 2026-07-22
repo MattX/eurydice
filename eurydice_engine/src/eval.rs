@@ -41,6 +41,10 @@ impl EnumType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScalarType {
+    /// An empty collection with no evidence about its outcome type.
+    Uninhabited,
+    /// The polymorphic identity produced by summing an uninhabited collection.
+    AdditiveIdentity,
     Int,
     Enum(Rc<EnumType>),
     Tuple(Rc<[ScalarType]>),
@@ -48,15 +52,21 @@ pub enum ScalarType {
 
 impl ScalarType {
     fn merged_with(&self, other: &Self) -> Option<Self> {
-        if self == other {
-            Some(self.clone())
-        } else {
-            None
+        match (self, other) {
+            (ScalarType::Uninhabited, other) | (other, ScalarType::Uninhabited) => {
+                Some(other.clone())
+            }
+            (ScalarType::AdditiveIdentity, other) if other.is_additive() => Some(other.clone()),
+            (other, ScalarType::AdditiveIdentity) if other.is_additive() => Some(other.clone()),
+            (left, right) if left == right => Some(left.clone()),
+            _ => None,
         }
     }
 
     fn display_name(&self) -> String {
         match self {
+            ScalarType::Uninhabited => "empty".to_string(),
+            ScalarType::AdditiveIdentity => "additive identity".to_string(),
             ScalarType::Int => "int".to_string(),
             ScalarType::Enum(ty) => ty.name.clone(),
             ScalarType::Tuple(fields) => format!(
@@ -72,6 +82,9 @@ impl ScalarType {
 
     fn additive_identity(&self) -> Option<ScalarValue> {
         match self {
+            ScalarType::Uninhabited | ScalarType::AdditiveIdentity => {
+                Some(ScalarValue::AdditiveIdentity)
+            }
             ScalarType::Int => Some(ScalarValue::Int(0)),
             ScalarType::Tuple(fields)
                 if fields.iter().all(|field| matches!(field, ScalarType::Int)) =>
@@ -89,13 +102,30 @@ impl ScalarType {
     }
 
     fn is_additive(&self) -> bool {
-        matches!(self, ScalarType::Int)
-            || matches!(self, ScalarType::Tuple(fields) if fields.iter().all(|field| matches!(field, ScalarType::Int)))
+        matches!(
+            self,
+            ScalarType::Uninhabited | ScalarType::AdditiveIdentity | ScalarType::Int
+        ) || matches!(self, ScalarType::Tuple(fields) if fields.iter().all(|field| matches!(field, ScalarType::Int)))
+    }
+
+    pub(crate) fn summed_type(&self) -> Self {
+        match self {
+            ScalarType::Uninhabited => ScalarType::AdditiveIdentity,
+            other => other.clone(),
+        }
+    }
+
+    pub(crate) fn defaulted(&self) -> Self {
+        match self {
+            ScalarType::Uninhabited | ScalarType::AdditiveIdentity => ScalarType::Int,
+            other => other.clone(),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ScalarValue {
+    AdditiveIdentity,
     Int(i32),
     Enum { value: i32, ty: Rc<EnumType> },
     Tuple(Rc<[ScalarValue]>),
@@ -104,6 +134,7 @@ pub enum ScalarValue {
 impl ScalarValue {
     pub fn scalar_type(&self) -> ScalarType {
         match self {
+            ScalarValue::AdditiveIdentity => ScalarType::AdditiveIdentity,
             ScalarValue::Int(_) => ScalarType::Int,
             ScalarValue::Enum { ty, .. } => ScalarType::Enum(Rc::clone(ty)),
             ScalarValue::Tuple(fields) => ScalarType::Tuple(
@@ -119,19 +150,30 @@ impl ScalarValue {
     pub fn as_int(&self) -> Option<i32> {
         match self {
             ScalarValue::Int(value) => Some(*value),
-            ScalarValue::Enum { .. } | ScalarValue::Tuple(_) => None,
+            ScalarValue::AdditiveIdentity | ScalarValue::Enum { .. } | ScalarValue::Tuple(_) => {
+                None
+            }
         }
     }
 
     pub fn enum_type(&self) -> Option<Rc<EnumType>> {
         match self {
             ScalarValue::Enum { ty, .. } => Some(Rc::clone(ty)),
-            ScalarValue::Int(_) | ScalarValue::Tuple(_) => None,
+            ScalarValue::AdditiveIdentity | ScalarValue::Int(_) | ScalarValue::Tuple(_) => None,
         }
     }
 
     fn add_scaled(&self, other: &Self, count: u32) -> Self {
         match (self, other) {
+            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity) => {
+                ScalarValue::AdditiveIdentity
+            }
+            (ScalarValue::AdditiveIdentity, other) => other
+                .scalar_type()
+                .additive_identity()
+                .expect("identity can only be added to an additive value")
+                .add_scaled(other, count),
+            (other, ScalarValue::AdditiveIdentity) => other.clone(),
             (ScalarValue::Int(left), ScalarValue::Int(right)) => {
                 let count = i32::try_from(count).expect("pool dimension fits in i32");
                 ScalarValue::Int(left + right * count)
@@ -149,6 +191,7 @@ impl ScalarValue {
 
     fn try_map_ints(&self, f: &impl Fn(i32) -> Result<i32, String>) -> Result<Self, String> {
         match self {
+            ScalarValue::AdditiveIdentity => Ok(ScalarValue::AdditiveIdentity),
             ScalarValue::Int(value) => Ok(ScalarValue::Int(f(*value)?)),
             ScalarValue::Tuple(fields) => Ok(ScalarValue::Tuple(
                 fields
@@ -167,6 +210,9 @@ impl ScalarValue {
         f: &impl Fn(i32, i32) -> Result<i32, String>,
     ) -> Result<Self, String> {
         match (self, other) {
+            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity) => {
+                Ok(ScalarValue::AdditiveIdentity)
+            }
             (ScalarValue::Int(left), ScalarValue::Int(right)) => {
                 Ok(ScalarValue::Int(f(*left, *right)?))
             }
@@ -188,11 +234,22 @@ impl ScalarValue {
                 .ok_or_else(|| format!("Negation overflow: -{value}"))
         })
     }
+
+    pub(crate) fn materialize_identity(&self, outcome_type: &ScalarType) -> Self {
+        match self {
+            ScalarValue::AdditiveIdentity => outcome_type
+                .additive_identity()
+                .filter(|value| !matches!(value, ScalarValue::AdditiveIdentity))
+                .expect("identity must be materialized as a concrete additive type"),
+            other => other.clone(),
+        }
+    }
 }
 
 impl std::fmt::Display for ScalarValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ScalarValue::AdditiveIdentity => write!(f, "0"),
             ScalarValue::Int(value) => write!(f, "{value}"),
             ScalarValue::Enum { value, ty } => {
                 write!(f, "{}", ty.member_name(*value).unwrap_or("<?>"))
@@ -229,12 +286,16 @@ impl std::fmt::Display for RuntimeValue {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            RuntimeValue::Pool(pool, ScalarType::Int) => write!(
+            RuntimeValue::Pool(
+                pool,
+                ScalarType::Uninhabited | ScalarType::AdditiveIdentity | ScalarType::Int,
+            ) => write!(
                 f,
                 "{}",
-                (**pool)
-                    .clone()
-                    .map_outcomes(|outcome| outcome.as_int().expect("numeric pool"))
+                (**pool).clone().map_outcomes(|outcome| match outcome {
+                    ScalarValue::AdditiveIdentity => 0,
+                    outcome => outcome.as_int().expect("numeric pool"),
+                })
             ),
             RuntimeValue::Pool(pool, ScalarType::Enum(_) | ScalarType::Tuple(_)) => write!(
                 f,
@@ -270,20 +331,54 @@ impl RuntimeValue {
     pub fn enum_type(&self) -> Option<Rc<EnumType>> {
         match self.outcome_type() {
             ScalarType::Enum(ty) => Some(ty),
-            ScalarType::Int | ScalarType::Tuple(_) => None,
+            ScalarType::Uninhabited
+            | ScalarType::AdditiveIdentity
+            | ScalarType::Int
+            | ScalarType::Tuple(_) => None,
         }
     }
 
-    pub(crate) fn has_same_outcome_type(&self, other: &Self) -> bool {
-        self.outcome_type() == other.outcome_type()
+    pub(crate) fn merged_outcome_type(&self, other: &Self) -> Option<ScalarType> {
+        self.outcome_type().merged_with(&other.outcome_type())
     }
 
-    fn is_numeric(&self) -> bool {
-        self.outcome_type() == ScalarType::Int
+    fn is_numeric_compatible(&self) -> bool {
+        matches!(
+            self.outcome_type(),
+            ScalarType::Uninhabited | ScalarType::AdditiveIdentity | ScalarType::Int
+        )
     }
 
     fn is_additive(&self) -> bool {
         self.outcome_type().is_additive()
+    }
+
+    fn flattened_outcome_type(&self) -> ScalarType {
+        match self {
+            RuntimeValue::Pool(_, ScalarType::Uninhabited) => ScalarType::AdditiveIdentity,
+            _ => self.outcome_type(),
+        }
+    }
+
+    pub(crate) fn materialize_identities(&self, outcome_type: &ScalarType) -> Self {
+        if matches!(
+            outcome_type,
+            ScalarType::Uninhabited | ScalarType::AdditiveIdentity
+        ) {
+            return self.clone();
+        }
+        let materialize = |value: &ScalarValue| value.materialize_identity(outcome_type);
+        match self {
+            RuntimeValue::Scalar(value) => RuntimeValue::Scalar(materialize(value)),
+            RuntimeValue::List(values, _) => RuntimeValue::List(
+                Rc::new(values.iter().map(materialize).collect()),
+                outcome_type.clone(),
+            ),
+            RuntimeValue::Pool(pool, _) => RuntimeValue::Pool(
+                Rc::new((**pool).clone().map_outcomes(|value| materialize(&value))),
+                outcome_type.clone(),
+            ),
+        }
     }
 
     fn to_list(&self, repeat: usize) -> Vec<ScalarValue> {
@@ -302,8 +397,23 @@ impl RuntimeValue {
 
     pub(crate) fn map_numeric_outcomes(&self, f: impl Fn(i32) -> i32 + Copy) -> Self {
         match self {
+            RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => f(0).into(),
             RuntimeValue::Scalar(ScalarValue::Int(value)) => f(*value).into(),
+            RuntimeValue::List(_, ScalarType::Uninhabited | ScalarType::AdditiveIdentity) => {
+                f(0).into()
+            }
             RuntimeValue::List(list, _) => f(list.iter().map(expect_int).sum()).into(),
+            RuntimeValue::Pool(
+                pool,
+                outcome_type @ (ScalarType::Uninhabited | ScalarType::AdditiveIdentity),
+            ) => RuntimeValue::Pool(
+                Rc::new(sum_pool(pool, outcome_type).map_outcomes(|outcome| {
+                    ScalarValue::Int(f(expect_int(
+                        &outcome.materialize_identity(&ScalarType::Int),
+                    )))
+                })),
+                ScalarType::Int,
+            ),
             RuntimeValue::Pool(pool, _) => RuntimeValue::Pool(
                 Rc::new(
                     (**pool)
@@ -773,6 +883,7 @@ impl Evaluator {
             } => {
                 let condition_value = self.evaluate(eval_context, condition)?;
                 let cond_value = match condition_value {
+                    RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
                     RuntimeValue::Scalar(ScalarValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::InvalidCondition {
@@ -877,21 +988,31 @@ impl Evaluator {
                     .map(|item| self.evaluate_list_literal_item(eval_context, item))
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut outcome: Option<ScalarType> = None;
-                let mut elems = Vec::new();
-                for item in items {
-                    let item_type = item.outcome_type();
+                for item in &items {
+                    let item_type = item.flattened_outcome_type();
                     merge_outcome_type(
                         &mut outcome,
                         item_type,
                         expression.range,
                         "list literal contains mixed outcome types",
                     )?;
-                    elems.extend(item.to_list(1));
                 }
-                Ok(RuntimeValue::List(
-                    Rc::new(elems),
-                    outcome.unwrap_or(ScalarType::Int),
-                ))
+                let outcome = outcome.unwrap_or(ScalarType::Uninhabited);
+                let elems = items
+                    .into_iter()
+                    .flat_map(|item| item.to_list(1))
+                    .map(|value| {
+                        if matches!(
+                            outcome,
+                            ScalarType::Uninhabited | ScalarType::AdditiveIdentity
+                        ) {
+                            value
+                        } else {
+                            value.materialize_identity(&outcome)
+                        }
+                    })
+                    .collect();
+                Ok(RuntimeValue::List(Rc::new(elems), outcome))
             }
             Expression::FunctionCall { name, args } => {
                 let func = self
@@ -941,6 +1062,7 @@ impl Evaluator {
     ) -> Result<RuntimeValue, RuntimeError> {
         let repeat_count = match &item.repeat {
             Some(repeat) => match self.evaluate(eval_context, repeat)? {
+                RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
                 RuntimeValue::Scalar(ScalarValue::Int(i)) => {
                     usize::try_from(i.max(0)).expect("converting a positive i32 into usize")
                 }
@@ -959,6 +1081,7 @@ impl Evaluator {
             BareListItem::Range(start_expr, end_expr) => {
                 let start = self.evaluate(eval_context, start_expr)?;
                 let start = match start {
+                    RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
                     RuntimeValue::Scalar(ScalarValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
@@ -969,6 +1092,7 @@ impl Evaluator {
                 };
                 let end = self.evaluate(eval_context, end_expr)?;
                 let end = match end {
+                    RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
                     RuntimeValue::Scalar(ScalarValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
@@ -1108,7 +1232,7 @@ impl Evaluator {
             }
         }
         let result_type = result_type.unwrap_or(ScalarType::Int);
-        Ok(RuntimeValue::Pool(
+        let result = RuntimeValue::Pool(
             Rc::new(
                 total_results
                     .into_iter()
@@ -1120,8 +1244,9 @@ impl Evaluator {
                     })
                     .collect::<Pool<ScalarValue>>(),
             ),
-            result_type,
-        ))
+            result_type.clone(),
+        );
+        Ok(result.materialize_identities(&result_type))
     }
 
     fn call_function(
@@ -1173,7 +1298,7 @@ fn apply_unary_op(
             range: op.range.into(),
             message: format!("operator {} is not defined for this scalar type", op.value),
         }),
-        UnaryOp::Invert if !operand.is_numeric() => Err(RuntimeError::EnumTypeError {
+        UnaryOp::Invert if !operand.is_numeric_compatible() => Err(RuntimeError::EnumTypeError {
             range: op.range.into(),
             message: format!("operator {} is not defined for this scalar type", op.value),
         }),
@@ -1183,6 +1308,7 @@ fn apply_unary_op(
         }),
         UnaryOp::Invert => Ok(operand.map_numeric_outcomes(|o| if o == 0 { 1 } else { 0 })),
         UnaryOp::Length => Ok(match operand {
+            RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 1.into(),
             RuntimeValue::Scalar(ScalarValue::Int(i)) => i32::try_from(i.abs().to_string().len())
                 .expect("vector length fits in i32")
                 .into(),
@@ -1218,13 +1344,39 @@ fn negate_value(value: &RuntimeValue) -> Result<RuntimeValue, String> {
 }
 
 fn math_result_type(op: BinaryOp, left: &ScalarType, right: &ScalarType) -> Option<ScalarType> {
+    let left = left.summed_type();
+    let right = right.summed_type();
     match op {
-        BinaryOp::Add | BinaryOp::Sub if left == right && left.is_additive() => Some(left.clone()),
-        BinaryOp::Mul if left == &ScalarType::Int && right.is_additive() => Some(right.clone()),
-        BinaryOp::Mul if right == &ScalarType::Int && left.is_additive() => Some(left.clone()),
-        BinaryOp::Div if right == &ScalarType::Int && left.is_additive() => Some(left.clone()),
+        BinaryOp::Add | BinaryOp::Sub => left.merged_with(&right).filter(ScalarType::is_additive),
+        BinaryOp::Mul
+            if matches!(left, ScalarType::Tuple(_))
+                && left.is_additive()
+                && matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity) =>
+        {
+            Some(left)
+        }
+        BinaryOp::Mul
+            if matches!(right, ScalarType::Tuple(_))
+                && right.is_additive()
+                && matches!(left, ScalarType::Int | ScalarType::AdditiveIdentity) =>
+        {
+            Some(right)
+        }
+        BinaryOp::Mul
+            if matches!(left, ScalarType::Int | ScalarType::AdditiveIdentity)
+                && matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity) =>
+        {
+            left.merged_with(&right)
+        }
+        BinaryOp::Div
+            if matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity)
+                && left.is_additive() =>
+        {
+            Some(left)
+        }
         BinaryOp::Pow | BinaryOp::Or | BinaryOp::And
-            if left == &ScalarType::Int && right == &ScalarType::Int =>
+            if matches!(left, ScalarType::Int | ScalarType::AdditiveIdentity)
+                && matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity) =>
         {
             Some(ScalarType::Int)
         }
@@ -1239,10 +1391,12 @@ fn apply_scalar_math(
 ) -> Result<ScalarValue, String> {
     match op {
         BinaryOp::Pow => {
+            let left = left.materialize_identity(&ScalarType::Int);
+            let right = right.materialize_identity(&ScalarType::Int);
             let (ScalarValue::Int(left), ScalarValue::Int(right)) = (left, right) else {
                 unreachable!("power operands were type checked")
             };
-            if *right < 0 {
+            if right < 0 {
                 Err(format!("Cannot raise {} to negative power {}", left, right))
             } else {
                 left.checked_pow(right.unsigned_abs())
@@ -1250,15 +1404,40 @@ fn apply_scalar_math(
                     .ok_or_else(|| format!("Power overflow: {} ^ {}", left, right))
             }
         }
-        BinaryOp::Add => left.try_zip_ints(right, &|left, right| {
-            left.checked_add(right)
-                .ok_or_else(|| format!("Addition overflow: {} + {}", left, right))
-        }),
-        BinaryOp::Sub => left.try_zip_ints(right, &|left, right| {
-            left.checked_sub(right)
-                .ok_or_else(|| format!("Subtraction overflow: {} - {}", left, right))
-        }),
+        BinaryOp::Add => match (left, right) {
+            (ScalarValue::AdditiveIdentity, other) | (other, ScalarValue::AdditiveIdentity) => {
+                Ok(other.clone())
+            }
+            _ => left.try_zip_ints(right, &|left, right| {
+                left.checked_add(right)
+                    .ok_or_else(|| format!("Addition overflow: {} + {}", left, right))
+            }),
+        },
+        BinaryOp::Sub => match (left, right) {
+            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity) => {
+                Ok(ScalarValue::AdditiveIdentity)
+            }
+            (other, ScalarValue::AdditiveIdentity) => Ok(other.clone()),
+            (ScalarValue::AdditiveIdentity, other) => other.checked_neg(),
+            _ => left.try_zip_ints(right, &|left, right| {
+                left.checked_sub(right)
+                    .ok_or_else(|| format!("Subtraction overflow: {} - {}", left, right))
+            }),
+        },
         BinaryOp::Mul => match (left, right) {
+            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity)
+            | (ScalarValue::AdditiveIdentity, ScalarValue::Int(_))
+            | (ScalarValue::Int(_), ScalarValue::AdditiveIdentity) => {
+                Ok(ScalarValue::AdditiveIdentity)
+            }
+            (ScalarValue::AdditiveIdentity, ScalarValue::Tuple(_)) => Ok(right
+                .scalar_type()
+                .additive_identity()
+                .expect("additive tuple")),
+            (ScalarValue::Tuple(_), ScalarValue::AdditiveIdentity) => Ok(left
+                .scalar_type()
+                .additive_identity()
+                .expect("additive tuple")),
             (ScalarValue::Int(left), ScalarValue::Int(right)) => left
                 .checked_mul(*right)
                 .map(ScalarValue::Int)
@@ -1276,25 +1455,31 @@ fn apply_scalar_math(
             _ => unreachable!("multiplication operands were type checked"),
         },
         BinaryOp::Div => {
-            let ScalarValue::Int(divisor) = right else {
+            let divisor = right.materialize_identity(&ScalarType::Int);
+            let ScalarValue::Int(divisor) = divisor else {
                 unreachable!("division divisor was type checked")
             };
-            if *divisor == 0 {
+            if divisor == 0 {
                 return Err(format!("Cannot divide {} by zero", left));
+            }
+            if matches!(left, ScalarValue::AdditiveIdentity) {
+                return Ok(ScalarValue::AdditiveIdentity);
             }
             left.try_map_ints(&|value| {
                 value
-                    .checked_div(*divisor)
+                    .checked_div(divisor)
                     .ok_or_else(|| format!("Division overflow: {} / {}", value, divisor))
             })
         }
         BinaryOp::Or | BinaryOp::And => {
+            let left = left.materialize_identity(&ScalarType::Int);
+            let right = right.materialize_identity(&ScalarType::Int);
             let (ScalarValue::Int(left), ScalarValue::Int(right)) = (left, right) else {
                 unreachable!("logical operands were type checked")
             };
             let result = match op {
-                BinaryOp::Or => *left != 0 || *right != 0,
-                BinaryOp::And => *left != 0 && *right != 0,
+                BinaryOp::Or => left != 0 || right != 0,
+                BinaryOp::And => left != 0 && right != 0,
                 _ => unreachable!(),
             };
             Ok(ScalarValue::Int(i32::from(result)))
@@ -1338,7 +1523,7 @@ fn apply_binary_op(
     if matches!(
         op.value,
         BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
-    ) && (!left.is_numeric() || !right.is_numeric())
+    ) && (!left.is_numeric_compatible() || !right.is_numeric_compatible())
     {
         return Err(RuntimeError::EnumTypeError {
             range: op.range.into(),
@@ -1348,7 +1533,8 @@ fn apply_binary_op(
             ),
         });
     }
-    if matches!(op.value, BinaryOp::Eq | BinaryOp::Ne) && !left.has_same_outcome_type(right) {
+    if matches!(op.value, BinaryOp::Eq | BinaryOp::Ne) && left.merged_outcome_type(right).is_none()
+    {
         return Err(RuntimeError::EnumTypeError {
             range: op.range.into(),
             message: "equality requires operands with the same outcome type".to_string(),
@@ -1357,13 +1543,14 @@ fn apply_binary_op(
     match &op.value {
         BinaryOp::D => make_d(Some(left), right, op.range),
         BinaryOp::At => {
-            if !left.is_numeric() {
+            if !left.is_numeric_compatible() {
                 return Err(RuntimeError::EnumTypeError {
                     range: op.range.into(),
                     message: "only integers can be used as positions".to_string(),
                 });
             }
             let left = match left {
+                RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => Rc::new(vec![0]),
                 RuntimeValue::Scalar(ScalarValue::Int(i)) => Rc::new(vec![*i]),
                 RuntimeValue::List(lst, _) => {
                     Rc::new(lst.iter().map(expect_int).collect::<Vec<_>>())
@@ -1382,6 +1569,14 @@ fn apply_binary_op(
                 }
             };
             match right {
+                RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => {
+                    Ok(RuntimeValue::Scalar(select_positions(
+                        &left,
+                        &[ScalarValue::Int(0)],
+                        &ScalarType::Int,
+                        lowest_first,
+                    )))
+                }
                 RuntimeValue::Scalar(ScalarValue::Int(i)) => {
                     let digits = i
                         .abs()
@@ -1583,7 +1778,9 @@ fn comp_binary_op(
     int_comp: impl Fn(i32, i32) -> i32,
     list_comp: impl Fn(&[i32], &[i32]) -> i32,
 ) -> RuntimeValue {
-    match (left, right) {
+    let left = left.materialize_identities(&ScalarType::Int);
+    let right = right.materialize_identities(&ScalarType::Int);
+    match (&left, &right) {
         (RuntimeValue::Scalar(ScalarValue::Int(a)), RuntimeValue::Scalar(ScalarValue::Int(b))) => {
             int_comp(*a, *b).into()
         }
@@ -1625,8 +1822,14 @@ fn comp_binary_op(
 }
 
 fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) -> RuntimeValue {
+    let outcome_type = left
+        .merged_outcome_type(right)
+        .expect("equality operand types were checked")
+        .summed_type();
+    let left = left.materialize_identities(&outcome_type);
+    let right = right.materialize_identities(&outcome_type);
     let compare = |a: &ScalarValue, b: &ScalarValue| i32::from((a == b) == equal);
-    match (left, right) {
+    match (&left, &right) {
         (RuntimeValue::Scalar(a), RuntimeValue::Scalar(b)) => compare(a, b).into(),
         (RuntimeValue::List(a, _), RuntimeValue::List(b, _)) => i32::from((a == b) == equal).into(),
         (RuntimeValue::List(a, _), RuntimeValue::Scalar(b)) => {
@@ -1636,7 +1839,6 @@ fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) ->
             b.iter().map(|b| compare(a, b)).sum::<i32>().into()
         }
         _ => {
-            let outcome_type = left.outcome_type();
             let left_pool = sum_pool(&left.to_pool(), &outcome_type);
             let right_pool = sum_pool(&right.to_pool(), &outcome_type);
             RuntimeValue::Pool(
@@ -1666,6 +1868,7 @@ enum DRightSide {
 
 fn normalize_dice_count(arg: &RuntimeValue) -> DiceCount {
     match arg {
+        RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => DiceCount::Int(0),
         RuntimeValue::Scalar(ScalarValue::Int(i)) => DiceCount::Int(*i),
         RuntimeValue::List(list, _) => DiceCount::Int(list.iter().map(expect_int).sum()),
         RuntimeValue::Pool(pool, _) => DiceCount::Pool(Rc::new(
@@ -1685,7 +1888,7 @@ fn make_d(
     right: &RuntimeValue,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
-    if left.is_some_and(|value| !value.is_numeric()) {
+    if left.is_some_and(|value| !value.is_numeric_compatible()) {
         return Err(RuntimeError::EnumTypeError {
             range: range.into(),
             message: "only numeric values can be used as dice counts".to_string(),
@@ -1694,6 +1897,9 @@ fn make_d(
     let repeat = left.map_or(DiceCount::Int(1), normalize_dice_count);
     let outcome_type = right.outcome_type();
     let right = match right {
+        RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => {
+            DRightSide::List(vec![ScalarValue::Int(0)])
+        }
         RuntimeValue::Scalar(ScalarValue::Int(sides)) => {
             if *sides > 0 {
                 DRightSide::List((1..=*sides).map(ScalarValue::Int).collect())
@@ -1825,14 +2031,14 @@ fn merge_outcome_type(
 }
 
 fn coerce_arg(
-    arg: RuntimeValue,
+    mut arg: RuntimeValue,
     expected: Option<&ResolvedArgType>,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
     let Some(expected) = expected else {
         return Ok(arg);
     };
-    let actual_outcome = arg.outcome_type();
+    let mut actual_outcome = arg.outcome_type();
     if let Some(required) = &expected.outcome {
         if actual_outcome.merged_with(required).is_none() {
             return Err(RuntimeError::EnumTypeError {
@@ -1844,6 +2050,8 @@ fn coerce_arg(
                 ),
             });
         }
+        arg = arg.materialize_identities(required);
+        actual_outcome = required.clone();
     }
     match (arg, expected.shape) {
         (value @ RuntimeValue::Scalar(_), StaticType::Int) => Ok(value),

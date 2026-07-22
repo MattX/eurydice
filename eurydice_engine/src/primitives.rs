@@ -48,21 +48,23 @@ fn contains_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let result = match (&args[0], &args[1]) {
-        (
-            haystack_value @ RuntimeValue::List(haystack, _),
-            needle_value @ RuntimeValue::Scalar(needle),
-        ) if haystack_value.has_same_outcome_type(needle_value) => {
-            haystack.iter().any(|h| h == needle)
-        }
-        _ => {
-            return Err(crate::eval::RuntimeError::EnumTypeError {
-                range: function_range.into(),
-                message: "[contains] requires a sequence and scalar with the same outcome type"
-                    .to_string(),
-            })
-        }
+    let error = || crate::eval::RuntimeError::EnumTypeError {
+        range: function_range.into(),
+        message: "[contains] requires a sequence and scalar with the same outcome type".to_string(),
     };
+    let (RuntimeValue::List(_, _), RuntimeValue::Scalar(_)) = (&args[0], &args[1]) else {
+        return Err(error());
+    };
+    let outcome_type = args[0]
+        .merged_outcome_type(&args[1])
+        .ok_or_else(error)?
+        .summed_type();
+    let haystack = args[0].materialize_identities(&outcome_type);
+    let needle = args[1].materialize_identities(&outcome_type);
+    let (RuntimeValue::List(haystack, _), RuntimeValue::Scalar(needle)) = (haystack, needle) else {
+        unreachable!("contains argument shapes were checked")
+    };
+    let result = haystack.iter().any(|value| value == &needle);
     Ok(if result { 1.into() } else { 0.into() })
 }
 
@@ -73,20 +75,27 @@ fn count_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let (needle, haystack) = match (&args[0], &args[1]) {
-        (
-            needle_value @ RuntimeValue::List(needle, _),
-            haystack_value @ RuntimeValue::List(haystack, _),
-        ) if needle_value.has_same_outcome_type(haystack_value) => {
-            (needle.as_slice(), haystack.as_slice())
-        }
-        _ => {
-            return Err(crate::eval::RuntimeError::EnumTypeError {
-                range: function_range.into(),
-                message: "[count] requires sequences with the same outcome type".to_string(),
-            })
-        }
+    let error = || crate::eval::RuntimeError::EnumTypeError {
+        range: function_range.into(),
+        message: "[count] requires sequences with the same outcome type".to_string(),
     };
+    if !matches!(
+        (&args[0], &args[1]),
+        (RuntimeValue::List(_, _), RuntimeValue::List(_, _))
+    ) {
+        return Err(error());
+    }
+    let outcome_type = args[0]
+        .merged_outcome_type(&args[1])
+        .ok_or_else(error)?
+        .summed_type();
+    let needle = args[0].materialize_identities(&outcome_type);
+    let haystack = args[1].materialize_identities(&outcome_type);
+    let (RuntimeValue::List(needle, _), RuntimeValue::List(haystack, _)) = (needle, haystack)
+    else {
+        unreachable!("count argument shapes were checked")
+    };
+    let (needle, haystack) = (needle.as_slice(), haystack.as_slice());
     let mut needle_map = HashMap::new();
     for n in needle.iter() {
         *needle_map.entry(n).or_insert(0) += 1;
@@ -366,6 +375,7 @@ fn tuple_execute(
     let fields = args
         .iter()
         .map(|arg| match arg {
+            RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => Ok(ScalarValue::Int(0)),
             RuntimeValue::Scalar(value @ (ScalarValue::Int(_) | ScalarValue::Enum { .. })) => {
                 Ok(value.clone())
             }

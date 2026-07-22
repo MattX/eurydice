@@ -57,6 +57,22 @@ fn rejects_mixed_enum_list() {
 }
 
 #[test]
+fn untyped_empty_list_adopts_an_enum_outcome_type() {
+    let outputs = run(r#"
+        enum: RESULT { MISS, HIT }
+        output {{}, MISS}
+        "#)
+    .unwrap();
+    let RuntimeValue::List(values, _) = &outputs[0].0 else {
+        panic!("expected enum list");
+    };
+    assert!(matches!(
+        values.as_slice(),
+        [ScalarValue::Enum { value: 0, .. }]
+    ));
+}
+
+#[test]
 fn enum_names_and_members_are_immutable() {
     for program in [
         "enum: RESULT { MISS, HIT } MISS: 3",

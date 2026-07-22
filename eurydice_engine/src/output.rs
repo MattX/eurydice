@@ -62,6 +62,7 @@ fn tuple_values(values: &[ScalarValue]) -> Vec<i32> {
     values
         .iter()
         .map(|value| match value {
+            ScalarValue::AdditiveIdentity => 0,
             ScalarValue::Int(value) => *value,
             ScalarValue::Enum { value, .. } => *value,
             ScalarValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
@@ -75,7 +76,20 @@ fn pool_output(pool: &Pool<ScalarValue>, outcome_type: &ScalarType, sum: bool) -
     } else {
         pool.clone()
     };
-    match outcome_type {
+    let unresolved = matches!(
+        outcome_type,
+        ScalarType::Uninhabited | ScalarType::AdditiveIdentity
+    );
+    let outcome_type = outcome_type.defaulted();
+    let pool = if unresolved {
+        pool.map_outcomes(|value| value.materialize_identity(&outcome_type))
+    } else {
+        pool
+    };
+    match &outcome_type {
+        ScalarType::Uninhabited | ScalarType::AdditiveIdentity => {
+            unreachable!("defaulted outcome types are concrete")
+        }
         ScalarType::Int => OutputValue::Distribution(Distribution {
             probabilities: to_probabilities(
                 &pool
@@ -110,6 +124,9 @@ fn pool_output(pool: &Pool<ScalarValue>, outcome_type: &ScalarType, sum: bool) -
             fields: field_types
                 .iter()
                 .map(|ty| match ty {
+                    ScalarType::Uninhabited | ScalarType::AdditiveIdentity => {
+                        unreachable!("tuple fields always have concrete types")
+                    }
                     ScalarType::Int => TupleFieldSchema::Int,
                     ScalarType::Enum(ty) => TupleFieldSchema::Enum {
                         enum_name: ty.name.clone(),

@@ -81,7 +81,9 @@ And two additional types built on scalar types:
 * `list`: values of this type hold a list of scalars.
 * `pool`: values of this type hold a pool, which is composed of a mapping of outcomes (each of which is a scalar) to probabilities (whose representation is unspecified), together with an unsigned count of dice, which is called the _dimension_.
 
-Scalars, lists, and pools have an _outcome type_: `int`, one particular enum, or a particular structural tuple type. Lists and pools are homogeneous and cannot mix values with different outcome types. For example, all tuples in one list must have the same arity and corresponding field types. An empty literal is numeric unless its outcome type comes from a typed expression, such as `{MISS:0}`; an untyped empty literal is not inferred to satisfy a non-numeric constraint.
+Scalars, lists, and pools have an _outcome type_: `int`, one particular enum, or a particular structural tuple type. Lists and pools are homogeneous and cannot mix values with different outcome types. For example, all tuples in one list must have the same arity and corresponding field types.
+
+A bare empty literal has an initially uninhabited outcome type: because it contains no values, it is compatible with any outcome type supplied by its context. This differs from an explicitly typed empty literal such as `{MISS:0}`, `{[tuple 1 2]:0}`, or `{1:0}`, which retains the type of its repeated expression. Summing an untyped empty sequence or pool produces a universal additive identity. That identity remains polymorphic through additive arithmetic until a concrete additive type is supplied; if it is still unconstrained when displayed or used by an operation requiring integers, it becomes the integer `0`.
 
 The maximum number of elements in a list, or of outcomes in a pool, is 2^31-1.
 
@@ -136,7 +138,7 @@ There are no first-class functions.
 
 It is not possible to create a pool value representing a pool of different types of dice. For instance, `3d6` is a pool of three d6s, but there is no way to represent a pool of one d6 and one d8.
 
-Pools whose outcomes are neither integers nor additive tuples must have dimension one. Enum pools and tuple pools containing enum fields therefore represent categorical or joint distributions rather than collections of values which can be summed.
+Pools whose outcomes are neither integers nor additive tuples must have dimension one. Enum pools and tuple pools containing enum fields therefore represent categorical or joint distributions rather than collections of values which can be summed. An untyped pool with no outcomes may have any dimension because it has not yet acquired an outcome type.
 
 Pools may have no possible outcomes (for instance, such a pool is created with expression `d{}`). Such a pool has dimension 0.
 
@@ -144,7 +146,7 @@ The following operations are frequently referred to in this document:
 
 #### Summing
 
-_Summing_ an additive pool transforms it into a pool of dimension 1 whose outcomes are the possible sums when sampling from the dice in the pool, with associated probabilities. Integer outcomes are added normally and all-int tuple outcomes are added componentwise. Summing a pool of dimension 1 does nothing, including for a non-additive pool. Summing a dimension-0 additive pool creates a dimension-1 pool containing its additive identity: `0` for integers or an all-zero tuple of the appropriate type.
+_Summing_ an additive pool transforms it into a pool of dimension 1 whose outcomes are the possible sums when sampling from the dice in the pool, with associated probabilities. Integer outcomes are added normally and all-int tuple outcomes are added componentwise. Summing a pool of dimension 1 does nothing, including for a non-additive pool. Summing a dimension-0 pool with a concrete additive type creates a dimension-1 pool containing its additive identity: `0` for integers or an all-zero tuple of the appropriate type. If the empty pool is untyped, summing it produces the universal additive identity described above.
 
 For instance, summing `2d2` results in a pool equivalent to `d{2, 3, 3, 4}`.
 
@@ -353,7 +355,7 @@ List flattening transforms values in the following way:
 * `list` values are unchanged by flattening.
 * `pool` values are flattened first by [summing](#summing), then by discarding the probabilities and creating a list containing each outcome in ascending order. Outcomes with nonzero probability appear once regardless of their probabilities.
 
-Flattening preserves the outcome type. Non-additive pools always have dimension one, so flattening them does not require adding their outcomes together. Additive tuple pools are summed componentwise before flattening.
+Flattening preserves concrete outcome types. Non-additive pools always have dimension one, so flattening them does not require adding their outcomes together. Additive tuple pools are summed componentwise before flattening. Flattening an untyped empty pool produces the universal additive identity, which may subsequently adopt the outcome type of the list containing it.
 
 #### Examples
 
@@ -447,6 +449,8 @@ Applied to `int`s, `&` evaluates to `1` if both of its arguments are nonzero, `0
 Division by 0 causes an error to be raised. `0^0` evaluates to 1.
 
 Enums and enum-containing tuples cannot be used with mathematical operators. All-int tuples support componentwise addition and subtraction, integer scalar multiplication in either operand order, and tuple-by-integer division. Other mathematical operations involving tuples are errors.
+
+The universal additive identity is preserved by addition, subtraction, negation, multiplication, and division by a nonzero integer until another operand determines a concrete additive result type. Consequently, grouping does not change the meaning of expressions such as `2d{} + 2d{} + [tuple 1 2]`. Operators that intrinsically require integers, including exponentiation and logical operators, resolve an unconstrained identity to `0`.
 
 1. If either argument to a mathematical operator is a `list`, it is summed to an additive scalar.
 2. After this, if both arguments are scalars, the operator is applied according to the integer and tuple rules above.
@@ -660,7 +664,7 @@ The function's identifier is the sequence of words and argument positions in the
 
 Each argument name can optionally be annotated with a shape: `n` for a scalar, `s` for a sequence, or `d` for a pool. The value's outcomes may be integers, members of any one enum, or tuples; function declarations cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
 
-An enum or tuple scalar may be coerced to a singleton sequence or pool. An additive tuple sequence or pool may be summed into a scalar tuple. A dimension-one enum or enum-containing tuple pool may be expanded for a scalar or sequence parameter. Non-additive sequences cannot be summed into scalars, and non-additive pools always have dimension one.
+An enum or tuple scalar may be coerced to a singleton sequence or pool. An additive tuple sequence or pool may be summed into a scalar tuple. A dimension-one enum or enum-containing tuple pool may be expanded for a scalar or sequence parameter. Non-additive sequences cannot be summed into scalars, and non-additive pools always have dimension one. Generic function parameters preserve an unconstrained additive identity; a concrete outcome constraint or operation inside the function resolves it only when required.
 
 ### Return from function
 

@@ -278,6 +278,59 @@ fn typed_empty_tuple_pool_sums_to_the_zero_tuple() {
 }
 
 #[test]
+fn untyped_empty_dice_preserve_the_additive_identity_until_constrained() {
+    let outputs = run(r#"
+        EMPTY: 2d{}
+        function: identity VALUE:n { result: VALUE }
+        output EMPTY + EMPTY + [tuple 1 2]
+        output [tuple 1 2] + EMPTY + EMPTY
+        output [identity EMPTY] + [tuple 1 2]
+        output EMPTY + EMPTY
+        output 2d{} + 2d{[tuple (d2) (d2)]}
+        output 2d{[tuple (d2) (d2)]}
+        output 2d{[tuple 9 8]:0} + [tuple 1 2]
+        "#)
+    .unwrap();
+
+    for index in 0..3 {
+        assert_eq!(
+            tuple_output_distribution(outputs[index].0.clone()),
+            [(vec![1, 2], 1.0)]
+        );
+    }
+    let OutputValue::Distribution(defaulted) = OutputValue::from(outputs[3].0.clone()) else {
+        panic!("unconstrained identity should default to an integer output");
+    };
+    assert_eq!(defaulted.probabilities, [(0, 1.0)]);
+    assert_eq!(
+        tuple_output_distribution(outputs[4].0.clone()),
+        tuple_output_distribution(outputs[5].0.clone())
+    );
+    assert_eq!(
+        tuple_output_distribution(outputs[6].0.clone()),
+        [(vec![1, 2], 1.0)]
+    );
+}
+
+#[test]
+fn pool_evaluated_functions_merge_identity_and_tuple_results() {
+    let outputs = run(r#"
+        function: identity VALUE:n { result: VALUE }
+        function: maybe tuple CONDITION:n {
+            if CONDITION { result: [tuple 1 2] }
+            result: [identity 2d{}]
+        }
+        output [maybe tuple d{0, 1}]
+        "#)
+    .unwrap();
+
+    assert_eq!(
+        tuple_output_distribution(outputs[0].0.clone()),
+        [(vec![0, 0], 0.5), (vec![1, 2], 0.5)]
+    );
+}
+
+#[test]
 fn tuple_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
     let mut outputs =
         run("output [tuple 1 2] output {[tuple 1 2], [tuple 3 4], [tuple 1 2]}").unwrap();
@@ -310,6 +363,8 @@ fn rejects_invalid_tuple_operations() {
         "output [tuple 2147483647 0] + [tuple 1 0]",
         "enum: RESULT { A } output [tuple 1 A] * 2",
         "output [tuple 1 2] = [tuple 1 2 3]",
+        "output 0d6 + [tuple 1 2]",
+        "output 2d{1:0} + [tuple 1 2]",
         "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]}",
     ] {
         assert!(run(program).is_err(), "expected error for {program}");
