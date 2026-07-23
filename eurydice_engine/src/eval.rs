@@ -7,10 +7,7 @@ use std::{
     rc::Rc,
 };
 
-use malachite::{
-    base::num::basic::traits::{One, Zero},
-    Natural,
-};
+use malachite::{base::num::basic::traits::One, Natural};
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
@@ -1552,10 +1549,19 @@ fn apply_math_op(
                 op.value
             ),
         })?;
-    lift_math_binary_op(
-        left,
-        right,
+    let sum_sequence = |operand: &RuntimeValue| match operand {
+        RuntimeValue::List(values, outcome_type) => {
+            RuntimeValue::Element(sum_elements(values, outcome_type))
+        }
+        _ => operand.clone(),
+    };
+    let left = sum_sequence(left);
+    let right = sum_sequence(right);
+    broadcast_binary(
+        &left,
+        &right,
         |left, right| apply_element_math(op.value, left, right),
+        |_, _| unreachable!("mathematical sequences are summed before broadcasting"),
         result_type,
     )
     .map_err(|message| RuntimeError::MathError {
@@ -1772,57 +1778,62 @@ fn select_in_dice(
     )
 }
 
-fn lift_math_binary_op(
+/// Broadcasts an element operation over runtime operand shapes.
+///
+/// Sequence/sequence behavior is operator-specific. Sequence/element pairs
+/// apply the element operation to every sequence member and sum the results.
+/// If either operand is a pool, both operands are first converted to summed
+/// distributions and their cross product is combined into a new distribution.
+fn broadcast_binary<E>(
     left: &RuntimeValue,
     right: &RuntimeValue,
-    f: impl Fn(&ElementValue, &ElementValue) -> Result<ElementValue, String>,
+    element_op: impl Fn(&ElementValue, &ElementValue) -> Result<ElementValue, E>,
+    list_list_op: impl Fn(&[ElementValue], &[ElementValue]) -> Result<ElementValue, E>,
     result_type: ElementType,
-) -> Result<RuntimeValue, String> {
-    let sum_operand = |operand: &RuntimeValue| match operand {
-        RuntimeValue::Element(value) => RuntimeValue::Element(value.clone()),
-        RuntimeValue::List(values, outcome_type) => {
-            RuntimeValue::Element(sum_elements(values, outcome_type))
+) -> Result<RuntimeValue, E> {
+    match (left, right) {
+        (RuntimeValue::Element(left), RuntimeValue::Element(right)) => {
+            return Ok(RuntimeValue::Element(element_op(left, right)?));
         }
-        RuntimeValue::Pool(pool, outcome_type) => {
-            RuntimeValue::Pool(Rc::new(sum_pool(pool, outcome_type)), outcome_type.clone())
+        (RuntimeValue::List(left, _), RuntimeValue::List(right, _)) => {
+            return Ok(RuntimeValue::Element(list_list_op(left, right)?));
         }
-    };
-    let left = sum_operand(left);
-    let right = sum_operand(right);
-    let (left_pool, right_pool) = match (&left, &right) {
-        (RuntimeValue::Element(a), RuntimeValue::Element(b)) => {
-            return Ok(RuntimeValue::Element(f(a, b)?));
+        (RuntimeValue::List(left, _), RuntimeValue::Element(right)) => {
+            let results = left
+                .iter()
+                .map(|left| element_op(left, right))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(RuntimeValue::Element(sum_elements(&results, &result_type)));
         }
-        _ => (left.to_pool(), right.to_pool()),
-    };
-
-    // For pool operations, we need to handle errors during mapping
-    let mut results = Vec::new();
-    for (left_outcome, left_weight) in left_pool.ordered_outcomes() {
-        for (right_outcome, right_weight) in right_pool.ordered_outcomes() {
-            match f(left_outcome, right_outcome) {
-                Ok(result) => results.push((result, left_weight * right_weight)),
-                Err(err) => return Err(err),
-            }
+        (RuntimeValue::Element(left), RuntimeValue::List(right, _)) => {
+            let results = right
+                .iter()
+                .map(|right| element_op(left, right))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(RuntimeValue::Element(sum_elements(&results, &result_type)));
         }
+        (RuntimeValue::Pool(_, _), _) | (_, RuntimeValue::Pool(_, _)) => {}
     }
 
-    let mut pool_map = std::collections::BTreeMap::new();
-    for (outcome, weight) in results {
-        *pool_map.entry(outcome).or_insert(Natural::ZERO) += weight;
-    }
+    let left_pool = sum_pool(&left.to_pool(), &left.outcome_type());
+    let right_pool = sum_pool(&right.to_pool(), &right.outcome_type());
+    let components = left_pool
+        .ordered_outcomes()
+        .iter()
+        .map(|(left_outcome, left_weight)| {
+            let distribution = right_pool
+                .clone()
+                .try_map_outcomes(|right_outcome| element_op(left_outcome, &right_outcome))?;
+            Ok((left_weight.clone(), distribution))
+        })
+        .collect::<Result<Vec<_>, E>>()?;
 
     Ok(RuntimeValue::Pool(
-        Rc::new(Pool::from(pool_map.into_iter().collect::<Vec<_>>())),
+        Rc::new(Pool::from_mixture(components)),
         result_type,
     ))
 }
 
-/// Binary ops behave differently depending on the types of their arguments.
-/// (int, int) is the straightforward case
-/// (list, list) is in lexicographic order
-/// (list, int) or (int, list) are elementwise then summed (counted)
-/// (pool, pool) sums both sides, then applies the binary op elementwise
 fn comp_binary_op(
     left: &RuntimeValue,
     right: &RuntimeValue,
@@ -1831,46 +1842,24 @@ fn comp_binary_op(
 ) -> RuntimeValue {
     let left = left.materialize_identities(&ElementType::Int);
     let right = right.materialize_identities(&ElementType::Int);
-    match (&left, &right) {
-        (
-            RuntimeValue::Element(ElementValue::Int(a)),
-            RuntimeValue::Element(ElementValue::Int(b)),
-        ) => int_comp(*a, *b).into(),
-        (RuntimeValue::List(a, _), RuntimeValue::List(b, _)) => list_comp(
-            &a.iter().map(expect_int).collect::<Vec<_>>(),
-            &b.iter().map(expect_int).collect::<Vec<_>>(),
-        )
-        .into(),
-        (RuntimeValue::List(a, _), RuntimeValue::Element(ElementValue::Int(b))) => a
-            .iter()
-            .map(|a| int_comp(expect_int(a), *b))
-            .sum::<i32>()
-            .into(),
-        (RuntimeValue::Element(ElementValue::Int(a)), RuntimeValue::List(b, _)) => b
-            .iter()
-            .map(|b| int_comp(*a, expect_int(b)))
-            .sum::<i32>()
-            .into(),
-        _ => {
-            // At least one is a pool
-            let left_pool = sum_pool(&left.to_pool(), &ElementType::Int);
-            let right_pool = sum_pool(&right.to_pool(), &ElementType::Int);
-            RuntimeValue::Pool(
-                Rc::new(left_pool.flat_map(|left_outcome| {
-                    right_pool
-                        .clone()
-                        .map_outcomes(|right_outcome| {
-                            ElementValue::Int(int_comp(
-                                expect_int(&left_outcome[0]),
-                                expect_int(&right_outcome),
-                            ))
-                        })
-                        .into()
-                })),
-                ElementType::Int,
-            )
-        }
-    }
+    broadcast_binary(
+        &left,
+        &right,
+        |left, right| {
+            Ok::<_, std::convert::Infallible>(ElementValue::Int(int_comp(
+                expect_int(left),
+                expect_int(right),
+            )))
+        },
+        |left, right| {
+            Ok(ElementValue::Int(list_comp(
+                &left.iter().map(expect_int).collect::<Vec<_>>(),
+                &right.iter().map(expect_int).collect::<Vec<_>>(),
+            )))
+        },
+        ElementType::Int,
+    )
+    .expect("comparison broadcasting is infallible")
 }
 
 fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) -> RuntimeValue {
@@ -1881,31 +1870,14 @@ fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) ->
     let left = left.materialize_identities(&outcome_type);
     let right = right.materialize_identities(&outcome_type);
     let compare = |a: &ElementValue, b: &ElementValue| i32::from((a == b) == equal);
-    match (&left, &right) {
-        (RuntimeValue::Element(a), RuntimeValue::Element(b)) => compare(a, b).into(),
-        (RuntimeValue::List(a, _), RuntimeValue::List(b, _)) => i32::from((a == b) == equal).into(),
-        (RuntimeValue::List(a, _), RuntimeValue::Element(b)) => {
-            a.iter().map(|a| compare(a, b)).sum::<i32>().into()
-        }
-        (RuntimeValue::Element(a), RuntimeValue::List(b, _)) => {
-            b.iter().map(|b| compare(a, b)).sum::<i32>().into()
-        }
-        _ => {
-            let left_pool = sum_pool(&left.to_pool(), &outcome_type);
-            let right_pool = sum_pool(&right.to_pool(), &outcome_type);
-            RuntimeValue::Pool(
-                Rc::new(left_pool.flat_map(|left_outcome| {
-                    right_pool
-                        .clone()
-                        .map_outcomes(|right_outcome| {
-                            ElementValue::Int(compare(&left_outcome[0], &right_outcome))
-                        })
-                        .into()
-                })),
-                ElementType::Int,
-            )
-        }
-    }
+    broadcast_binary(
+        &left,
+        &right,
+        |left, right| Ok::<_, std::convert::Infallible>(ElementValue::Int(compare(left, right))),
+        |left, right| Ok(ElementValue::Int(i32::from((left == right) == equal))),
+        ElementType::Int,
+    )
+    .expect("equality broadcasting is infallible")
 }
 
 enum DiceCount {

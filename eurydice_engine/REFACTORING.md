@@ -117,32 +117,20 @@ Expected benefits:
 
 This is smaller than the first two refactors and could be done independently.
 
-## 5. Consolidate binary-operator broadcasting
+## 5. Consolidate binary-operator broadcasting — completed
 
-Three functions in `eval.rs` independently reimplement the same
-"broadcast a binary operation across element / sequence / pool operands" matrix:
+The common element / sequence / pool operand-shape matrix now lives in
+`broadcast_binary`. Arithmetic, ordering comparisons, and equality provide
+their per-element operation and sequence/sequence rule while sharing:
 
-- `lift_math_binary_op` (arithmetic);
-- `comp_binary_op` (ordering comparisons); and
-- `equality_binary_op` (equality).
+- element/element application;
+- sequence/element and element/sequence broadcasting and summation; and
+- summed pool cross products composed through `Pool::from_mixture`.
 
-Each handles the same cases — `(element, element)` to a scalar, `(list, list)`,
-`(list, element)` / `(element, list)` summed elementwise, and the `(pool, …)`
-cross product folded into a new pool. `comp_binary_op` and `equality_binary_op`
-differ only in the per-element function and one special case (`list == list`
-compares whole sequences). The pool branch uses the same kind of
-probability-preserving composition now centralized in `Pool::from_mixture`, but
-still repeats the operand-shape broadcasting around it.
-
-A single `broadcast_binary` helper, parameterized by the per-element function
-and the list/list rule, would collapse all three. This would naturally live in
-the `operators.rs` extracted in §3, so it is best done alongside that work, not
-before.
-
-Expected benefits:
-
-- one implementation of operand broadcasting instead of three; and
-- less risk of the variants drifting apart during future changes.
+Arithmetic retains its AnyDice sequence-summing coercion before broadcasting,
+and equality and ordering retain their distinct whole-sequence comparison
+rules. The helper remains in `eval.rs` until the broader operator-module
+extraction described in §3 is worthwhile.
 
 ## 6. Reduce primitive declaration boilerplate
 
@@ -189,7 +177,7 @@ Module extraction should follow clearer ownership and invariants.
 6. Add the high-level `Engine` façade and migrate the CLI and WASM frontends.
 
 The primitive-table cleanup (§6) is independent of the above and can be done at
-any point; consolidating operator broadcasting (§5) is best folded into step 3.
+any point.
 
 ## Baseline when these notes were written
 
