@@ -1,0 +1,55 @@
+function: lifted VALUE:n {
+ if VALUE = 1 { result: d2 }
+ result: d4
+}
+
+function: maybe empty VALUE:n {
+ if VALUE = 1 { result: d{} }
+ result: d2
+}
+
+function: read value DUMMY:n { result: X }
+
+function: caller VALUE:n {
+ X: VALUE
+ result: [read value 0]
+}
+
+X: 1
+
+output [lifted d2]
+output [maybe empty d2]
+output [caller 7]
+output [read value 0]
+output 2d{} + 5
+output 5 + 2d{}
+
+\\\ Result \\\
+
+"output 1",2,1,1,4
+#,%
+1,37.5
+2,37.5
+3,12.5
+4,12.5
+
+"output 2",1.5,0.5,1,2
+#,%
+1,50
+2,50
+
+"output 3",7,0,7,7
+#,%
+7,100
+
+"output 4",1,0,1,1
+#,%
+1,100
+
+"output 5",5,0,5,5
+#,%
+5,100
+
+"output 6",5,0,5,5
+#,%
+5,100

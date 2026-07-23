@@ -14,7 +14,7 @@
 use lazy_static::lazy_static;
 use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::base::num::basic::traits::{One, Zero};
-use malachite::{rational::Rational, Natural};
+use malachite::Natural;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
@@ -22,8 +22,7 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 /// Represents a pool of identical independent dice whose faces have type `T`.
 ///
 /// The Icepool algorithm only needs outcomes to have a stable total order and
-/// equality. Numeric operations such as summing and adding pools are provided
-/// separately for `Pool<i32>`.
+/// equality. Numeric summation is provided separately for `Pool<i32>`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pool<T = i32> {
     dimension: u32,
@@ -75,15 +74,6 @@ impl Pool<i32> {
 
     pub fn sum_with_keep_list(&self, keep_list: &[bool]) -> Pool<i32> {
         self.sum_with_keep_list_by(keep_list, 0, sum_mapper)
-    }
-
-    pub fn add(&self, other: &Pool<i32>) -> Pool<i32> {
-        let other_summed = other.sum();
-        self.sum().flat_map(|outcome| {
-            other_summed
-                .map(|other_outcome| outcome[0] + other_outcome[0])
-                .into()
-        })
     }
 }
 
@@ -147,16 +137,36 @@ where
         })
     }
 
-    /// Maps the weights of the pool using the given function.
-    pub fn map_weights(self, f: impl Fn(Natural) -> Natural) -> Self {
-        Self {
-            ordered_outcomes: self
-                .ordered_outcomes
-                .into_iter()
-                .map(|(outcome, weight)| (outcome, f(weight)))
-                .collect(),
-            ..self
-        }
+    /// Combines weighted component distributions without allowing a
+    /// component's arbitrary total weight to bias the mixture.
+    ///
+    /// Empty components are ignored. Each component must already represent a
+    /// distribution (conventionally a dimension-one pool).
+    pub(crate) fn from_mixture(components: impl IntoIterator<Item = (Natural, Pool<T>)>) -> Self {
+        let components = components
+            .into_iter()
+            .filter_map(|(outer_weight, distribution)| {
+                let total = distribution
+                    .ordered_outcomes
+                    .iter()
+                    .map(|(_, weight)| weight)
+                    .sum::<Natural>();
+                (outer_weight != 0 && total != 0).then_some((outer_weight, distribution, total))
+            })
+            .collect::<Vec<_>>();
+        let common_denominator = components
+            .iter()
+            .fold(Natural::ONE, |lcm, (_, _, total)| lcm.lcm(total));
+        components
+            .into_iter()
+            .flat_map(|(outer_weight, distribution, total)| {
+                let scale = common_denominator.clone().div_exact(total);
+                distribution
+                    .ordered_outcomes
+                    .into_iter()
+                    .map(move |(outcome, weight)| (outcome, &outer_weight * weight * &scale))
+            })
+            .collect()
     }
 
     pub fn apply<S, F>(&self, mapper: StateMapper<S, F>, keep_list: &[bool]) -> HashMap<S, Natural>
@@ -235,10 +245,6 @@ where
         u32::try_from(count).expect("count greater than max u32")
     }
 
-    pub fn into_die_iter(self) -> impl Iterator<Item = (T, Natural)> {
-        self.ordered_outcomes.into_iter()
-    }
-
     pub fn ordered_outcomes(&self) -> &[(T, Natural)] {
         &self.ordered_outcomes
     }
@@ -289,42 +295,17 @@ where
         PoolMultisetIterator::new(self)
     }
 
-    /// This functions call `f` with each multiset outcome from the pool. The distributions returned
-    /// by `f` are flatmapped together to create a new distribution, stored as a size-1 pool.
+    /// Calls `f` with every multiset outcome and combines the returned
+    /// distributions without bias from their relative weight scales.
     pub fn flat_map<U, F>(&self, f: F) -> Pool<U>
     where
         U: Clone + Ord,
         F: Fn(&[T]) -> BTreeMap<U, Natural>,
     {
-        // Positions will take all values between [0, 0, ..., 0] and [self.n - 1, self.n - 1, ..., self.n - 1],
-        // in lexicographic order.
-        let mut new_outcomes = BTreeMap::new();
-        let mut outcome_sum_lcm = Natural::from(1usize);
-
-        for (outcome, ways) in self.multiset_iterator() {
-            // Map the outcome. The weights returned by the outcome distribution should still sum to
-            // |weight|, but instead, the sum can be an arbitrary value.
-            // To solve this, we store each weight in |new_outcomes| as a fraction (divided by the total
-            // weight returned by f), and multiply everything by the LCM at the end to go back
-            // to naturals.
-            let f_outcome = f(&outcome);
-            let f_outcome_sum = f_outcome.values().sum();
-            outcome_sum_lcm = outcome_sum_lcm.lcm(&f_outcome_sum);
-            for (new_outcome, sub_weight) in f_outcome {
-                *new_outcomes.entry(new_outcome).or_insert(Rational::ZERO) +=
-                    Rational::from_naturals(&ways * sub_weight, f_outcome_sum.clone());
-            }
-        }
-        let new_outcomes = new_outcomes
-            .into_iter()
-            .map(|(outcome, weight)| {
-                let (numerator, denominator) =
-                    (weight * Rational::from(&outcome_sum_lcm)).into_numerator_and_denominator();
-                debug_assert_eq!(denominator, Natural::ONE);
-                (outcome, numerator)
-            })
-            .collect::<BTreeMap<_, _>>();
-        new_outcomes.into_iter().collect()
+        let components = self
+            .multiset_iterator()
+            .map(|(outcome, ways)| (ways, f(&outcome).into_iter().collect()));
+        Pool::from_mixture(components)
     }
 
     /// Maps multiset outcomes to a single value each.
@@ -695,6 +676,25 @@ mod tests {
     }
 
     #[test]
+    fn weighted_mixture_normalizes_each_component() {
+        let result = Pool::from_mixture([
+            (Natural::ONE, Pool::from_list(1, vec![1, 2])),
+            (Natural::ONE, Pool::from_list(1, vec![1, 2, 3, 4])),
+            (Natural::ONE, Pool::from_list(1, Vec::<i32>::new())),
+        ]);
+
+        assert_eq!(
+            result.ordered_outcomes(),
+            &[
+                (1, Natural::from(3u32)),
+                (2, Natural::from(3u32)),
+                (3, Natural::ONE),
+                (4, Natural::ONE),
+            ]
+        );
+    }
+
+    #[test]
     fn test_sum_10d20() {
         let pool = Pool::ndn(10, 20);
         let keep_list = vec![true; 10];
@@ -864,6 +864,10 @@ mod tests {
     #[test]
     fn test_sum_no_outcomes() {
         let pool = Pool::from_list(10, vec![]);
+        assert!(pool.is_empty());
+        assert_eq!(pool.dimension(), 10);
+        assert_eq!(pool.multiset_iterator().next(), None);
+        assert_eq!(pool.sum().ordered_outcomes(), &[(0, Natural::ONE)]);
         let keep_list = vec![true; 10];
         let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(
@@ -875,6 +879,11 @@ mod tests {
     #[test]
     fn test_sum_0_dim() {
         let pool = Pool::from_list(0, vec![1, 2, 3]);
+        assert!(pool.is_empty());
+        assert_eq!(pool.dimension(), 0);
+        assert_eq!(pool.ordered_outcomes().len(), 3);
+        assert_eq!(pool.multiset_iterator().next(), None);
+        assert_eq!(pool.sum(), pool);
         let keep_list = vec![];
         let result = pool.apply(SUM_MAPPER, &keep_list);
         assert_eq!(
@@ -1000,7 +1009,10 @@ mod tests {
 
         let result = pool.map(multiset_to_int);
 
-        let map = result.into_die_iter().collect::<HashMap<_, _>>();
+        let map = result
+            .ordered_outcomes
+            .into_iter()
+            .collect::<HashMap<_, _>>();
         let expected = [
             (0, 1),
             (1, 5),
@@ -1201,12 +1213,12 @@ mod tests {
         let result = pool1.flat_map(|outcome| {
             let mut summed_pool = pool2.clone();
             summed_pool.set_dimension(outcome[0] as u32);
-            summed_pool
-                .sum()
-                .into_die_iter()
-                .collect::<BTreeMap<_, _>>()
+            summed_pool.sum().into()
         });
-        let map = result.into_die_iter().collect::<HashMap<_, _>>();
+        let map = result
+            .ordered_outcomes
+            .into_iter()
+            .collect::<HashMap<_, _>>();
         let expected = [
             (1, 16),
             (2, 20),

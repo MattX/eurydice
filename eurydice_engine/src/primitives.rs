@@ -137,7 +137,7 @@ fn transform_die(
     if d.is_empty() {
         return Ok(args[0].clone());
     }
-    let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
+    let die = numeric_pool(d).sum().ordered_outcomes().to_vec();
     let on = match on {
         None => vec![die.last().unwrap().0],
         Some(RuntimeValue::List(cond, _)) => numeric_list(cond),

@@ -2,15 +2,13 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Write,
     rc::Rc,
 };
 
-use malachite::base::num::arithmetic::traits::Lcm;
 use malachite::{
     base::num::basic::traits::{One, Zero},
-    rational::Rational,
     Natural,
 };
 use miette::{Diagnostic, SourceSpan};
@@ -417,8 +415,10 @@ impl RuntimeValue {
             RuntimeValue::List(list, _) => (0..repeat).flat_map(|_| list.iter().cloned()).collect(),
             RuntimeValue::Pool(pool, _) => {
                 let outcomes = sum_pool(pool, &self.outcome_type())
-                    .into_die_iter()
+                    .ordered_outcomes()
+                    .iter()
                     .map(|(outcome, _)| outcome)
+                    .cloned()
                     .collect::<Vec<_>>();
                 (0..repeat).flat_map(|_| outcomes.iter().cloned()).collect()
             }
@@ -1260,14 +1260,12 @@ impl Evaluator {
             ));
         }
 
-        // TODO this is similar to the logic in flat_map in Pool, find a way to use that?
-        let mut total_results = BTreeMap::<ElementValue, Rational>::new();
-        let mut lcm = Natural::ONE;
+        let mut result_distributions = Vec::new();
         let mut result_type: Option<ElementType> = None;
         for (result, weight) in results {
-            if let RuntimeValue::Pool(ref p, _) = result {
+            if let RuntimeValue::Pool(ref pool, _) = result {
                 // The empty die is ignored in this context, but the empty list is not.
-                if p.ordered_outcomes().is_empty() {
+                if pool.ordered_outcomes().is_empty() {
                     continue;
                 }
             }
@@ -1289,33 +1287,12 @@ impl Evaluator {
                 }
                 _ => {}
             }
-            let summed = sum_pool(&result.to_pool(), &result.outcome_type());
-            let total_count = summed
-                .ordered_outcomes()
-                .iter()
-                .map(|(_, count)| count)
-                .sum();
-            lcm = lcm.lcm(&total_count);
-            for (outcome, count) in summed.ordered_outcomes() {
-                *total_results
-                    .entry(outcome.clone())
-                    .or_insert(Rational::ZERO) +=
-                    Rational::from_naturals(count * &weight, total_count.clone());
-            }
+            result_distributions
+                .push((weight, sum_pool(&result.to_pool(), &result.outcome_type())));
         }
         let result_type = result_type.unwrap_or(ElementType::Int);
         let result = RuntimeValue::Pool(
-            Rc::new(
-                total_results
-                    .into_iter()
-                    .map(|(outcome, weight)| {
-                        let (numerator, denominator) =
-                            (weight * Rational::from(&lcm)).into_numerator_and_denominator();
-                        debug_assert_eq!(denominator, Natural::ONE);
-                        (outcome, numerator)
-                    })
-                    .collect::<Pool<ElementValue>>(),
-            ),
+            Rc::new(Pool::from_mixture(result_distributions)),
             result_type.clone(),
         );
         Ok(result.materialize_identities(&result_type))

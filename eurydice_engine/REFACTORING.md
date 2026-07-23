@@ -6,7 +6,7 @@ has already removed considerable duplication.
 
 The following ideas are ordered by expected payoff.
 
-## 1. Separate weighted distributions from pools of identical dice
+## 1. Clarify weighted-distribution composition without splitting `Pool` — done
 
 `dice::Pool` currently represents two related but distinct concepts:
 
@@ -14,76 +14,48 @@ The following ideas are ordered by expected payoff.
 - an arbitrary computed distribution, conventionally represented as a pool
   with dimension 1.
 
-This dual role creates special cases around dimensions zero and one, empty
-outcomes, summation, and `flat_map`. Probability-preserving flattening and
-normalization are also implemented both in `Pool::flat_map` and in
-`Evaluator::evaluate_function_call`; the evaluator already has a TODO noting
-the similarity.
+Introducing a separate `WeightedDistribution` type was explored, but at the
+current feature level it increased conversion and runtime-dispatch complexity
+without enforcing enough additional invariants to justify the cost.
 
-A possible model is:
+Instead:
 
-```rust
-struct WeightedDistribution<T> {
-    // Canonical weighted outcomes.
-}
+- probability-preserving mixture normalization is centralized in
+  `Pool::from_mixture`;
+- both `Pool::flat_map` and function-result lifting use that implementation;
+- empty component distributions are handled consistently;
+- unused `Pool` APIs were removed; and
+- empty-pool, zero-dimension, lifting, dynamic-scope, and additive-identity
+  behavior is covered by characterization tests.
 
-struct DicePool<T> {
-    die: WeightedDistribution<T>,
-    count: u32,
-}
-```
+The remaining dual role is intentional for now. Reconsider a separate
+distribution type only if future features require materially different
+operations or invariants for dice pools and computed distributions.
 
-`WeightedDistribution` would own canonicalization, mapping, fallible mapping,
-products/zipping, and probability-preserving `flat_map`. The Icepool machinery
-would operate on `DicePool` and return distributions explicitly.
+Possible triggers for revisiting the split:
 
-Expected benefits:
+- bugs caused by accidentally treating a multidimensional pool as an already
+  summed distribution;
+- several operations that are valid for distributions but invalid for pools,
+  or vice versa;
+- repeated dimension-one assertions or conversions across module boundaries;
+- a public engine API that needs to expose computed distributions independently
+  of dice pools; or
+- an implementation where the distinction removes more branching and
+  conversion code than it introduces.
 
-- fewer invalid or ambiguous states;
-- a single implementation of distribution composition;
-- simpler function lifting and arithmetic;
-- clearer explode/reroll and output conversion; and
-- more explicit dimension and empty-pool semantics.
+## 2. Encapsulate runtime values and their element-type invariant — completed
 
-The serialized `output::Distribution` would probably be renamed to something
-like `OutputDistribution` to distinguish it from the engine's exact weighted
-distribution.
+Validated `SequenceValue` and `PoolValue` wrappers were implemented and then
+reverted. They made invalid type/data pairs harder to construct, but added
+substantial code and match-site churn without reducing defensive branches or
+meaningfully simplifying operators and primitives. Much of the existing type
+plumbing merely moved behind wrapper accessors.
 
-## 2. Encapsulate runtime values and their element-type invariant
-
-`RuntimeValue::List` and `RuntimeValue::Pool` each store their data alongside a
-separate `ElementType`. Those values must remain synchronized manually.
-Consequently, `eval.rs` contains substantial defensive matching, type merging,
-identity materialization, and `unreachable!()` assertions.
-
-Validated wrappers could make that invariant explicit:
-
-```rust
-struct SequenceValue {
-    values: Rc<[ElementValue]>,
-    element_type: ElementType,
-}
-
-struct PoolValue {
-    pool: Rc<DicePool<ElementValue>>,
-    element_type: ElementType,
-}
-```
-
-Construction would go through checked constructors. Operations such as
-`sum`, `materialize_identity`, `coerce_to`, and `merge_type` would live on
-these wrappers instead of being distributed across the evaluator, operators,
-primitives, and output conversion.
-
-The existing additive-identity semantics are useful and should be preserved,
-but their transitional states could be hidden behind this API.
-
-Expected benefits:
-
-- invalid type/data combinations become harder to construct;
-- fewer scattered type checks and `unreachable!()` branches;
-- one place to define empty and additive-identity behavior; and
-- simpler primitive and operator implementations.
+Keep the current `RuntimeValue::List` and `RuntimeValue::Pool` representation
+for now. Reconsider encapsulation only if concrete invariant bugs appear or a
+future value/module refactor provides wrappers with enough behavior to remove
+more code than they introduce.
 
 ## 3. Slim down `eval.rs`
 
@@ -96,8 +68,8 @@ Expected benefits:
 - dice construction; and
 - runtime diagnostics.
 
-After establishing the abstractions above, these could be separated into
-modules such as:
+After establishing clearer runtime-value boundaries, these could be separated
+into modules such as:
 
 ```text
 value.rs
@@ -158,14 +130,14 @@ Each handles the same cases — `(element, element)` to a scalar, `(list, list)`
 `(list, element)` / `(element, list)` summed elementwise, and the `(pool, …)`
 cross product folded into a new pool. `comp_binary_op` and `equality_binary_op`
 differ only in the per-element function and one special case (`list == list`
-compares whole sequences). The pool branch is, again, the same
-probability-preserving composition as `Pool::flat_map` and the lifting logic in
-`evaluate_function_call`.
+compares whole sequences). The pool branch uses the same kind of
+probability-preserving composition now centralized in `Pool::from_mixture`, but
+still repeats the operand-shape broadcasting around it.
 
 A single `broadcast_binary` helper, parameterized by the per-element function
-and the list/list rule, would collapse all three. This overlaps with §1 (the
-pool branch is the shared composition path) and would naturally live in the
-`operators.rs` extracted in §3, so it is best done alongside those, not before.
+and the list/list rule, would collapse all three. This would naturally live in
+the `operators.rs` extracted in §3, so it is best done alongside that work, not
+before.
 
 Expected benefits:
 
@@ -207,17 +179,17 @@ Module extraction should follow clearer ownership and invariants.
 
 ## Suggested order
 
-1. Add characterization tests for empty pools, zero dimensions, distribution
-   lifting, dynamic scope, and additive identities.
-2. Introduce the exact weighted-distribution abstraction and migrate one
-   composition path at a time.
-3. Introduce validated sequence/pool runtime wrappers.
-4. Move operator and value behavior out of `eval.rs`.
+1. Characterization coverage and shared mixture normalization — completed.
+2. Evaluate encapsulating runtime element-type invariants — completed; the
+   wrapper approach was reverted.
+3. Move operator and value behavior out of `eval.rs`.
+4. Reassess whether the resulting module boundaries naturally justify distinct
+   pool and distribution types.
 5. Consider replacing the environment parent chain with explicit frames.
 6. Add the high-level `Engine` façade and migrate the CLI and WASM frontends.
 
 The primitive-table cleanup (§6) is independent of the above and can be done at
-any point; consolidating operator broadcasting (§5) is best folded into step 4.
+any point; consolidating operator broadcasting (§5) is best folded into step 3.
 
 ## Baseline when these notes were written
 
