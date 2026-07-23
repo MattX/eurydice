@@ -5,6 +5,7 @@ import {
   normalizeTupleScalar,
   normalizeTupleSequence,
   normalizeTupleDistribution,
+  fieldName,
   fieldValueLabel,
   fieldAxis,
   computeMarginals,
@@ -58,13 +59,23 @@ describe("tupleData normalization", () => {
   it("passes distribution probabilities through", () => {
     const dist = normalizeTupleDistribution({
       fields: ["Int", { Enum: { enum_name: "R", labels: ["A"] } }],
+      field_names: ["Count", "Result"],
       probabilities: [[[1, 0], 1]],
     });
     expect(dist.fields[1]).toEqual({ kind: "enum", enumName: "R", labels: ["A"] });
+    expect(dist.fieldNames).toEqual(["Count", "Result"]);
   });
 });
 
 describe("tupleData labels and axes", () => {
+  it("prefers explicit field names and otherwise uses existing defaults", () => {
+    expect(fieldName(jointIntEnum, 0)).toBe("Field 1");
+    expect(fieldName(jointIntEnum, 1)).toBe("RESULT");
+    expect(
+      fieldName({ ...jointIntEnum, fieldNames: ["Roll", "Outcome"] }, 1)
+    ).toBe("Outcome");
+  });
+
   it("labels enum fields by member name and ints by value", () => {
     expect(fieldValueLabel({ kind: "int" }, 7)).toBe("7");
     expect(

@@ -54,6 +54,7 @@ pub enum Statement {
     Output {
         expr: WithRange<Expression>,
         named: Option<WithRange<String>>,
+        labeled: Option<WithRange<Vec<WithRange<String>>>>,
     },
     Return {
         value: WithRange<Expression>,

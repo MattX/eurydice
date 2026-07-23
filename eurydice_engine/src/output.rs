@@ -39,20 +39,40 @@ pub enum TupleFieldSchema {
 #[derive(Debug, Clone, Serialize)]
 pub struct TupleDistribution {
     pub fields: Vec<TupleFieldSchema>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_names: Option<Vec<String>>,
     pub probabilities: Vec<(Vec<i32>, f64)>,
 }
 
 impl From<RuntimeValue> for OutputValue {
     fn from(value: RuntimeValue) -> Self {
+        Self::from_runtime(value, None)
+    }
+}
+
+impl OutputValue {
+    /// Converts an evaluated value into its serialized display representation,
+    /// attaching validated tuple field names when the output supplied them.
+    pub fn from_runtime(value: RuntimeValue, field_names: Option<Vec<String>>) -> Self {
         match value {
             RuntimeValue::Scalar(value) => {
                 let outcome_type = value.scalar_type();
-                pool_output(&Pool::from_list(1, vec![value]), &outcome_type, false)
+                pool_output(
+                    &Pool::from_list(1, vec![value]),
+                    &outcome_type,
+                    false,
+                    field_names,
+                )
             }
-            RuntimeValue::List(values, outcome_type) => {
-                pool_output(&Pool::from_list(1, values.to_vec()), &outcome_type, false)
+            RuntimeValue::List(values, outcome_type) => pool_output(
+                &Pool::from_list(1, values.to_vec()),
+                &outcome_type,
+                false,
+                field_names,
+            ),
+            RuntimeValue::Pool(pool, outcome_type) => {
+                pool_output(&pool, &outcome_type, true, field_names)
             }
-            RuntimeValue::Pool(pool, outcome_type) => pool_output(&pool, &outcome_type, true),
         }
     }
 }
@@ -70,7 +90,12 @@ fn tuple_values(values: &[ScalarValue]) -> Vec<i32> {
         .collect()
 }
 
-fn pool_output(pool: &Pool<ScalarValue>, outcome_type: &ScalarType, sum: bool) -> OutputValue {
+fn pool_output(
+    pool: &Pool<ScalarValue>,
+    outcome_type: &ScalarType,
+    sum: bool,
+    field_names: Option<Vec<String>>,
+) -> OutputValue {
     let pool = if sum {
         if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ScalarType::Uninhabited) {
             pool.clone()
@@ -141,6 +166,7 @@ fn pool_output(pool: &Pool<ScalarValue>, outcome_type: &ScalarType, sum: bool) -
                     }
                 })
                 .collect(),
+            field_names,
             probabilities: to_probabilities_generic(pool.ordered_outcomes())
                 .into_iter()
                 .map(|(value, probability)| match value {

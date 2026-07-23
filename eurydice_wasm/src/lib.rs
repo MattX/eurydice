@@ -53,7 +53,12 @@ fn run_inner(
     Ok(evaluator
         .take_outputs()
         .into_iter()
-        .map(|(value, name)| (name, OutputValue::from(value)))
+        .map(|output| {
+            (
+                output.name,
+                OutputValue::from_runtime(output.value, output.field_names),
+            )
+        })
         .collect())
 }
 
@@ -72,5 +77,27 @@ fn lalrpop_to_error<T: std::fmt::Display>(e: &ParseError<usize, T, ParseActionEr
         message: e.to_string(),
         from: range.0,
         to: range.1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_inner;
+    use eurydice_engine::output::OutputValue;
+
+    #[test]
+    fn labeled_tuple_metadata_reaches_wasm_output() {
+        let outputs = run_inner(
+            "output [tuple 1 2] labeled \"Left\", \"Right\"",
+            Box::new(|_, _| {}),
+        )
+        .unwrap();
+        let OutputValue::TupleDistribution(distribution) = &outputs[0].1 else {
+            panic!("expected tuple distribution");
+        };
+        assert_eq!(
+            distribution.field_names.as_ref().unwrap(),
+            &["Left".to_string(), "Right".to_string()]
+        );
     }
 }

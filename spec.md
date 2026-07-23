@@ -594,7 +594,9 @@ Both statements allow the user to output a value.
 
 ```
 PrintStatement = 'print' Expr ['named' Str].
-OutputStatement = 'output' Expr ['named' Str].
+OutputStatement = 'output' Expr OutputOptions.
+OutputOptions = ['named' Str ['labeled' Str {',' Str}]
+               | 'labeled' Str {',' Str} ['named' Str]].
 ```
 
 > [!IMPORTANT]
@@ -602,12 +604,21 @@ OutputStatement = 'output' Expr ['named' Str].
 
 It is an error if an `output` statement occurs inside a function. No such restriction exists for the `print` statement.
 
-In both cases, the expression is evaluated. If present, the name string is then interpolated: any pair of square brackets containing a _variable name_ will be replaced by the named variable's value. Square brackets containing any other data will not be replaced. To be replaced, a variable name must correspond to an actually defined variable; otherwise, the bracketed string is left as-is.
+In both cases, the expression is evaluated. Any strings present as part of a `named` or a `labeled` clause are then interpolated: any pair of square brackets containing a _variable name_ will be replaced by the named variable's value. Square brackets containing any other data will not be replaced. A syntactically valid variable name that is not defined is an error.
 
 > [!IMPORTANT]
 > Eurydice is a little more explicit than AnyDice in replaced variables for lists and pools, using strings like `{1, 3, 4}` instead of `{?}`.
 
-For an `output` statement, the value of the expression is converted to a `pool`, and added to an output list. If a name is not provided, it is associated with the default name `output n`, where `n` is the 1-indexed output number.
+For an `output` statement, the value of the expression is converted to a `pool`, and added to an output list.
+
+The optional `named` clause attaches a name to the distribution for display purposes. If a name is not provided, it is associated with the default name `output n`, where `n` is the 1-indexed output index in program execution order.
+
+The optional `labeled` clause assigns display names to the fields of a tuple-valued output. It is an error to use it with a non-tuple output or to provide a number of labels different from the tuple's arity. The labels do not change the tuple's type or values. `named` and `labeled` may occur in either order.
+
+```
+output [tuple d6 d8] labeled "First die", "Second die"
+output [tuple d6 d8] named "Joint roll" labeled "d6 result", "d8 result"
+```
 
 Enum outputs display member names rather than numeric values. Tuple outputs display every field of each outcome. Numeric statistics and cumulative/order-based presentation do not apply to enum or tuple distributions.
 

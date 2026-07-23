@@ -632,7 +632,7 @@ impl std::fmt::Display for EnumIdentifierKind {
 
 pub struct Evaluator {
     global_env: RcValEnv,
-    outputs: Vec<(RuntimeValue, String)>,
+    outputs: Vec<EvaluatedOutput>,
     functions: HashMap<String, Function>,
     enums: HashMap<String, Rc<EnumType>>,
     enum_members: HashSet<String>,
@@ -640,6 +640,14 @@ pub struct Evaluator {
     recursion_depth: usize,
     lowest_first: bool,
     print_callback: Option<Box<dyn Fn(RuntimeValue, String)>>,
+}
+
+/// A top-level output and its presentation metadata.
+#[derive(Debug, Clone)]
+pub struct EvaluatedOutput {
+    pub value: RuntimeValue,
+    pub name: String,
+    pub field_names: Option<Vec<String>>,
 }
 
 impl Default for Evaluator {
@@ -679,7 +687,7 @@ impl Evaluator {
         Ok(())
     }
 
-    pub fn take_outputs(&mut self) -> Vec<(RuntimeValue, String)> {
+    pub fn take_outputs(&mut self) -> Vec<EvaluatedOutput> {
         std::mem::take(&mut self.outputs)
     }
 
@@ -844,18 +852,49 @@ impl Evaluator {
             Statement::EnumDefinition(definition) => {
                 self.define_enum(eval_context, definition, statement.range)?;
             }
-            Statement::Output { expr, named } => {
+            Statement::Output {
+                expr,
+                named,
+                labeled,
+            } => {
                 if eval_context.recursion_depth != 0 {
                     return Err(RuntimeError::OutputNotAtTopLevel {
                         range: statement.range.into(),
                     });
                 }
                 let value = self.evaluate(eval_context, expr)?;
+                let field_names = if let Some(labels) = labeled {
+                    let ScalarType::Tuple(fields) = value.outcome_type() else {
+                        return Err(RuntimeError::LabelsOnNonTupleOutput {
+                            range: labels.range.into(),
+                        });
+                    };
+                    if labels.value.len() != fields.len() {
+                        return Err(RuntimeError::OutputLabelCountMismatch {
+                            range: labels.range.into(),
+                            expected: fields.len(),
+                            found: labels.value.len(),
+                        });
+                    }
+                    Some(
+                        labels
+                            .value
+                            .iter()
+                            .map(|label| interpolate_variable_names(label, &eval_context.env))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    )
+                } else {
+                    None
+                };
                 let name = match named {
                     Some(name) => interpolate_variable_names(name, &eval_context.env)?,
                     None => format!("output {}", self.outputs.len() + 1),
                 };
-                self.outputs.push((value, name));
+                self.outputs.push(EvaluatedOutput {
+                    value,
+                    name,
+                    field_names,
+                });
             }
             Statement::Print { expr, named } => {
                 let value = self.evaluate(eval_context, expr)?;
@@ -2155,6 +2194,20 @@ pub enum RuntimeError {
         message: String,
     },
 
+    #[error("Tuple labels on a non-tuple output")]
+    LabelsOnNonTupleOutput {
+        #[label = "Labels can only be specified for tuple-valued outputs"]
+        range: SourceSpan,
+    },
+
+    #[error("Wrong number of tuple output labels: expected {expected}, found {found}")]
+    OutputLabelCountMismatch {
+        #[label = "Expected {expected} labels, found {found}"]
+        range: SourceSpan,
+        expected: usize,
+        found: usize,
+    },
+
     #[error("Output statement inside a function")]
     #[diagnostic(help("Output statements can only appear outside functions."))]
     OutputNotAtTopLevel {
@@ -2256,6 +2309,8 @@ impl RuntimeError {
     pub fn range(&self) -> ast::Range {
         match self {
             RuntimeError::EnumTypeError { range, .. } => range.into(),
+            RuntimeError::LabelsOnNonTupleOutput { range } => range.into(),
+            RuntimeError::OutputLabelCountMismatch { range, .. } => range.into(),
             RuntimeError::OutputNotAtTopLevel { range } => range.into(),
             RuntimeError::SetNotAtTopLevel { range } => range.into(),
             RuntimeError::ReturnOutsideFunction { range } => range.into(),

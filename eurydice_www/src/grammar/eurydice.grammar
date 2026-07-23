@@ -56,9 +56,10 @@ EnumDefinition {
     kw<"enum"> ":" VariableIdentifier "{" VariableIdentifier ("," VariableIdentifier)* "}"
 }
 
-Output { kw<"output"> Expression OutputName? }
+Output { kw<"output"> Expression (OutputName OutputLabels? | OutputLabels OutputName?)? }
 Print { kw<"print"> Expression OutputName? }
 OutputName { kw<"named"> String }
+OutputLabels { kw<"labeled"> String ("," String)* }
 
 Return { kw<"result"> ":" Expression }
 

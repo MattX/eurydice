@@ -1,11 +1,11 @@
 use eurydice_engine::{
-    eval::{Evaluator, RuntimeValue, ScalarValue},
+    eval::{EvaluatedOutput, Evaluator, RuntimeValue, ScalarValue},
     grammar,
     output::OutputValue,
 };
 use malachite::Natural;
 
-fn run(program: &str) -> Result<Vec<(RuntimeValue, String)>, String> {
+fn run(program: &str) -> Result<Vec<EvaluatedOutput>, String> {
     let statements = grammar::BodyParser::new()
         .parse(program)
         .map_err(|error| error.to_string())?;
@@ -57,26 +57,26 @@ fn constructs_and_projects_tuples() {
     .unwrap();
 
     assert!(matches!(
-        outputs[0].0,
+        outputs[0].value,
         RuntimeValue::Scalar(ScalarValue::Tuple(_))
     ));
     assert!(matches!(
-        outputs[1].0,
+        outputs[1].value,
         RuntimeValue::Scalar(ScalarValue::Tuple(_))
     ));
     assert!(matches!(
-        outputs[2].0,
+        outputs[2].value,
         RuntimeValue::Scalar(ScalarValue::Tuple(_))
     ));
-    assert_eq!(outputs[3].0, 20.into());
-    assert_eq!(outputs[4].0, 3.into());
+    assert_eq!(outputs[3].value, 20.into());
+    assert_eq!(outputs[4].value, 3.into());
 }
 
 #[test]
 fn tuple_constructor_lifts_over_distributions() {
     let outputs = run("A: d2 B: d2 output [tuple A B]").unwrap();
     assert_eq!(
-        tuple_distribution(&outputs[0].0),
+        tuple_distribution(&outputs[0].value),
         vec![
             (vec![1, 1], 1u32.into()),
             (vec![1, 2], 1u32.into()),
@@ -108,7 +108,7 @@ const RISK_PROGRAM: &str = r#"
 fn risk_round_returns_joint_distribution() {
     let outputs = run(&format!("{RISK_PROGRAM} output ROUND")).unwrap();
     assert_eq!(
-        tuple_distribution(&outputs[0].0),
+        tuple_distribution(&outputs[0].value),
         vec![
             (vec![0, 2], 2890u32.into()),
             (vec![1, 1], 2611u32.into()),
@@ -133,7 +133,7 @@ fn tuple_distribution_can_be_projected_through_scalar_parameter() {
     let expected_second = [(0, 2275u32), (1, 2611), (2, 2890)];
     for (value, expected) in outputs
         .iter()
-        .map(|output| &output.0)
+        .map(|output| &output.value)
         .zip([expected_first.as_slice(), expected_second.as_slice()])
     {
         let RuntimeValue::Pool(pool, _) = value else {
@@ -158,12 +158,12 @@ fn tuples_support_enum_fields() {
         output [element 2 of T]
         "#)
     .unwrap();
-    let RuntimeValue::Scalar(ScalarValue::Tuple(fields)) = &outputs[0].0 else {
+    let RuntimeValue::Scalar(ScalarValue::Tuple(fields)) = &outputs[0].value else {
         panic!("expected tuple");
     };
     assert!(matches!(fields[1], ScalarValue::Enum { value: 1, .. }));
     assert!(matches!(
-        outputs[1].0,
+        outputs[1].value,
         RuntimeValue::Scalar(ScalarValue::Enum { value: 1, .. })
     ));
 }
@@ -177,10 +177,10 @@ fn tuples_have_structural_equality_and_can_be_die_faces() {
         "#)
     .unwrap();
 
-    assert_eq!(outputs[0].0, 1.into());
-    assert_eq!(outputs[1].0, 1.into());
+    assert_eq!(outputs[0].value, 1.into());
+    assert_eq!(outputs[1].value, 1.into());
     assert_eq!(
-        tuple_distribution(&outputs[2].0),
+        tuple_distribution(&outputs[2].value),
         vec![(vec![1, 2], 1u32.into()), (vec![3, 4], 1u32.into()),]
     );
 }
@@ -205,9 +205,9 @@ fn integer_tuples_support_vector_arithmetic() {
         vec![-4, 6],
         vec![2, -2],
     ];
-    for ((value, _), expected) in outputs.iter().zip(expected) {
+    for (output, expected) in outputs.iter().zip(expected) {
         assert_eq!(
-            tuple_ints(match value {
+            tuple_ints(match &output.value {
                 RuntimeValue::Scalar(value) => value,
                 _ => panic!("expected tuple scalar"),
             }),
@@ -229,9 +229,11 @@ fn tuple_sequences_sum_during_arithmetic_and_scalar_coercion() {
     assert_eq!(
         outputs
             .iter()
-            .map(|(value, _)| match value {
+            .map(|output| match &output.value {
                 RuntimeValue::Scalar(value) => tuple_ints(value),
-                RuntimeValue::Pool(_, _) => tuple_output_distribution(value.clone())[0].0.clone(),
+                RuntimeValue::Pool(_, _) => {
+                    tuple_output_distribution(output.value.clone())[0].0.clone()
+                }
                 _ => panic!("expected summed tuple"),
             })
             .collect::<Vec<_>>(),
@@ -252,14 +254,20 @@ fn multidimensional_tuple_dice_sum_componentwise() {
     .unwrap();
 
     let expected = vec![(vec![0, 2], 0.25), (vec![1, 1], 0.5), (vec![2, 0], 0.25)];
-    assert_eq!(tuple_output_distribution(outputs[0].0.clone()), expected);
-    assert_eq!(tuple_output_distribution(outputs[1].0.clone()), expected);
     assert_eq!(
-        tuple_output_distribution(outputs[2].0.clone()),
+        tuple_output_distribution(outputs[0].value.clone()),
+        expected
+    );
+    assert_eq!(
+        tuple_output_distribution(outputs[1].value.clone()),
+        expected
+    );
+    assert_eq!(
+        tuple_output_distribution(outputs[2].value.clone()),
         [(vec![0, 0], 1.0)]
     );
     assert_eq!(
-        tuple_output_distribution(outputs[3].0.clone()),
+        tuple_output_distribution(outputs[3].value.clone()),
         vec![
             (vec![-2, 0], 0.25),
             (vec![-1, -1], 0.5),
@@ -272,7 +280,7 @@ fn multidimensional_tuple_dice_sum_componentwise() {
 fn typed_empty_tuple_pool_sums_to_the_zero_tuple() {
     let outputs = run("output d{[tuple 5 6]:0}").unwrap();
     assert_eq!(
-        tuple_output_distribution(outputs[0].0.clone()),
+        tuple_output_distribution(outputs[0].value.clone()),
         [(vec![0, 0], 1.0)]
     );
 }
@@ -294,20 +302,20 @@ fn untyped_empty_dice_preserve_the_additive_identity_until_constrained() {
 
     for index in 0..3 {
         assert_eq!(
-            tuple_output_distribution(outputs[index].0.clone()),
+            tuple_output_distribution(outputs[index].value.clone()),
             [(vec![1, 2], 1.0)]
         );
     }
-    let OutputValue::Distribution(defaulted) = OutputValue::from(outputs[3].0.clone()) else {
+    let OutputValue::Distribution(defaulted) = OutputValue::from(outputs[3].value.clone()) else {
         panic!("unconstrained identity should default to an integer output");
     };
     assert_eq!(defaulted.probabilities, [(0, 1.0)]);
     assert_eq!(
-        tuple_output_distribution(outputs[4].0.clone()),
-        tuple_output_distribution(outputs[5].0.clone())
+        tuple_output_distribution(outputs[4].value.clone()),
+        tuple_output_distribution(outputs[5].value.clone())
     );
     assert_eq!(
-        tuple_output_distribution(outputs[6].0.clone()),
+        tuple_output_distribution(outputs[6].value.clone()),
         [(vec![1, 2], 1.0)]
     );
 }
@@ -325,7 +333,7 @@ fn pool_evaluated_functions_merge_identity_and_tuple_results() {
     .unwrap();
 
     assert_eq!(
-        tuple_output_distribution(outputs[0].0.clone()),
+        tuple_output_distribution(outputs[0].value.clone()),
         [(vec![0, 0], 0.5), (vec![1, 2], 0.5)]
     );
 }
@@ -335,18 +343,88 @@ fn tuple_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
     let mut outputs =
         run("output [tuple 1 2] output {[tuple 1 2], [tuple 3 4], [tuple 1 2]}").unwrap();
 
-    let OutputValue::TupleDistribution(scalar) = OutputValue::from(outputs.remove(0).0) else {
+    let OutputValue::TupleDistribution(scalar) = OutputValue::from(outputs.remove(0).value) else {
         panic!("expected tuple scalar distribution");
     };
     assert_eq!(scalar.probabilities, [(vec![1, 2], 1.0)]);
 
-    let OutputValue::TupleDistribution(list) = OutputValue::from(outputs.remove(0).0) else {
+    let OutputValue::TupleDistribution(list) = OutputValue::from(outputs.remove(0).value) else {
         panic!("expected tuple list distribution");
     };
     assert_eq!(
         list.probabilities,
         [(vec![1, 2], 2.0 / 3.0), (vec![3, 4], 1.0 / 3.0)]
     );
+}
+
+#[test]
+fn tuple_outputs_accept_interpolated_labels_and_named_in_either_order() {
+    let outputs = run(r#"
+        N: 2
+        output [tuple 1 2] labeled "First [N]", "Second" named "scalar"
+        output {[tuple 1 2], [tuple 3 4]} named "list" labeled "Left", "Right"
+        output d{[tuple 1 2], [tuple 3 4]} labeled "X", "Y"
+        output [tuple 1 2] labeled "", ""
+        "#)
+    .unwrap();
+
+    assert_eq!(outputs[0].name, "scalar");
+    assert_eq!(
+        outputs[0].field_names.as_ref().unwrap(),
+        &vec!["First 2".to_string(), "Second".to_string()]
+    );
+    assert_eq!(outputs[1].name, "list");
+    assert_eq!(
+        outputs[1].field_names.as_ref().unwrap(),
+        &vec!["Left".to_string(), "Right".to_string()]
+    );
+    assert_eq!(
+        outputs[2].field_names.as_ref().unwrap(),
+        &vec!["X".to_string(), "Y".to_string()]
+    );
+    assert_eq!(
+        outputs[3].field_names.as_ref().unwrap(),
+        &vec![String::new(), String::new()]
+    );
+
+    let labeled = outputs.into_iter().next().unwrap();
+    let OutputValue::TupleDistribution(distribution) =
+        OutputValue::from_runtime(labeled.value, labeled.field_names)
+    else {
+        panic!("expected tuple distribution");
+    };
+    assert_eq!(
+        distribution.field_names.as_ref().unwrap(),
+        &vec!["First 2".to_string(), "Second".to_string()]
+    );
+}
+
+#[test]
+fn tuple_output_labels_require_tuple_outcomes_and_matching_arity() {
+    for (program, expected) in [
+        ("output 1 labeled \"A\", \"B\"", "non-tuple"),
+        ("enum: RESULT { A } output A labeled \"Value\"", "non-tuple"),
+        (
+            "output [tuple 1 2] labeled \"Only one\"",
+            "expected 2, found 1",
+        ),
+        (
+            "output [tuple 1 2] labeled \"A\", \"B\", \"C\"",
+            "expected 2, found 3",
+        ),
+        (
+            "output [tuple 1 2] labeled \"[MISSING]\", \"B\"",
+            "undefined",
+        ),
+    ] {
+        let error = run(program).unwrap_err();
+        assert!(
+            error.to_lowercase().contains(&expected.to_lowercase()),
+            "{error}"
+        );
+    }
+
+    assert!(run("output [tuple 1 2] labeled \"A\", \"B\" labeled \"C\", \"D\"").is_err());
 }
 
 #[test]

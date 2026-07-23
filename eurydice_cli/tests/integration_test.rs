@@ -96,12 +96,12 @@ fn test_anydice_programs() {
                 );
             }
 
-            for (((value, name), expected), expected_str) in outputs
+            for ((output, expected), expected_str) in outputs
                 .into_iter()
                 .zip(expected_results.iter())
                 .zip(expected_results_strings.iter())
             {
-                let d = match value {
+                let d = match output.value {
                     eval::RuntimeValue::Scalar(value) => {
                         Pool::from_list(1, vec![value.as_int().expect("numeric fixture output")])
                     }
@@ -117,13 +117,13 @@ fn test_anydice_programs() {
                         .clone()
                         .map_outcomes(|value| value.as_int().expect("numeric fixture output")),
                 };
-                let actual_result = create_expected_result(&name, &d);
+                let actual_result = create_expected_result(&output.name, &d);
                 if !compare_expected_results(&actual_result, expected) {
                     paths_with_errors.insert(path_string.clone());
                     println!("Mismatch in file {}:", path.display());
                     println!(
                         "{}",
-                        StrComparison::new(&export_anydice_format(&name, &d), expected_str)
+                        StrComparison::new(&export_anydice_format(&output.name, &d), expected_str,)
                     );
                 }
             }

@@ -1,5 +1,5 @@
-use eurydice_cli::print_diagnostic;
-use eurydice_engine::output::{OutputValue, TupleFieldSchema};
+use eurydice_cli::{format_output_probabilities, print_diagnostic};
+use eurydice_engine::output::OutputValue;
 use lalrpop_util::ParseError;
 
 fn main() {
@@ -34,46 +34,13 @@ fn main() {
                 }
             }
         }
-        for (value, name) in evaluator.take_outputs() {
+        for output in evaluator.take_outputs() {
             let (width, _) = crossterm::terminal::size().unwrap_or((80, 0));
-            println!("{}:", name);
-            let labeled_probabilities: Vec<(String, f64)> = match OutputValue::from(value) {
-                OutputValue::Distribution(distribution) => distribution
-                    .probabilities
-                    .into_iter()
-                    .map(|(outcome, probability)| {
-                        let label = distribution
-                            .labels
-                            .as_ref()
-                            .and_then(|labels| {
-                                usize::try_from(outcome).ok().and_then(|i| labels.get(i))
-                            })
-                            .cloned()
-                            .unwrap_or_else(|| outcome.to_string());
-                        (label, probability)
-                    })
-                    .collect(),
-                OutputValue::TupleDistribution(distribution) => distribution
-                    .probabilities
-                    .into_iter()
-                    .map(|(outcome, probability)| {
-                        let fields = outcome
-                            .iter()
-                            .zip(&distribution.fields)
-                            .map(|(value, schema)| match schema {
-                                TupleFieldSchema::Int => value.to_string(),
-                                TupleFieldSchema::Enum { labels, .. } => usize::try_from(*value)
-                                    .ok()
-                                    .and_then(|i| labels.get(i))
-                                    .cloned()
-                                    .unwrap_or_else(|| value.to_string()),
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        (format!("({fields})"), probability)
-                    })
-                    .collect(),
-            };
+            println!("{}:", output.name);
+            let labeled_probabilities = format_output_probabilities(OutputValue::from_runtime(
+                output.value,
+                output.field_names,
+            ));
             display_distribution(&labeled_probabilities, width);
         }
     }

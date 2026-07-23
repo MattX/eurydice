@@ -916,7 +916,10 @@ mod tests {
         }
 
         let outputs = evaluator.take_outputs();
-        let [(RuntimeValue::Pool(result, _), _)] = outputs.as_slice() else {
+        let [output] = outputs.as_slice() else {
+            panic!("Expected one pool output");
+        };
+        let RuntimeValue::Pool(result, _) = &output.value else {
             panic!("Expected one pool output");
         };
         assert_eq!(

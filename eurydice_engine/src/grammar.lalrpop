@@ -35,7 +35,11 @@ StatementInner: Statement = {
             name: WithRange::new(name_start, name_end, name),
             members,
         }),
-    "output" <e:Expr> <n:OutputName?> => Statement::Output { expr: e, named: n },
+    "output" <e:Expr> <options:OutputOptions> => Statement::Output {
+        expr: e,
+        named: options.0,
+        labeled: options.1,
+    },
     "print" <e:Expr> <n:OutputName?> => Statement::Print { expr: e, named: n },
     "result" ":" <e:Expr> => Statement::Return { value: e },
     <s:SetStatement> => s,
@@ -135,8 +139,25 @@ ExprInner12: Expression = {
 };
 
 OutputName: WithRange<String> = {
-    "named" <start: @L> <l:r#""(\\\\|\\"|[^"\\])*""#> <end: @R> =>
+    "named" <label:OutputLabel> => label,
+}
+
+OutputLabels: WithRange<Vec<WithRange<String>>> = {
+    <start:@L> "labeled" <labels:Comma1<OutputLabel>> <end:@R> =>
+        WithRange::new(start, end, labels),
+}
+
+OutputLabel: WithRange<String> = {
+    <start:@L> <l:r#""(\\\\|\\"|[^"\\])*""#> <end:@R> =>
         WithRange::new(start, end, apply_string_escapes(&l[1..l.len()-1])),
+}
+
+OutputOptions: (Option<WithRange<String>>, Option<WithRange<Vec<WithRange<String>>>>) = {
+    => (None, None),
+    <name:OutputName> => (Some(name), None),
+    <labels:OutputLabels> => (None, Some(labels)),
+    <name:OutputName> <labels:OutputLabels> => (Some(name), Some(labels)),
+    <labels:OutputLabels> <name:OutputName> => (Some(name), Some(labels)),
 }
 
 List: ListLiteral = {
@@ -235,6 +256,7 @@ Word: String = {
     "output" => "output".to_string(),
     "print" => "print".to_string(),
     "named" => "named".to_string(),
+    "labeled" => "labeled".to_string(),
     "n" => "n".to_string(),
     "s" => "s".to_string(),
     "int" => "int".to_string(),

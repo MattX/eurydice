@@ -21,6 +21,7 @@ export interface WireTupleSequence {
 
 export interface WireTupleDistribution {
   fields: WireTupleFieldSchema[];
+  field_names?: string[];
   probabilities: [number[], number][];
 }
 
@@ -73,6 +74,7 @@ export function normalizeTupleDistribution(
 ): TupleDistribution {
   return {
     fields: wire.fields.map(normalizeFieldSchema),
+    fieldNames: wire.field_names,
     probabilities: wire.probabilities,
   };
 }
@@ -89,7 +91,10 @@ export function fieldValueLabel(
 }
 
 /** A human-facing name for a field, used as a column/axis title. */
-export function fieldName(schema: TupleFieldSchema, index: number): string {
+export function fieldName(dist: TupleDistribution, index: number): string {
+  const explicit = dist.fieldNames?.[index];
+  if (explicit !== undefined) return explicit;
+  const schema = dist.fields[index];
   if (schema.kind === "enum") return schema.enumName;
   return `Field ${index + 1}`;
 }

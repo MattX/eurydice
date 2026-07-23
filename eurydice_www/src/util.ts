@@ -20,5 +20,6 @@ export type TupleFieldSchema =
  */
 export interface TupleDistribution {
   fields: TupleFieldSchema[];
+  fieldNames?: string[];
   probabilities: [number[], number][];
 }

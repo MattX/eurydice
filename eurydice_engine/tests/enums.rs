@@ -1,10 +1,10 @@
 use eurydice_engine::{
-    eval::{Evaluator, RuntimeValue, ScalarValue},
+    eval::{EvaluatedOutput, Evaluator, RuntimeValue, ScalarValue},
     grammar,
     output::{Distribution, OutputValue, TupleFieldSchema},
 };
 
-fn run(program: &str) -> Result<Vec<(RuntimeValue, String)>, String> {
+fn run(program: &str) -> Result<Vec<EvaluatedOutput>, String> {
     let statements = grammar::BodyParser::new()
         .parse(program)
         .map_err(|error| error.to_string())?;
@@ -35,8 +35,8 @@ fn attack_function_returns_enum_distribution() {
         "#)
     .unwrap();
 
-    let RuntimeValue::Pool(pool, _) = &outputs[0].0 else {
-        panic!("expected enum pool, got {:?}", outputs[0].0);
+    let RuntimeValue::Pool(pool, _) = &outputs[0].value else {
+        panic!("expected enum pool, got {:?}", outputs[0].value);
     };
     let ScalarValue::Enum { ty: enum_type, .. } = &pool.ordered_outcomes()[0].0 else {
         panic!("expected enum outcome");
@@ -63,7 +63,7 @@ fn untyped_empty_list_adopts_an_enum_outcome_type() {
         output {{}, MISS}
         "#)
     .unwrap();
-    let RuntimeValue::List(values, _) = &outputs[0].0 else {
+    let RuntimeValue::List(values, _) = &outputs[0].value else {
         panic!("expected enum list");
     };
     assert!(matches!(
@@ -111,15 +111,15 @@ fn supports_enum_shape_constraints_and_safe_operations() {
         output #{MISS, HIT}
         "#)
     .unwrap();
-    assert!(matches!(outputs[0].0, RuntimeValue::Pool(_, _)));
-    assert!(matches!(outputs[1].0, RuntimeValue::Pool(_, _)));
-    assert_eq!(outputs[2].0, 1.into());
-    assert_eq!(outputs[3].0, 2.into());
+    assert!(matches!(outputs[0].value, RuntimeValue::Pool(_, _)));
+    assert!(matches!(outputs[1].value, RuntimeValue::Pool(_, _)));
+    assert_eq!(outputs[2].value, 1.into());
+    assert_eq!(outputs[3].value, 2.into());
     assert!(matches!(
-        outputs[4].0,
+        outputs[4].value,
         RuntimeValue::Scalar(ScalarValue::Enum { value: 0, .. })
     ));
-    assert_eq!(outputs[5].0, 2.into());
+    assert_eq!(outputs[5].value, 2.into());
 }
 
 #[test]
@@ -159,13 +159,13 @@ fn equality_aware_operations_require_the_same_enum_type() {
 fn shape_constraints_accept_typed_empty_enum_values() {
     let outputs =
         run("enum: RESULT { A } function: typed X:s { result: X } output [typed {A:0}]").unwrap();
-    assert!(matches!(outputs[0].0, RuntimeValue::List(_, _)));
+    assert!(matches!(outputs[0].value, RuntimeValue::List(_, _)));
 }
 
 #[test]
 fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
     let mut outputs = run("enum: RESULT { MISS, HIT } output d{MISS, HIT}").unwrap();
-    let output = OutputValue::from(outputs.remove(0).0);
+    let output = OutputValue::from(outputs.remove(0).value);
     let OutputValue::Distribution(Distribution {
         probabilities,
         enum_name,
@@ -186,14 +186,14 @@ fn enum_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
     )
     .unwrap();
 
-    let OutputValue::Distribution(scalar) = OutputValue::from(outputs.remove(0).0) else {
+    let OutputValue::Distribution(scalar) = OutputValue::from(outputs.remove(0).value) else {
         panic!("expected scalar distribution");
     };
     assert_eq!(scalar.probabilities, [(1, 1.0)]);
     assert_eq!(scalar.enum_name.as_deref(), Some("RESULT"));
     assert_eq!(scalar.labels.unwrap(), ["MISS", "HIT"]);
 
-    let OutputValue::Distribution(list) = OutputValue::from(outputs.remove(0).0) else {
+    let OutputValue::Distribution(list) = OutputValue::from(outputs.remove(0).value) else {
         panic!("expected list distribution");
     };
     assert_eq!(list.probabilities, [(0, 1.0 / 3.0), (1, 2.0 / 3.0)]);
@@ -205,10 +205,11 @@ fn enum_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
 fn serialized_tuple_distribution_hoists_field_schema() {
     let mut outputs =
         run("enum: RESULT { MISS, HIT } A: d2 B: d{MISS, HIT} output [tuple A B]").unwrap();
-    let output = OutputValue::from(outputs.remove(0).0);
+    let output = OutputValue::from(outputs.remove(0).value);
     let OutputValue::TupleDistribution(dist) = output else {
         panic!("expected tuple distribution");
     };
+    assert!(dist.field_names.is_none());
 
     // The per-field schema is stored once, not repeated on each outcome.
     assert!(matches!(dist.fields[0], TupleFieldSchema::Int));

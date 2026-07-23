@@ -117,6 +117,23 @@ describe('csvExport', () => {
         'RAIN,0',
       ].join('\n'));
     });
+
+    it('uses explicit tuple field names as CSV columns', () => {
+      const result = generateSpreadsheetCSV([], [{
+        name: 'round',
+        distribution: {
+          fields: [{ kind: 'int' }, { kind: 'int' }],
+          fieldNames: ['Attacker losses', 'Defender losses'],
+          probabilities: [[[1, 2], 1]],
+        },
+      }]);
+
+      expect(result).toBe([
+        'round',
+        'Attacker losses,Defender losses,Probability',
+        '1,2,1',
+      ].join('\n'));
+    });
   });
 
   describe('generateAnyDiceFormatCSV', () => {

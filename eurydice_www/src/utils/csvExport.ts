@@ -52,7 +52,7 @@ function generateWideBlock(
 /** One CSV block per tuple: a field-per-column joint table. */
 function generateTupleBlock({ name, distribution }: TupleData): string {
   const header = [
-    ...distribution.fields.map((schema, i) => escapeCSVField(fieldName(schema, i))),
+    ...distribution.fields.map((_, i) => escapeCSVField(fieldName(distribution, i))),
     "Probability",
   ].join(",");
   const rows = computeTupleRows(distribution, "lexicographic").map((row) =>

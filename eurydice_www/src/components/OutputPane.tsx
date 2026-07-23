@@ -453,7 +453,6 @@ function TupleHeatmap({
     [distribution]
   );
   const { xAxis, yAxis, maxCell } = pivot;
-  const [xField, yField] = distribution.fields;
   const xCount = xAxis.values.length;
   const yCount = yAxis.values.length;
 
@@ -526,7 +525,7 @@ function TupleHeatmap({
           title: () => "",
           label: (ctx: TooltipItem<"matrix">) => {
             const point = ctx.raw as HeatmapCell;
-            return `${point.x}, ${point.y}: ${formatPercent(point.v)}`;
+            return `${fieldName(distribution, 0)}: ${point.x}, ${fieldName(distribution, 1)}: ${point.y} — ${formatPercent(point.v)}`;
           },
         },
       },
@@ -536,7 +535,7 @@ function TupleHeatmap({
         type: "category",
         labels: xAxis.labels,
         offset: true,
-        title: { display: true, text: fieldName(xField, 0), color: textColor },
+        title: { display: true, text: fieldName(distribution, 0), color: textColor },
         ticks: { color: textColor, font: { size: 11 }, autoSkipPadding: 8 },
         grid: { display: false },
       },
@@ -545,7 +544,7 @@ function TupleHeatmap({
         // Reverse so the first field value sits at the top, as in the table.
         labels: [...yAxis.labels].reverse(),
         offset: true,
-        title: { display: true, text: fieldName(yField, 1), color: textColor },
+        title: { display: true, text: fieldName(distribution, 1), color: textColor },
         ticks: { color: textColor, font: { size: 11 }, autoSkipPadding: 8 },
         grid: { display: false },
       },
@@ -553,7 +552,10 @@ function TupleHeatmap({
   };
 
   return (
-    <div>
+    <div
+      role="group"
+      aria-label={`Joint distribution of ${fieldName(distribution, 0)} and ${fieldName(distribution, 1)}`}
+    >
       <div className="mb-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
         <span>0%</span>
         <span
@@ -590,7 +592,6 @@ function TupleContingencyTable({
     [distribution]
   );
   const { xAxis, yAxis } = pivot;
-  const [xField, yField] = distribution.fields;
 
   if (xAxis.values.length * yAxis.values.length > MAX_TABLE_CELLS) {
     return (
@@ -611,10 +612,13 @@ function TupleContingencyTable({
   return (
     <div>
       <div className="mb-2 text-xs text-[var(--text-muted)]">
-        Columns: {fieldName(xField, 0)} · Rows: {fieldName(yField, 1)}
+        Columns: {fieldName(distribution, 0)} · Rows: {fieldName(distribution, 1)}
       </div>
       <div className="dice-table overflow-x-auto rounded-lg border">
-        <table className="w-full border-collapse text-sm">
+        <table
+          className="w-full border-collapse text-sm"
+          aria-label={`${fieldName(distribution, 1)} by ${fieldName(distribution, 0)}`}
+        >
           <thead>
             <tr>
               <th className={rowHeader} />
@@ -636,7 +640,7 @@ function TupleContingencyTable({
                     <td
                       key={x}
                       className={cell}
-                      title={`${xAxis.labels[xi]}, ${yAxis.labels[yi]}: ${formatPercent(p)}`}
+                      title={`${fieldName(distribution, 0)}: ${xAxis.labels[xi]}, ${fieldName(distribution, 1)}: ${yAxis.labels[yi]} — ${formatPercent(p)}`}
                     >
                       {p > 0 ? formatPercent(p) : ""}
                     </td>
@@ -702,12 +706,15 @@ function TupleListTable({ distribution }: { distribution: TupleDistribution }) {
         </div>
       </div>
       <div className="dice-table overflow-x-auto rounded-lg border">
-        <table className="w-full border-collapse text-sm">
+        <table
+          className="w-full border-collapse text-sm"
+          aria-label={`Tuple outcomes: ${distribution.fields.map((_, i) => fieldName(distribution, i)).join(", ")}`}
+        >
           <thead>
             <tr>
-              {distribution.fields.map((schema, i) => (
+              {distribution.fields.map((_, i) => (
                 <th key={i} className={colHeader}>
-                  {fieldName(schema, i)}
+                  {fieldName(distribution, i)}
                 </th>
               ))}
               <th className={probHeader}>Probability</th>
@@ -747,8 +754,8 @@ function TupleMarginals({ distribution }: { distribution: TupleDistribution }) {
   );
   const named = React.useMemo(
     (): [string, Distribution][] =>
-      marginals.map((marginal, i) => [`Field ${i + 1}`, marginal]),
-    [marginals]
+      marginals.map((marginal, i) => [fieldName(distribution, i), marginal]),
+    [distribution, marginals]
   );
 
   return <OutputSections distributions={named} />;
