@@ -6,10 +6,10 @@ import {
   calculateBracketingProbabilities,
 } from './tableData';
 import { DisplayMode } from './chartData';
-import { Distribution } from '../util';
+import { ScalarDistribution } from '../util';
 
 describe('tableData', () => {
-  const testDistributions: [string, Distribution][] = [
+  const testDistributions: [string, ScalarDistribution][] = [
     [
       'output 1',
       {
@@ -54,7 +54,7 @@ describe('tableData', () => {
     });
 
     it('should handle single distribution', () => {
-      const singleDistribution: [string, Distribution][] = [
+      const singleDistribution: [string, ScalarDistribution][] = [
         ['test', { probabilities: [[1, 0.5], [3, 0.5]] }]
       ];
       const result = getAllUniqueOutcomes(singleDistribution);
@@ -62,7 +62,7 @@ describe('tableData', () => {
     });
 
     it('should handle duplicate outcomes across distributions', () => {
-      const duplicateDistributions: [string, Distribution][] = [
+      const duplicateDistributions: [string, ScalarDistribution][] = [
         ['dist1', { probabilities: [[1, 0.5], [2, 0.5]] }],
         ['dist2', { probabilities: [[2, 0.3], [3, 0.7]] }]
       ];
@@ -71,7 +71,7 @@ describe('tableData', () => {
     });
 
     it('should sort outcomes numerically, not lexicographically', () => {
-      const unsortedDistributions: [string, Distribution][] = [
+      const unsortedDistributions: [string, ScalarDistribution][] = [
         ['test', { probabilities: [[10, 0.3], [2, 0.4], [20, 0.3]] }]
       ];
       const result = getAllUniqueOutcomes(unsortedDistributions);
@@ -133,7 +133,7 @@ describe('tableData', () => {
     });
 
     it('should format percentages to 2 decimal places', () => {
-      const precisionDistributions: [string, Distribution][] = [
+      const precisionDistributions: [string, ScalarDistribution][] = [
         ['test', { probabilities: [[1, 0.123456789]] }]
       ];
       const result = computeTableData(precisionDistributions, DisplayMode.Distribution, [1]);
@@ -163,7 +163,7 @@ describe('tableData', () => {
     });
 
     it('should handle single outcome distribution', () => {
-      const singleOutcome: [string, Distribution][] = [
+      const singleOutcome: [string, ScalarDistribution][] = [
         ['constant', { probabilities: [[5, 1.0]] }]
       ];
       const result = computeDistributionStatistics(singleOutcome);
@@ -180,7 +180,7 @@ describe('tableData', () => {
     });
 
     it('should format numbers to 2 decimal places', () => {
-      const precisionDistribution: [string, Distribution][] = [
+      const precisionDistribution: [string, ScalarDistribution][] = [
         ['test', { probabilities: [[1, 0.123456], [2, 0.876544]] }]
       ];
       const result = computeDistributionStatistics(precisionDistribution);
@@ -192,7 +192,7 @@ describe('tableData', () => {
 
     it('should calculate correct mean and variance', () => {
       // Simple distribution: [1, 2] with equal probabilities
-      const simpleDistribution: [string, Distribution][] = [
+      const simpleDistribution: [string, ScalarDistribution][] = [
         ['simple', { probabilities: [[1, 0.5], [2, 0.5]] }]
       ];
       const result = computeDistributionStatistics(simpleDistribution);
@@ -276,7 +276,7 @@ describe('tableData', () => {
     });
 
     it('should return percentages (multiply by 100)', () => {
-      const distribution: Distribution = {
+      const distribution: ScalarDistribution = {
         probabilities: [[1, 0.5], [2, 0.5]]
       };
       const result = calculateBracketingProbabilities(distribution, 1, 1);

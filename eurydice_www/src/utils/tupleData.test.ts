@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { TupleDistribution } from "../util";
+import { Distribution } from "../util";
 import {
   normalizeFieldSchema,
-  normalizeTupleElement,
-  normalizeTupleSequence,
-  normalizeTupleDistribution,
+  normalizeDistribution,
   fieldName,
   fieldValueLabel,
   fieldAxis,
@@ -14,7 +12,7 @@ import {
 } from "./tupleData";
 
 // A 2x2 joint distribution: field 0 is an int (1..2), field 1 is an enum.
-const jointIntEnum: TupleDistribution = {
+const jointIntEnum: Distribution = {
   fields: [
     { kind: "int" },
     { kind: "enum", enumName: "RESULT", labels: ["MISS", "HIT"] },
@@ -35,35 +33,25 @@ describe("tupleData normalization", () => {
     ).toEqual({ kind: "enum", enumName: "R", labels: ["A", "B"] });
   });
 
-  it("turns a tuple element into a certain outcome", () => {
-    const dist = normalizeTupleElement({ fields: ["Int", "Int"], values: [3, 5] });
-    expect(dist.probabilities).toEqual([[[3, 5], 1]]);
-    expect(dist.fields).toEqual([{ kind: "int" }, { kind: "int" }]);
-  });
-
-  it("turns a tuple sequence into a uniform distribution, collapsing duplicates", () => {
-    const dist = normalizeTupleSequence({
-      fields: ["Int", "Int"],
-      values: [
-        [1, 1],
-        [1, 1],
-        [2, 2],
-      ],
-    });
-    const byKey = new Map(dist.probabilities.map(([o, p]) => [o.join(","), p]));
-    expect(byKey.get("1,1")).toBeCloseTo(2 / 3);
-    expect(byKey.get("2,2")).toBeCloseTo(1 / 3);
-    expect(dist.probabilities).toHaveLength(2);
-  });
-
   it("passes distribution probabilities through", () => {
-    const dist = normalizeTupleDistribution({
+    const dist = normalizeDistribution({
       fields: ["Int", { Enum: { enum_name: "R", labels: ["A"] } }],
       field_names: ["Count", "Result"],
       probabilities: [[[1, 0], 1]],
     });
     expect(dist.fields[1]).toEqual({ kind: "enum", enumName: "R", labels: ["A"] });
     expect(dist.fieldNames).toEqual(["Count", "Result"]);
+  });
+
+  it("uses the same wire shape for scalar distributions", () => {
+    const dist = normalizeDistribution({
+      fields: [{ Enum: { enum_name: "R", labels: ["A", "B"] } }],
+      probabilities: [[[1], 1]],
+    });
+    expect(dist.fields).toEqual([
+      { kind: "enum", enumName: "R", labels: ["A", "B"] },
+    ]);
+    expect(dist.probabilities).toEqual([[[1], 1]]);
   });
 });
 

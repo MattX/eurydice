@@ -1,7 +1,7 @@
 use eurydice_engine::{
     eval::{ElementValue, EvaluatedOutput, Evaluator, RuntimeValue},
     grammar,
-    output::OutputValue,
+    output::Distribution,
 };
 use malachite::Natural;
 
@@ -39,10 +39,7 @@ fn tuple_distribution(value: &RuntimeValue) -> Vec<(Vec<i32>, Natural)> {
 }
 
 fn tuple_output_distribution(value: RuntimeValue) -> Vec<(Vec<i32>, f64)> {
-    let OutputValue::TupleDistribution(distribution) = OutputValue::from(value) else {
-        panic!("expected tuple output distribution");
-    };
-    distribution.probabilities
+    Distribution::from(value).probabilities
 }
 
 #[test]
@@ -306,10 +303,8 @@ fn untyped_empty_dice_preserve_the_additive_identity_until_constrained() {
             [(vec![1, 2], 1.0)]
         );
     }
-    let OutputValue::Distribution(defaulted) = OutputValue::from(outputs[3].value.clone()) else {
-        panic!("unconstrained identity should default to an integer output");
-    };
-    assert_eq!(defaulted.probabilities, [(0, 1.0)]);
+    let defaulted = Distribution::from(outputs[3].value.clone());
+    assert_eq!(defaulted.probabilities, [(vec![0], 1.0)]);
     assert_eq!(
         tuple_output_distribution(outputs[4].value.clone()),
         tuple_output_distribution(outputs[5].value.clone())
@@ -343,14 +338,10 @@ fn tuple_elements_and_lists_are_converted_to_distributions_in_the_engine() {
     let mut outputs =
         run("output [tuple 1 2] output {[tuple 1 2], [tuple 3 4], [tuple 1 2]}").unwrap();
 
-    let OutputValue::TupleDistribution(element) = OutputValue::from(outputs.remove(0).value) else {
-        panic!("expected tuple element distribution");
-    };
+    let element = Distribution::from(outputs.remove(0).value);
     assert_eq!(element.probabilities, [(vec![1, 2], 1.0)]);
 
-    let OutputValue::TupleDistribution(list) = OutputValue::from(outputs.remove(0).value) else {
-        panic!("expected tuple list distribution");
-    };
+    let list = Distribution::from(outputs.remove(0).value);
     assert_eq!(
         list.probabilities,
         [(vec![1, 2], 2.0 / 3.0), (vec![3, 4], 1.0 / 3.0)]
@@ -388,11 +379,7 @@ fn tuple_outputs_accept_interpolated_labels_and_named_in_either_order() {
     );
 
     let labeled = outputs.into_iter().next().unwrap();
-    let OutputValue::TupleDistribution(distribution) =
-        OutputValue::from_runtime(labeled.value, labeled.field_names)
-    else {
-        panic!("expected tuple distribution");
-    };
+    let distribution = Distribution::from_runtime(labeled.value, labeled.field_names);
     assert_eq!(
         distribution.field_names.as_ref().unwrap(),
         &vec!["First 2".to_string(), "Second".to_string()]

@@ -8,10 +8,10 @@ import {
   ColorGenerator,
   partialSums,
 } from './chartData';
-import { Distribution } from '../util';
+import { ScalarDistribution } from '../util';
 
 describe('chartData', () => {
-  const testDistributions: [string, Distribution][] = [
+  const testDistributions: [string, ScalarDistribution][] = [
     [
       'output 1',
       {
@@ -139,7 +139,7 @@ describe('chartData', () => {
     });
 
     it('should fill gaps with zero probabilities', () => {
-      const sparseDistributions: [string, Distribution][] = [
+      const sparseDistributions: [string, ScalarDistribution][] = [
         [
           'sparse',
           {
@@ -201,7 +201,7 @@ describe('chartData', () => {
     });
 
     it('should sort outcomes numerically', () => {
-      const unorderedDistributions: [string, Distribution][] = [
+      const unorderedDistributions: [string, ScalarDistribution][] = [
         [
           'test',
           {
@@ -242,7 +242,7 @@ describe('chartData', () => {
   });
 
   describe('categorical distributions', () => {
-    const mixedDistributions: [string, Distribution][] = [
+    const mixedDistributions: [string, ScalarDistribution][] = [
       ['numeric', { probabilities: [[1, 1]] }],
       ['attack', {
         probabilities: [[0, 0.25], [2, 0.75]],
@@ -296,7 +296,7 @@ describe('chartData', () => {
     });
 
     it('ignores enum ordinals when calculating the numeric display range', () => {
-      const distributions: [string, Distribution][] = [
+      const distributions: [string, ScalarDistribution][] = [
         ['numeric', { probabilities: [[10, 0.5], [20, 0.5]] }],
         ['enum', {
           probabilities: [[0, 0.5], [10000, 0.5]],

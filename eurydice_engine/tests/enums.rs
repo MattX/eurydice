@@ -1,7 +1,7 @@
 use eurydice_engine::{
     eval::{ElementValue, EvaluatedOutput, Evaluator, RuntimeValue},
     grammar,
-    output::{Distribution, OutputValue, TupleFieldSchema},
+    output::{Distribution, FieldSchema},
 };
 
 fn run(program: &str) -> Result<Vec<EvaluatedOutput>, String> {
@@ -165,18 +165,13 @@ fn shape_constraints_accept_typed_empty_enum_values() {
 #[test]
 fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
     let mut outputs = run("enum: RESULT { MISS, HIT } output d{MISS, HIT}").unwrap();
-    let output = OutputValue::from(outputs.remove(0).value);
-    let OutputValue::Distribution(Distribution {
-        probabilities,
-        enum_name,
-        labels,
-    }) = output
-    else {
-        panic!("expected distribution");
+    let output = Distribution::from(outputs.remove(0).value);
+    assert_eq!(output.probabilities.len(), 2);
+    let FieldSchema::Enum { enum_name, labels } = &output.fields[0] else {
+        panic!("expected enum field");
     };
-    assert_eq!(probabilities.len(), 2);
-    assert_eq!(enum_name.as_deref(), Some("RESULT"));
-    assert_eq!(labels.unwrap(), ["MISS", "HIT"]);
+    assert_eq!(enum_name, "RESULT");
+    assert_eq!(labels, &["MISS", "HIT"]);
 }
 
 #[test]
@@ -186,34 +181,36 @@ fn enum_elements_and_lists_are_converted_to_distributions_in_the_engine() {
     )
     .unwrap();
 
-    let OutputValue::Distribution(element) = OutputValue::from(outputs.remove(0).value) else {
-        panic!("expected element distribution");
+    let element = Distribution::from(outputs.remove(0).value);
+    assert_eq!(element.probabilities, [(vec![1], 1.0)]);
+    let FieldSchema::Enum { enum_name, labels } = &element.fields[0] else {
+        panic!("expected enum field");
     };
-    assert_eq!(element.probabilities, [(1, 1.0)]);
-    assert_eq!(element.enum_name.as_deref(), Some("RESULT"));
-    assert_eq!(element.labels.unwrap(), ["MISS", "HIT"]);
+    assert_eq!(enum_name, "RESULT");
+    assert_eq!(labels, &["MISS", "HIT"]);
 
-    let OutputValue::Distribution(list) = OutputValue::from(outputs.remove(0).value) else {
-        panic!("expected list distribution");
+    let list = Distribution::from(outputs.remove(0).value);
+    assert_eq!(
+        list.probabilities,
+        [(vec![0], 1.0 / 3.0), (vec![1], 2.0 / 3.0)]
+    );
+    let FieldSchema::Enum { enum_name, labels } = &list.fields[0] else {
+        panic!("expected enum field");
     };
-    assert_eq!(list.probabilities, [(0, 1.0 / 3.0), (1, 2.0 / 3.0)]);
-    assert_eq!(list.enum_name.as_deref(), Some("RESULT"));
-    assert_eq!(list.labels.unwrap(), ["MISS", "HIT"]);
+    assert_eq!(enum_name, "RESULT");
+    assert_eq!(labels, &["MISS", "HIT"]);
 }
 
 #[test]
 fn serialized_tuple_distribution_hoists_field_schema() {
     let mut outputs =
         run("enum: RESULT { MISS, HIT } A: d2 B: d{MISS, HIT} output [tuple A B]").unwrap();
-    let output = OutputValue::from(outputs.remove(0).value);
-    let OutputValue::TupleDistribution(dist) = output else {
-        panic!("expected tuple distribution");
-    };
+    let dist = Distribution::from(outputs.remove(0).value);
     assert!(dist.field_names.is_none());
 
     // The per-field schema is stored once, not repeated on each outcome.
-    assert!(matches!(dist.fields[0], TupleFieldSchema::Int));
-    let TupleFieldSchema::Enum { enum_name, labels } = &dist.fields[1] else {
+    assert!(matches!(dist.fields[0], FieldSchema::Int));
+    let FieldSchema::Enum { enum_name, labels } = &dist.fields[1] else {
         panic!("expected enum field schema");
     };
     assert_eq!(enum_name, "RESULT");

@@ -1,4 +1,4 @@
-import { Distribution } from "../util";
+import { ScalarDistribution } from "../util";
 import { DisplayMode, partialSums } from "./chartData";
 
 export interface TableRowData {
@@ -23,7 +23,7 @@ export interface BracketingProbabilities {
 /**
  * Gets all unique outcomes across all distributions, sorted in ascending order
  */
-export function getAllUniqueOutcomes(distributions: [string, Distribution][]): number[] {
+export function getAllUniqueOutcomes(distributions: [string, ScalarDistribution][]): number[] {
   const allOutcomes = new Set<number>();
   distributions.forEach(([, distribution]) => {
     distribution.probabilities.forEach(([outcome]) => {
@@ -37,7 +37,7 @@ export function getAllUniqueOutcomes(distributions: [string, Distribution][]): n
  * Pre-computes table data for the combined probability table
  */
 export function computeTableData(
-  distributions: [string, Distribution][],
+  distributions: [string, ScalarDistribution][],
   mode: DisplayMode,
   sortedOutcomes: number[]
 ): TableRowData[] {
@@ -83,7 +83,7 @@ export function computeTableData(
  * Pre-computes statistics for each distribution
  */
 export function computeDistributionStatistics(
-  distributions: [string, Distribution][]
+  distributions: [string, ScalarDistribution][]
 ): DistributionStatistics[] {
   return distributions.map(([, distribution]) => {
     const data = distribution.probabilities;
@@ -115,7 +115,7 @@ export function computeDistributionStatistics(
  * Calculates bracketing probabilities for a distribution within a given range
  */
 export function calculateBracketingProbabilities(
-  distribution: Distribution,
+  distribution: ScalarDistribution,
   lowerBound: number,
   upperBound: number
 ): BracketingProbabilities {

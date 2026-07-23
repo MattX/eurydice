@@ -1,33 +1,23 @@
-import { Distribution, TupleDistribution, TupleFieldSchema } from "../util";
+import { Distribution, FieldSchema, ScalarDistribution } from "../util";
 
 /**
- * Wire representation of a tuple output, as serialized by the engine. serde
- * encodes `TupleFieldSchema::Int` as the bare string "Int" and the struct
+ * Wire representation of an output distribution, as serialized by the engine. serde
+ * encodes `FieldSchema::Int` as the bare string "Int" and the struct
  * variant as `{ Enum: { enum_name, labels } }`.
  */
-export type WireTupleFieldSchema =
+export type WireFieldSchema =
   | "Int"
   | { Enum: { enum_name: string; labels: string[] } };
 
-export interface WireTupleElement {
-  fields: WireTupleFieldSchema[];
-  values: number[];
-}
-
-export interface WireTupleSequence {
-  fields: WireTupleFieldSchema[];
-  values: number[][];
-}
-
-export interface WireTupleDistribution {
-  fields: WireTupleFieldSchema[];
+export interface WireDistribution {
+  fields: WireFieldSchema[];
   field_names?: string[];
   probabilities: [number[], number][];
 }
 
 export function normalizeFieldSchema(
-  wire: WireTupleFieldSchema
-): TupleFieldSchema {
+  wire: WireFieldSchema
+): FieldSchema {
   if (wire === "Int") return { kind: "int" };
   return {
     kind: "enum",
@@ -36,42 +26,7 @@ export function normalizeFieldSchema(
   };
 }
 
-/** A tuple element becomes a distribution with a single, certain outcome. */
-export function normalizeTupleElement(wire: WireTupleElement): TupleDistribution {
-  return {
-    fields: wire.fields.map(normalizeFieldSchema),
-    probabilities: [[wire.values, 1]],
-  };
-}
-
-/**
- * A tuple sequence becomes a uniform distribution over its elements, with
- * repeated outcomes collapsed into a single summed entry (mirroring how a
- * numeric list is shown as a uniform distribution).
- */
-export function normalizeTupleSequence(
-  wire: WireTupleSequence
-): TupleDistribution {
-  const length = wire.values.length;
-  const collapsed = new Map<string, [number[], number]>();
-  for (const outcome of wire.values) {
-    const key = outcome.join(",");
-    const existing = collapsed.get(key);
-    if (existing) {
-      existing[1] += 1 / length;
-    } else {
-      collapsed.set(key, [outcome, 1 / length]);
-    }
-  }
-  return {
-    fields: wire.fields.map(normalizeFieldSchema),
-    probabilities: Array.from(collapsed.values()),
-  };
-}
-
-export function normalizeTupleDistribution(
-  wire: WireTupleDistribution
-): TupleDistribution {
+export function normalizeDistribution(wire: WireDistribution): Distribution {
   return {
     fields: wire.fields.map(normalizeFieldSchema),
     fieldNames: wire.field_names,
@@ -81,7 +36,7 @@ export function normalizeTupleDistribution(
 
 /** Display label for a single raw field value under its schema. */
 export function fieldValueLabel(
-  schema: TupleFieldSchema,
+  schema: FieldSchema,
   value: number
 ): string {
   if (schema.kind === "enum") {
@@ -91,7 +46,7 @@ export function fieldValueLabel(
 }
 
 /** A human-facing name for a field, used as a column/axis title. */
-export function fieldName(dist: TupleDistribution, index: number): string {
+export function fieldName(dist: Distribution, index: number): string {
   const explicit = dist.fieldNames?.[index];
   if (explicit !== undefined) return explicit;
   const schema = dist.fields[index];
@@ -112,7 +67,7 @@ export interface FieldAxis {
  * matching the 1-D numeric chart.
  */
 export function fieldAxis(
-  schema: TupleFieldSchema,
+  schema: FieldSchema,
   observed: number[]
 ): FieldAxis {
   if (schema.kind === "enum") {
@@ -129,7 +84,7 @@ export function fieldAxis(
 }
 
 export function observedValues(
-  dist: TupleDistribution,
+  dist: Distribution,
   field: number
 ): number[] {
   return dist.probabilities.map(([outcome]) => outcome[field]);
@@ -140,7 +95,7 @@ export function observedValues(
  * probabilities over all other fields. Enum fields carry their labels through
  * so the result can feed the existing 1-D chart machinery.
  */
-export function computeMarginals(dist: TupleDistribution): Distribution[] {
+export function computeMarginals(dist: Distribution): ScalarDistribution[] {
   return dist.fields.map((schema, field) => {
     const totals = new Map<number, number>();
     for (const [outcome, probability] of dist.probabilities) {
@@ -150,7 +105,7 @@ export function computeMarginals(dist: TupleDistribution): Distribution[] {
     const probabilities: [number, number][] = Array.from(totals.entries()).sort(
       (a, b) => a[0] - b[0]
     );
-    const marginal: Distribution = { probabilities };
+    const marginal: ScalarDistribution = { probabilities };
     if (schema.kind === "enum") {
       marginal.enum_name = schema.enumName;
       marginal.labels = schema.labels;
@@ -175,7 +130,7 @@ export interface TuplePivot {
 }
 
 /** Pivots an arity-2 joint distribution into a 2-D grid with marginals. */
-export function computeTuplePivot(dist: TupleDistribution): TuplePivot {
+export function computeTuplePivot(dist: Distribution): TuplePivot {
   const xAxis = fieldAxis(dist.fields[0], observedValues(dist, 0));
   const yAxis = fieldAxis(dist.fields[1], observedValues(dist, 1));
   const joint = new Map<string, number>();
@@ -211,7 +166,7 @@ export interface TupleRow {
 
 /** Flattens a joint distribution into rows for the list-out table. */
 export function computeTupleRows(
-  dist: TupleDistribution,
+  dist: Distribution,
   sort: TupleSort
 ): TupleRow[] {
   const rows: TupleRow[] = dist.probabilities.map(([outcome, probability]) => ({

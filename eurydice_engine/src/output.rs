@@ -7,28 +7,21 @@ use crate::dice::Pool;
 use crate::eval::{sum_pool, ElementType, ElementValue, RuntimeValue};
 
 #[derive(Debug, Clone, Serialize)]
-pub enum OutputValue {
-    Distribution(Distribution),
-    TupleDistribution(TupleDistribution),
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct Distribution {
-    pub probabilities: Vec<(i32, f64)>,
+    pub fields: Vec<FieldSchema>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub enum_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub labels: Option<Vec<String>>,
+    pub field_names: Option<Vec<String>>,
+    pub probabilities: Vec<(Vec<i32>, f64)>,
 }
 
-/// Describes a single tuple field, shared by every outcome of a tuple output.
+/// Describes a single output field, shared by every outcome of a distribution.
 ///
 /// Field values in the outcomes themselves are always raw `i32`s; for an enum
 /// field the value is the member's ordinal, and the labels here map it back to
 /// a display name. Hoisting the schema up here keeps the (potentially large)
 /// list of outcomes free of repeated enum metadata.
 #[derive(Debug, Clone, Serialize)]
-pub enum TupleFieldSchema {
+pub enum FieldSchema {
     Int,
     Enum {
         enum_name: String,
@@ -36,21 +29,13 @@ pub enum TupleFieldSchema {
     },
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct TupleDistribution {
-    pub fields: Vec<TupleFieldSchema>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub field_names: Option<Vec<String>>,
-    pub probabilities: Vec<(Vec<i32>, f64)>,
-}
-
-impl From<RuntimeValue> for OutputValue {
+impl From<RuntimeValue> for Distribution {
     fn from(value: RuntimeValue) -> Self {
         Self::from_runtime(value, None)
     }
 }
 
-impl OutputValue {
+impl Distribution {
     /// Converts an evaluated value into its serialized display representation,
     /// attaching validated tuple field names when the output supplied them.
     pub fn from_runtime(value: RuntimeValue, field_names: Option<Vec<String>>) -> Self {
@@ -77,17 +62,25 @@ impl OutputValue {
     }
 }
 
-/// Flattens a tuple's fields to raw `i32`s; enum fields become their ordinal.
-fn tuple_values(values: &[ElementValue]) -> Vec<i32> {
-    values
-        .iter()
-        .map(|value| match value {
-            ElementValue::AdditiveIdentity => 0,
-            ElementValue::Int(value) => *value,
-            ElementValue::Enum { value, .. } => *value,
-            ElementValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
-        })
-        .collect()
+/// Flattens any output outcome to raw `i32`s. Scalar outcomes have one value;
+/// tuples have one per field, and enum values are represented by their ordinal.
+fn output_values(value: &ElementValue) -> Vec<i32> {
+    match value {
+        ElementValue::AdditiveIdentity => {
+            unreachable!("additive identities are materialized before output")
+        }
+        ElementValue::Int(value) | ElementValue::Enum { value, .. } => vec![*value],
+        ElementValue::Tuple(fields) => fields
+            .iter()
+            .map(|field| match field {
+                ElementValue::AdditiveIdentity => 0,
+                ElementValue::Int(value) | ElementValue::Enum { value, .. } => *value,
+                ElementValue::Tuple(_) => {
+                    unreachable!("nested tuples are rejected by the evaluator")
+                }
+            })
+            .collect(),
+    }
 }
 
 fn pool_output(
@@ -95,7 +88,7 @@ fn pool_output(
     outcome_type: &ElementType,
     sum: bool,
     field_names: Option<Vec<String>>,
-) -> OutputValue {
+) -> Distribution {
     let pool = if sum {
         if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ElementType::Uninhabited) {
             pool.clone()
@@ -115,66 +108,43 @@ fn pool_output(
     } else {
         pool
     };
-    match &outcome_type {
+    let fields = match &outcome_type {
         ElementType::Uninhabited | ElementType::AdditiveIdentity => {
             unreachable!("defaulted outcome types are concrete")
         }
-        ElementType::Int => OutputValue::Distribution(Distribution {
-            probabilities: to_probabilities(
-                &pool
-                    .ordered_outcomes()
-                    .iter()
-                    .map(|(value, weight)| {
-                        (
-                            value.as_int().expect("homogeneous numeric pool"),
-                            weight.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            enum_name: None,
-            labels: None,
-        }),
-        ElementType::Enum(ty) => OutputValue::Distribution(Distribution {
-            probabilities: to_probabilities(
-                &pool
-                    .ordered_outcomes()
-                    .iter()
-                    .map(|(value, weight)| match value {
-                        ElementValue::Enum { value, .. } => (*value, weight.clone()),
-                        _ => unreachable!("homogeneous enum pool"),
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            enum_name: Some(ty.name.clone()),
-            labels: Some(ty.members.clone()),
-        }),
-        ElementType::Tuple(field_types) => OutputValue::TupleDistribution(TupleDistribution {
-            fields: field_types
-                .iter()
-                .map(|ty| match ty {
-                    ElementType::Uninhabited | ElementType::AdditiveIdentity => {
-                        unreachable!("tuple fields always have concrete types")
-                    }
-                    ElementType::Int => TupleFieldSchema::Int,
-                    ElementType::Enum(ty) => TupleFieldSchema::Enum {
-                        enum_name: ty.name.clone(),
-                        labels: ty.members.clone(),
-                    },
-                    ElementType::Tuple(_) => {
-                        unreachable!("nested tuples are rejected by the evaluator")
-                    }
-                })
-                .collect(),
-            field_names,
-            probabilities: to_probabilities_generic(pool.ordered_outcomes())
-                .into_iter()
-                .map(|(value, probability)| match value {
-                    ElementValue::Tuple(fields) => (tuple_values(&fields), probability),
-                    _ => unreachable!("homogeneous tuple pool"),
-                })
-                .collect(),
-        }),
+        ElementType::Int => vec![FieldSchema::Int],
+        ElementType::Enum(ty) => vec![FieldSchema::Enum {
+            enum_name: ty.name.clone(),
+            labels: ty.members.clone(),
+        }],
+        ElementType::Tuple(field_types) => field_types
+            .iter()
+            .map(|ty| match ty {
+                ElementType::Uninhabited | ElementType::AdditiveIdentity => {
+                    unreachable!("tuple fields always have concrete types")
+                }
+                ElementType::Int => FieldSchema::Int,
+                ElementType::Enum(ty) => FieldSchema::Enum {
+                    enum_name: ty.name.clone(),
+                    labels: ty.members.clone(),
+                },
+                ElementType::Tuple(_) => {
+                    unreachable!("nested tuples are rejected by the evaluator")
+                }
+            })
+            .collect(),
+    };
+    Distribution {
+        fields,
+        field_names: if matches!(outcome_type, ElementType::Tuple(_)) {
+            field_names
+        } else {
+            None
+        },
+        probabilities: to_probabilities_generic(pool.ordered_outcomes())
+            .into_iter()
+            .map(|(value, probability)| (output_values(&value), probability))
+            .collect(),
     }
 }
 
@@ -269,12 +239,9 @@ mod tests {
 
     #[test]
     fn converts_int_to_distribution() {
-        let OutputValue::Distribution(distribution) = OutputValue::from(RuntimeValue::from(5))
-        else {
-            panic!("expected numeric distribution");
-        };
+        let distribution = Distribution::from(RuntimeValue::from(5));
 
-        assert_eq!(distribution.probabilities, vec![(5, 1.0)]);
+        assert_eq!(distribution.probabilities, vec![(vec![5], 1.0)]);
     }
 
     #[test]
@@ -283,20 +250,18 @@ mod tests {
             5, -1, 5, 0, 5, 1, 5, 2, 5, 3, 5, 4, 5, 5, 5, 5,
         ]));
 
-        let OutputValue::Distribution(distribution) = OutputValue::from(value) else {
-            panic!("expected numeric distribution");
-        };
+        let distribution = Distribution::from(value);
 
         assert_eq!(
             distribution.probabilities,
             vec![
-                (-1, 0.0625),
-                (0, 0.0625),
-                (1, 0.0625),
-                (2, 0.0625),
-                (3, 0.0625),
-                (4, 0.0625),
-                (5, 0.625),
+                (vec![-1], 0.0625),
+                (vec![0], 0.0625),
+                (vec![1], 0.0625),
+                (vec![2], 0.0625),
+                (vec![3], 0.0625),
+                (vec![4], 0.0625),
+                (vec![5], 0.625),
             ]
         );
     }
@@ -305,13 +270,11 @@ mod tests {
     fn converts_pool_to_distribution_by_summing_dice() {
         let value = RuntimeValue::from(Pool::from_list(2, vec![1, 2]));
 
-        let OutputValue::Distribution(distribution) = OutputValue::from(value) else {
-            panic!("expected numeric distribution");
-        };
+        let distribution = Distribution::from(value);
 
         assert_eq!(
             distribution.probabilities,
-            vec![(2, 0.25), (3, 0.5), (4, 0.25)]
+            vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
     }
 }

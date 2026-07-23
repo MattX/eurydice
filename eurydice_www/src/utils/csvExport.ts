@@ -1,15 +1,15 @@
-import { Distribution, TupleDistribution } from "../util";
+import { Distribution, ScalarDistribution } from "../util";
 import { type NamedDistribution, partitionDistributions } from "./chartData";
 import { computeTupleRows, fieldName } from "./tupleData";
 
 export interface DistributionData {
   name: string;
-  distribution: Distribution;
+  distribution: ScalarDistribution;
 }
 
 export interface TupleData {
   name: string;
-  distribution: TupleDistribution;
+  distribution: Distribution;
 }
 
 export function escapeCSVField(field: string): string {

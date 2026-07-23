@@ -1,5 +1,5 @@
 use eurydice_cli::{format_output_probabilities, print_diagnostic};
-use eurydice_engine::output::OutputValue;
+use eurydice_engine::output::Distribution;
 use lalrpop_util::ParseError;
 
 fn main() {
@@ -37,7 +37,7 @@ fn main() {
         for output in evaluator.take_outputs() {
             let (width, _) = crossterm::terminal::size().unwrap_or((80, 0));
             println!("{}:", output.name);
-            let labeled_probabilities = format_output_probabilities(OutputValue::from_runtime(
+            let labeled_probabilities = format_output_probabilities(Distribution::from_runtime(
                 output.value,
                 output.field_names,
             ));

@@ -1,7 +1,11 @@
 import React from "react";
 import { Bar, Line, Chart as ReactChart } from "react-chartjs-2";
 import { MatrixController, MatrixElement } from "chartjs-chart-matrix";
-import { Distribution, TupleDistribution } from "../util";
+import {
+  Distribution,
+  ScalarDistribution,
+  asScalarDistribution,
+} from "../util";
 import {
   fieldName,
   computeMarginals,
@@ -56,11 +60,26 @@ function formatPercent(probability: number, digits = 2): string {
 }
 
 export default function OutputPane(props: OutputPaneProps) {
-  const tupleDistributions = props.tupleDistributions ?? [];
+  const scalarDistributions = React.useMemo(
+    () =>
+      props.distributions
+        .filter(([, distribution]) => distribution.fields.length === 1)
+        .map(
+          ([name, distribution]) =>
+            [name, asScalarDistribution(distribution)] as [
+              string,
+              ScalarDistribution,
+            ]
+        ),
+    [props.distributions]
+  );
+  const tupleDistributions = props.distributions.filter(
+    ([, distribution]) => distribution.fields.length > 1
+  );
 
   return (
     <div className="flex flex-col gap-6">
-      <OutputSections distributions={props.distributions} />
+      <OutputSections distributions={scalarDistributions} />
       {tupleDistributions.map(([name, distribution], index) => (
         <TupleOutputSection
           key={`tuple:${index}:${name}`}
@@ -80,7 +99,7 @@ export default function OutputPane(props: OutputPaneProps) {
 function OutputSections({
   distributions,
 }: {
-  distributions: [string, Distribution][];
+  distributions: [string, ScalarDistribution][];
 }) {
   const { sections } = React.useMemo(
     () => partitionDistributions(distributions),
@@ -108,7 +127,7 @@ function OutputSections({
 function NumericOutputSection({
   distributions,
 }: {
-  distributions: [string, Distribution][];
+  distributions: [string, ScalarDistribution][];
 }) {
   const [displayMode, setDisplayMode] = React.useState(
     DisplayMode.Distribution
@@ -335,7 +354,7 @@ function TupleOutputSection({
   distribution,
 }: {
   name: string;
-  distribution: TupleDistribution;
+  distribution: Distribution;
 }) {
   const isDarkMode = React.useContext(DarkModeContext);
   const arity = distribution.fields.length;
@@ -445,7 +464,7 @@ function TupleHeatmap({
   distribution,
   isDarkMode,
 }: {
-  distribution: TupleDistribution;
+  distribution: Distribution;
   isDarkMode: boolean;
 }) {
   const pivot = React.useMemo(
@@ -585,7 +604,7 @@ function TupleHeatmap({
 function TupleContingencyTable({
   distribution,
 }: {
-  distribution: TupleDistribution;
+  distribution: Distribution;
 }) {
   const pivot = React.useMemo(
     () => computeTuplePivot(distribution),
@@ -670,7 +689,7 @@ function TupleContingencyTable({
 /** Largest number of rows the list-out table renders before truncating. */
 const MAX_LIST_ROWS = 1000;
 
-function TupleListTable({ distribution }: { distribution: TupleDistribution }) {
+function TupleListTable({ distribution }: { distribution: Distribution }) {
   const [sort, setSort] = React.useState<TupleSort>("probability");
   const rows = React.useMemo(
     () => computeTupleRows(distribution, sort),
@@ -743,7 +762,7 @@ function TupleListTable({ distribution }: { distribution: TupleDistribution }) {
   );
 }
 
-function TupleMarginals({ distribution }: { distribution: TupleDistribution }) {
+function TupleMarginals({ distribution }: { distribution: Distribution }) {
   // Each field's marginal is a plain 1-D distribution, so route them through
   // the same section renderer as top-level outputs: numeric marginals overlay
   // on one full-featured chart (display modes, bracketing, table), and enum
@@ -753,7 +772,7 @@ function TupleMarginals({ distribution }: { distribution: TupleDistribution }) {
     [distribution]
   );
   const named = React.useMemo(
-    (): [string, Distribution][] =>
+    (): [string, ScalarDistribution][] =>
       marginals.map((marginal, i) => [fieldName(distribution, i), marginal]),
     [distribution, marginals]
   );
@@ -762,7 +781,7 @@ function TupleMarginals({ distribution }: { distribution: TupleDistribution }) {
 }
 
 interface NumericChartProps {
-  distributions: [string, Distribution][];
+  distributions: [string, ScalarDistribution][];
   mode: DisplayMode;
   isDarkMode: boolean;
   plugin: ChartJsRangeSelect;
@@ -922,18 +941,17 @@ function CategoricalChart({
 
 export interface OutputPaneProps {
   distributions: [string, Distribution][];
-  tupleDistributions?: [string, TupleDistribution][];
 }
 
 interface CombinedProbabilityTableProps {
-  distributions: [string, Distribution][];
+  distributions: [string, ScalarDistribution][];
   mode: DisplayMode;
   outcomes?: number[];
   showStatistics?: boolean;
 }
 
 interface BracketingTableProps {
-  distributions: [string, Distribution][];
+  distributions: [string, ScalarDistribution][];
   lowerBound: number;
   upperBound: number;
 }

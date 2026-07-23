@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useRef } from "react";
 
 import { WorkerWrapper } from "./worker-wrapper";
-import { Distribution, TupleDistribution } from "./util";
 import {
-  WireTupleDistribution,
-  normalizeTupleDistribution,
+  Distribution,
+  ScalarDistribution,
+  asScalarDistribution,
+} from "./util";
+import {
+  WireDistribution,
+  normalizeDistribution,
 } from "./utils/tupleData";
 import OutputPane from "./components/OutputPane";
 import ExportModal from "./components/ExportModal";
@@ -30,9 +34,6 @@ export default function App() {
 function AppInner() {
   const [editorText, setEditorText] = React.useState("");
   const [output, setOutput] = React.useState<[string, Distribution][]>([]);
-  const [tupleOutput, setTupleOutput] = React.useState<
-    [string, TupleDistribution][]
-  >([]);
   const [error, setError] = React.useState<EurydiceError | null>(null);
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
@@ -76,32 +77,29 @@ function AppInner() {
         runningRef.current = false;
         setRunning(false);
         setError(null);
-        const chartData: [string, Distribution][] = [];
-        const tupleData: [string, TupleDistribution][] = [];
-        for (const [key, value] of event.data.Ok!) {
-          if (value.TupleDistribution !== undefined) {
-            tupleData.push([
-              key,
-              normalizeTupleDistribution(value.TupleDistribution),
-            ]);
-          } else if (value.Distribution !== undefined) {
-            chartData.push([key, value.Distribution]);
-          }
-        }
-
-        setTupleOutput(tupleData);
+        const distributions: [string, Distribution][] = event.data.Ok!.map(
+          ([name, distribution]) => [name, normalizeDistribution(distribution)]
+        );
+        const chartData: [string, ScalarDistribution][] = distributions
+          .filter(([, distribution]) => distribution.fields.length === 1)
+          .map(([name, distribution]) => [
+            name,
+            asScalarDistribution(distribution),
+          ]);
 
         // Categorical outcomes use enum member ordinals, not a numeric axis.
         const range = numericOutcomeRange(chartData);
         if (range !== null && range >= 5000) {
-          setOutput([]);
+          setOutput(
+            distributions.filter(([, distribution]) => distribution.fields.length > 1)
+          );
           setError({
             message: `Range of outcomes (${range}) is too large to display. Maximum range is 5000.`,
             from: 0,
             to: 0
           });
         } else {
-          setOutput(chartData);
+          setOutput(distributions);
         }
       } else if (event.data.Print !== undefined) {
         const evt = event.data.Print as [string, string];
@@ -167,7 +165,19 @@ function AppInner() {
   // Export lives in the shared toolbar rather than an output section so it's
   // clearly a global action over every output, and never wraps onto its own
   // line inside the results pane.
-  const canExport = output.length > 0 || tupleOutput.length > 0;
+  const scalarOutput = output
+    .filter(([, distribution]) => distribution.fields.length === 1)
+    .map(
+      ([name, distribution]) =>
+        [name, asScalarDistribution(distribution)] as [
+          string,
+          ScalarDistribution,
+        ]
+    );
+  const tupleOutput = output.filter(
+    ([, distribution]) => distribution.fields.length > 1
+  );
+  const canExport = output.length > 0;
   const exportButton = (
     <button
       className="btn btn-secondary"
@@ -197,7 +207,7 @@ function AppInner() {
 
   const outputPane = (
     <div className="output-pane h-full p-4">
-      <OutputPane distributions={output} tupleDistributions={tupleOutput} />
+      <OutputPane distributions={output} />
     </div>
   );
 
@@ -237,7 +247,7 @@ function AppInner() {
       </div>
 
       <ExportModal
-        distributions={output.map(([name, distribution]) => ({
+        distributions={scalarOutput.map(([name, distribution]) => ({
           name,
           distribution,
         }))}
@@ -253,7 +263,7 @@ function AppInner() {
 }
 
 interface EurydiceMessage {
-  Ok: [string, OutputValue][] | undefined;
+  Ok: [string, WireDistribution][] | undefined;
   Err: EurydiceError | undefined;
   Print: [string, string] | undefined;
 }
@@ -262,8 +272,4 @@ interface EurydiceError {
   message: string;
   from: number;
   to: number;
-}
-interface OutputValue {
-  Distribution: Distribution | undefined;
-  TupleDistribution: WireTupleDistribution | undefined;
 }

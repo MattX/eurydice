@@ -1,6 +1,6 @@
 mod utils;
 
-use eurydice_engine::{ast::ParseActionError, eval::RuntimeValue, output::OutputValue};
+use eurydice_engine::{ast::ParseActionError, eval::RuntimeValue, output::Distribution};
 use js_sys::Function;
 use lalrpop_util::ParseError;
 use serde::Serialize;
@@ -28,7 +28,7 @@ pub struct Error {
 fn run_inner(
     input: &str,
     print_callback: Box<dyn Fn(RuntimeValue, String)>,
-) -> Result<Vec<(String, OutputValue)>, Error> {
+) -> Result<Vec<(String, Distribution)>, Error> {
     let mut evaluator = eurydice_engine::eval::Evaluator::new();
     evaluator.set_print_callback(print_callback);
     let parser = eurydice_engine::grammar::BodyParser::new();
@@ -56,7 +56,7 @@ fn run_inner(
         .map(|output| {
             (
                 output.name,
-                OutputValue::from_runtime(output.value, output.field_names),
+                Distribution::from_runtime(output.value, output.field_names),
             )
         })
         .collect())
@@ -83,7 +83,6 @@ fn lalrpop_to_error<T: std::fmt::Display>(e: &ParseError<usize, T, ParseActionEr
 #[cfg(test)]
 mod tests {
     use super::run_inner;
-    use eurydice_engine::output::OutputValue;
 
     #[test]
     fn labeled_tuple_metadata_reaches_wasm_output() {
@@ -92,9 +91,7 @@ mod tests {
             Box::new(|_, _| {}),
         )
         .unwrap();
-        let OutputValue::TupleDistribution(distribution) = &outputs[0].1 else {
-            panic!("expected tuple distribution");
-        };
+        let distribution = &outputs[0].1;
         assert_eq!(
             distribution.field_names.as_ref().unwrap(),
             &["Left".to_string(), "Right".to_string()]

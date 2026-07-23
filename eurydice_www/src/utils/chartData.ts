@@ -1,7 +1,7 @@
 import { ChartData } from "chart.js";
-import { Distribution } from "../util";
+import { ScalarDistribution } from "../util";
 
-export type NamedDistribution = [string, Distribution];
+export type NamedDistribution = [string, ScalarDistribution];
 
 export interface EnumDistributionGroup {
   enumName: string;
