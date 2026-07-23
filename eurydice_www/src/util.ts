@@ -15,7 +15,7 @@ export type TupleFieldSchema =
 
 /**
  * A tuple-valued (joint) distribution. Each outcome is a vector of raw ints,
- * one per field, paired with its probability. A tuple scalar or a tuple list
+ * one per field, paired with its probability. A tuple element or a tuple list
  * is normalized into this same shape (a single outcome, or a uniform mix).
  */
 export interface TupleDistribution {

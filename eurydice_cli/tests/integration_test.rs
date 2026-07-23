@@ -102,7 +102,7 @@ fn test_anydice_programs() {
                 .zip(expected_results_strings.iter())
             {
                 let d = match output.value {
-                    eval::RuntimeValue::Scalar(value) => {
+                    eval::RuntimeValue::Element(value) => {
                         Pool::from_list(1, vec![value.as_int().expect("numeric fixture output")])
                     }
                     eval::RuntimeValue::List(values, _) => Pool::from_list(

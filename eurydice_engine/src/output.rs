@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::fmt::Write;
 
 use crate::dice::Pool;
-use crate::eval::{sum_pool, RuntimeValue, ScalarType, ScalarValue};
+use crate::eval::{sum_pool, ElementType, ElementValue, RuntimeValue};
 
 #[derive(Debug, Clone, Serialize)]
 pub enum OutputValue {
@@ -55,8 +55,8 @@ impl OutputValue {
     /// attaching validated tuple field names when the output supplied them.
     pub fn from_runtime(value: RuntimeValue, field_names: Option<Vec<String>>) -> Self {
         match value {
-            RuntimeValue::Scalar(value) => {
-                let outcome_type = value.scalar_type();
+            RuntimeValue::Element(value) => {
+                let outcome_type = value.element_type();
                 pool_output(
                     &Pool::from_list(1, vec![value]),
                     &outcome_type,
@@ -78,26 +78,26 @@ impl OutputValue {
 }
 
 /// Flattens a tuple's fields to raw `i32`s; enum fields become their ordinal.
-fn tuple_values(values: &[ScalarValue]) -> Vec<i32> {
+fn tuple_values(values: &[ElementValue]) -> Vec<i32> {
     values
         .iter()
         .map(|value| match value {
-            ScalarValue::AdditiveIdentity => 0,
-            ScalarValue::Int(value) => *value,
-            ScalarValue::Enum { value, .. } => *value,
-            ScalarValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
+            ElementValue::AdditiveIdentity => 0,
+            ElementValue::Int(value) => *value,
+            ElementValue::Enum { value, .. } => *value,
+            ElementValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
         })
         .collect()
 }
 
 fn pool_output(
-    pool: &Pool<ScalarValue>,
-    outcome_type: &ScalarType,
+    pool: &Pool<ElementValue>,
+    outcome_type: &ElementType,
     sum: bool,
     field_names: Option<Vec<String>>,
 ) -> OutputValue {
     let pool = if sum {
-        if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ScalarType::Uninhabited) {
+        if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ElementType::Uninhabited) {
             pool.clone()
         } else {
             sum_pool(pool, outcome_type)
@@ -107,7 +107,7 @@ fn pool_output(
     };
     let unresolved = matches!(
         outcome_type,
-        ScalarType::Uninhabited | ScalarType::AdditiveIdentity
+        ElementType::Uninhabited | ElementType::AdditiveIdentity
     );
     let outcome_type = outcome_type.defaulted();
     let pool = if unresolved {
@@ -116,10 +116,10 @@ fn pool_output(
         pool
     };
     match &outcome_type {
-        ScalarType::Uninhabited | ScalarType::AdditiveIdentity => {
+        ElementType::Uninhabited | ElementType::AdditiveIdentity => {
             unreachable!("defaulted outcome types are concrete")
         }
-        ScalarType::Int => OutputValue::Distribution(Distribution {
+        ElementType::Int => OutputValue::Distribution(Distribution {
             probabilities: to_probabilities(
                 &pool
                     .ordered_outcomes()
@@ -135,13 +135,13 @@ fn pool_output(
             enum_name: None,
             labels: None,
         }),
-        ScalarType::Enum(ty) => OutputValue::Distribution(Distribution {
+        ElementType::Enum(ty) => OutputValue::Distribution(Distribution {
             probabilities: to_probabilities(
                 &pool
                     .ordered_outcomes()
                     .iter()
                     .map(|(value, weight)| match value {
-                        ScalarValue::Enum { value, .. } => (*value, weight.clone()),
+                        ElementValue::Enum { value, .. } => (*value, weight.clone()),
                         _ => unreachable!("homogeneous enum pool"),
                     })
                     .collect::<Vec<_>>(),
@@ -149,19 +149,19 @@ fn pool_output(
             enum_name: Some(ty.name.clone()),
             labels: Some(ty.members.clone()),
         }),
-        ScalarType::Tuple(field_types) => OutputValue::TupleDistribution(TupleDistribution {
+        ElementType::Tuple(field_types) => OutputValue::TupleDistribution(TupleDistribution {
             fields: field_types
                 .iter()
                 .map(|ty| match ty {
-                    ScalarType::Uninhabited | ScalarType::AdditiveIdentity => {
+                    ElementType::Uninhabited | ElementType::AdditiveIdentity => {
                         unreachable!("tuple fields always have concrete types")
                     }
-                    ScalarType::Int => TupleFieldSchema::Int,
-                    ScalarType::Enum(ty) => TupleFieldSchema::Enum {
+                    ElementType::Int => TupleFieldSchema::Int,
+                    ElementType::Enum(ty) => TupleFieldSchema::Enum {
                         enum_name: ty.name.clone(),
                         labels: ty.members.clone(),
                     },
-                    ScalarType::Tuple(_) => {
+                    ElementType::Tuple(_) => {
                         unreachable!("nested tuples are rejected by the evaluator")
                     }
                 })
@@ -170,7 +170,7 @@ fn pool_output(
             probabilities: to_probabilities_generic(pool.ordered_outcomes())
                 .into_iter()
                 .map(|(value, probability)| match value {
-                    ScalarValue::Tuple(fields) => (tuple_values(&fields), probability),
+                    ElementValue::Tuple(fields) => (tuple_values(&fields), probability),
                     _ => unreachable!("homogeneous tuple pool"),
                 })
                 .collect(),

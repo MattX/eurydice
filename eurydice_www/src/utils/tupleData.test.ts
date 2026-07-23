@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { TupleDistribution } from "../util";
 import {
   normalizeFieldSchema,
-  normalizeTupleScalar,
+  normalizeTupleElement,
   normalizeTupleSequence,
   normalizeTupleDistribution,
   fieldName,
@@ -35,8 +35,8 @@ describe("tupleData normalization", () => {
     ).toEqual({ kind: "enum", enumName: "R", labels: ["A", "B"] });
   });
 
-  it("turns a tuple scalar into a certain outcome", () => {
-    const dist = normalizeTupleScalar({ fields: ["Int", "Int"], values: [3, 5] });
+  it("turns a tuple element into a certain outcome", () => {
+    const dist = normalizeTupleElement({ fields: ["Int", "Int"], values: [3, 5] });
     expect(dist.probabilities).toEqual([[[3, 5], 1]]);
     expect(dist.fields).toEqual([{ kind: "int" }, { kind: "int" }]);
   });

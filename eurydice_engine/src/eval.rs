@@ -3,6 +3,7 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
+    fmt::Write,
     rc::Rc,
 };
 
@@ -39,25 +40,26 @@ impl EnumType {
     }
 }
 
+/// Types that can be elements in collections.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScalarType {
+pub enum ElementType {
     /// An empty collection with no evidence about its outcome type.
     Uninhabited,
     /// The polymorphic identity produced by summing an uninhabited collection.
     AdditiveIdentity,
     Int,
     Enum(Rc<EnumType>),
-    Tuple(Rc<[ScalarType]>),
+    Tuple(Rc<[ElementType]>),
 }
 
-impl ScalarType {
+impl ElementType {
     fn merged_with(&self, other: &Self) -> Option<Self> {
         match (self, other) {
-            (ScalarType::Uninhabited, other) | (other, ScalarType::Uninhabited) => {
+            (ElementType::Uninhabited, other) | (other, ElementType::Uninhabited) => {
                 Some(other.clone())
             }
-            (ScalarType::AdditiveIdentity, other) if other.is_additive() => Some(other.clone()),
-            (other, ScalarType::AdditiveIdentity) if other.is_additive() => Some(other.clone()),
+            (ElementType::AdditiveIdentity, other) if other.is_additive() => Some(other.clone()),
+            (other, ElementType::AdditiveIdentity) if other.is_additive() => Some(other.clone()),
             (left, right) if left == right => Some(left.clone()),
             _ => None,
         }
@@ -65,82 +67,82 @@ impl ScalarType {
 
     fn display_name(&self) -> String {
         match self {
-            ScalarType::Uninhabited => "empty".to_string(),
-            ScalarType::AdditiveIdentity => "additive identity".to_string(),
-            ScalarType::Int => "int".to_string(),
-            ScalarType::Enum(ty) => ty.name.clone(),
-            ScalarType::Tuple(fields) => format!(
+            ElementType::Uninhabited => "empty".to_string(),
+            ElementType::AdditiveIdentity => "additive identity".to_string(),
+            ElementType::Int => "int".to_string(),
+            ElementType::Enum(ty) => ty.name.clone(),
+            ElementType::Tuple(fields) => format!(
                 "tuple({})",
                 fields
                     .iter()
-                    .map(ScalarType::display_name)
+                    .map(ElementType::display_name)
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
         }
     }
 
-    fn additive_identity(&self) -> Option<ScalarValue> {
+    fn additive_identity(&self) -> Option<ElementValue> {
         match self {
-            ScalarType::Uninhabited | ScalarType::AdditiveIdentity => {
-                Some(ScalarValue::AdditiveIdentity)
+            ElementType::Uninhabited | ElementType::AdditiveIdentity => {
+                Some(ElementValue::AdditiveIdentity)
             }
-            ScalarType::Int => Some(ScalarValue::Int(0)),
-            ScalarType::Tuple(fields)
-                if fields.iter().all(|field| matches!(field, ScalarType::Int)) =>
+            ElementType::Int => Some(ElementValue::Int(0)),
+            ElementType::Tuple(fields)
+                if fields.iter().all(|field| matches!(field, ElementType::Int)) =>
             {
-                Some(ScalarValue::Tuple(
+                Some(ElementValue::Tuple(
                     fields
                         .iter()
-                        .map(|_| ScalarValue::Int(0))
+                        .map(|_| ElementValue::Int(0))
                         .collect::<Vec<_>>()
                         .into(),
                 ))
             }
-            ScalarType::Enum(_) | ScalarType::Tuple(_) => None,
+            ElementType::Enum(_) | ElementType::Tuple(_) => None,
         }
     }
 
     fn is_additive(&self) -> bool {
         matches!(
             self,
-            ScalarType::Uninhabited | ScalarType::AdditiveIdentity | ScalarType::Int
-        ) || matches!(self, ScalarType::Tuple(fields) if fields.iter().all(|field| matches!(field, ScalarType::Int)))
+            ElementType::Uninhabited | ElementType::AdditiveIdentity | ElementType::Int
+        ) || matches!(self, ElementType::Tuple(fields) if fields.iter().all(|field| matches!(field, ElementType::Int)))
     }
 
     pub(crate) fn summed_type(&self) -> Self {
         match self {
-            ScalarType::Uninhabited => ScalarType::AdditiveIdentity,
+            ElementType::Uninhabited => ElementType::AdditiveIdentity,
             other => other.clone(),
         }
     }
 
     pub(crate) fn defaulted(&self) -> Self {
         match self {
-            ScalarType::Uninhabited | ScalarType::AdditiveIdentity => ScalarType::Int,
+            ElementType::Uninhabited | ElementType::AdditiveIdentity => ElementType::Int,
             other => other.clone(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ScalarValue {
+pub enum ElementValue {
     AdditiveIdentity,
     Int(i32),
     Enum { value: i32, ty: Rc<EnumType> },
-    Tuple(Rc<[ScalarValue]>),
+    Tuple(Rc<[ElementValue]>),
 }
 
-impl ScalarValue {
-    pub fn scalar_type(&self) -> ScalarType {
+impl ElementValue {
+    pub fn element_type(&self) -> ElementType {
         match self {
-            ScalarValue::AdditiveIdentity => ScalarType::AdditiveIdentity,
-            ScalarValue::Int(_) => ScalarType::Int,
-            ScalarValue::Enum { ty, .. } => ScalarType::Enum(Rc::clone(ty)),
-            ScalarValue::Tuple(fields) => ScalarType::Tuple(
+            ElementValue::AdditiveIdentity => ElementType::AdditiveIdentity,
+            ElementValue::Int(_) => ElementType::Int,
+            ElementValue::Enum { ty, .. } => ElementType::Enum(Rc::clone(ty)),
+            ElementValue::Tuple(fields) => ElementType::Tuple(
                 fields
                     .iter()
-                    .map(ScalarValue::scalar_type)
+                    .map(ElementValue::element_type)
                     .collect::<Vec<_>>()
                     .into(),
             ),
@@ -149,8 +151,8 @@ impl ScalarValue {
 
     pub fn as_int(&self) -> Option<i32> {
         match self {
-            ScalarValue::Int(value) => Some(*value),
-            ScalarValue::AdditiveIdentity | ScalarValue::Enum { .. } | ScalarValue::Tuple(_) => {
+            ElementValue::Int(value) => Some(*value),
+            ElementValue::AdditiveIdentity | ElementValue::Enum { .. } | ElementValue::Tuple(_) => {
                 None
             }
         }
@@ -158,49 +160,49 @@ impl ScalarValue {
 
     pub fn enum_type(&self) -> Option<Rc<EnumType>> {
         match self {
-            ScalarValue::Enum { ty, .. } => Some(Rc::clone(ty)),
-            ScalarValue::AdditiveIdentity | ScalarValue::Int(_) | ScalarValue::Tuple(_) => None,
+            ElementValue::Enum { ty, .. } => Some(Rc::clone(ty)),
+            ElementValue::AdditiveIdentity | ElementValue::Int(_) | ElementValue::Tuple(_) => None,
         }
     }
 
     fn add_scaled(&self, other: &Self, count: u32) -> Self {
         match (self, other) {
-            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity) => {
-                ScalarValue::AdditiveIdentity
+            (ElementValue::AdditiveIdentity, ElementValue::AdditiveIdentity) => {
+                ElementValue::AdditiveIdentity
             }
-            (ScalarValue::AdditiveIdentity, other) => other
-                .scalar_type()
+            (ElementValue::AdditiveIdentity, other) => other
+                .element_type()
                 .additive_identity()
                 .expect("identity can only be added to an additive value")
                 .add_scaled(other, count),
-            (other, ScalarValue::AdditiveIdentity) => other.clone(),
-            (ScalarValue::Int(left), ScalarValue::Int(right)) => {
+            (other, ElementValue::AdditiveIdentity) => other.clone(),
+            (ElementValue::Int(left), ElementValue::Int(right)) => {
                 let count = i32::try_from(count).expect("pool dimension fits in i32");
-                ScalarValue::Int(left + right * count)
+                ElementValue::Int(left + right * count)
             }
-            (ScalarValue::Tuple(left), ScalarValue::Tuple(right)) => ScalarValue::Tuple(
+            (ElementValue::Tuple(left), ElementValue::Tuple(right)) => ElementValue::Tuple(
                 left.iter()
                     .zip(right.iter())
                     .map(|(left, right)| left.add_scaled(right, count))
                     .collect::<Vec<_>>()
                     .into(),
             ),
-            _ => unreachable!("additive values have matching scalar types"),
+            _ => unreachable!("additive values have matching element types"),
         }
     }
 
     fn try_map_ints(&self, f: &impl Fn(i32) -> Result<i32, String>) -> Result<Self, String> {
         match self {
-            ScalarValue::AdditiveIdentity => Ok(ScalarValue::AdditiveIdentity),
-            ScalarValue::Int(value) => Ok(ScalarValue::Int(f(*value)?)),
-            ScalarValue::Tuple(fields) => Ok(ScalarValue::Tuple(
+            ElementValue::AdditiveIdentity => Ok(ElementValue::AdditiveIdentity),
+            ElementValue::Int(value) => Ok(ElementValue::Int(f(*value)?)),
+            ElementValue::Tuple(fields) => Ok(ElementValue::Tuple(
                 fields
                     .iter()
                     .map(|field| field.try_map_ints(f))
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             )),
-            ScalarValue::Enum { .. } => unreachable!("enum values are not additive"),
+            ElementValue::Enum { .. } => unreachable!("enum values are not additive"),
         }
     }
 
@@ -210,13 +212,13 @@ impl ScalarValue {
         f: &impl Fn(i32, i32) -> Result<i32, String>,
     ) -> Result<Self, String> {
         match (self, other) {
-            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity) => {
-                Ok(ScalarValue::AdditiveIdentity)
+            (ElementValue::AdditiveIdentity, ElementValue::AdditiveIdentity) => {
+                Ok(ElementValue::AdditiveIdentity)
             }
-            (ScalarValue::Int(left), ScalarValue::Int(right)) => {
-                Ok(ScalarValue::Int(f(*left, *right)?))
+            (ElementValue::Int(left), ElementValue::Int(right)) => {
+                Ok(ElementValue::Int(f(*left, *right)?))
             }
-            (ScalarValue::Tuple(left), ScalarValue::Tuple(right)) => Ok(ScalarValue::Tuple(
+            (ElementValue::Tuple(left), ElementValue::Tuple(right)) => Ok(ElementValue::Tuple(
                 left.iter()
                     .zip(right.iter())
                     .map(|(left, right)| left.try_zip_ints(right, f))
@@ -235,26 +237,27 @@ impl ScalarValue {
         })
     }
 
-    pub(crate) fn materialize_identity(&self, outcome_type: &ScalarType) -> Self {
+    pub(crate) fn materialize_identity(&self, outcome_type: &ElementType) -> Self {
         match self {
-            ScalarValue::AdditiveIdentity => outcome_type
+            ElementValue::AdditiveIdentity => outcome_type
                 .additive_identity()
-                .filter(|value| !matches!(value, ScalarValue::AdditiveIdentity))
+                .filter(|value| !matches!(value, ElementValue::AdditiveIdentity))
                 .expect("identity must be materialized as a concrete additive type"),
             other => other.clone(),
         }
     }
 }
 
-impl std::fmt::Display for ScalarValue {
+impl std::fmt::Display for ElementValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScalarValue::AdditiveIdentity => write!(f, "0"),
-            ScalarValue::Int(value) => write!(f, "{value}"),
-            ScalarValue::Enum { value, ty } => {
+            // Use italic 𝑒 for additive identity
+            ElementValue::AdditiveIdentity => write!(f, "\u{1d452}"),
+            ElementValue::Int(value) => write!(f, "{value}"),
+            ElementValue::Enum { value, ty } => {
                 write!(f, "{}", ty.member_name(*value).unwrap_or("<?>"))
             }
-            ScalarValue::Tuple(fields) => write!(
+            ElementValue::Tuple(fields) => write!(
                 f,
                 "({})",
                 fields
@@ -269,15 +272,15 @@ impl std::fmt::Display for ScalarValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeValue {
-    Scalar(ScalarValue),
-    List(Rc<Vec<ScalarValue>>, ScalarType),
-    Pool(Rc<Pool<ScalarValue>>, ScalarType),
+    Element(ElementValue),
+    List(Rc<Vec<ElementValue>>, ElementType),
+    Pool(Rc<Pool<ElementValue>>, ElementType),
 }
 
 impl std::fmt::Display for RuntimeValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuntimeValue::Scalar(value) => write!(f, "{value}"),
+            RuntimeValue::Element(value) => write!(f, "{value}"),
             RuntimeValue::List(list, _) => write!(
                 f,
                 "{{{}}}",
@@ -286,42 +289,69 @@ impl std::fmt::Display for RuntimeValue {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            RuntimeValue::Pool(
-                pool,
-                ScalarType::Uninhabited | ScalarType::AdditiveIdentity | ScalarType::Int,
-            ) => write!(
-                f,
-                "{}",
-                (**pool).clone().map_outcomes(|outcome| match outcome {
-                    ScalarValue::AdditiveIdentity => 0,
-                    outcome => outcome.as_int().expect("numeric pool"),
-                })
-            ),
-            RuntimeValue::Pool(pool, ScalarType::Enum(_) | ScalarType::Tuple(_)) => write!(
-                f,
-                "d{{{}}}",
-                pool.ordered_outcomes()
-                    .iter()
-                    .map(|(outcome, count)| format!("{outcome}:{count}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            RuntimeValue::Pool(pool, outcome_type) => {
+                write!(f, "{}", display_pool(pool, outcome_type))
+            }
         }
     }
+}
+
+fn display_pool(pool: &Pool<ElementValue>, outcome_type: &ElementType) -> String {
+    if pool.ordered_outcomes().is_empty() {
+        return "d{}".to_string();
+    }
+    let mut f = String::new();
+    if pool.dimension() != 1 {
+        write!(f, "{}", pool.dimension()).expect("write to string");
+    }
+    if pool.ordered_outcomes() == [(ElementValue::Int(0), Natural::ONE)] {
+        write!(f, "d0").expect("write to string");
+        return f;
+    }
+    if outcome_type == &ElementType::Int
+        && pool
+            .ordered_outcomes()
+            .iter()
+            .enumerate()
+            .all(|(i, (outcome, weight))| {
+                usize::try_from(outcome.as_int().expect("int outcome in int pool")).ok()
+                    == Some(i + 1)
+                    && *weight == Natural::ONE
+            })
+    {
+        // This is a standard dn with no repeats.
+        write!(f, "d{}", pool.ordered_outcomes().len()).expect("write to string");
+    } else {
+        write!(
+            f,
+            "d{{{}}}",
+            pool.ordered_outcomes()
+                .iter()
+                .map(|(outcome, weight)| if weight == &Natural::ONE {
+                    outcome.to_string()
+                } else {
+                    format!("{}:{}", outcome, weight)
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .expect("write to string");
+    }
+    f
 }
 
 impl RuntimeValue {
     fn runtime_type(&self) -> StaticType {
         match self {
-            RuntimeValue::Scalar(_) => StaticType::Int,
+            RuntimeValue::Element(_) => StaticType::Int,
             RuntimeValue::List(_, _) => StaticType::List,
             RuntimeValue::Pool(_, _) => StaticType::Pool,
         }
     }
 
-    fn outcome_type(&self) -> ScalarType {
+    fn outcome_type(&self) -> ElementType {
         match self {
-            RuntimeValue::Scalar(value) => value.scalar_type(),
+            RuntimeValue::Element(value) => value.element_type(),
             RuntimeValue::List(_, outcome_type) | RuntimeValue::Pool(_, outcome_type) => {
                 outcome_type.clone()
             }
@@ -330,22 +360,22 @@ impl RuntimeValue {
 
     pub fn enum_type(&self) -> Option<Rc<EnumType>> {
         match self.outcome_type() {
-            ScalarType::Enum(ty) => Some(ty),
-            ScalarType::Uninhabited
-            | ScalarType::AdditiveIdentity
-            | ScalarType::Int
-            | ScalarType::Tuple(_) => None,
+            ElementType::Enum(ty) => Some(ty),
+            ElementType::Uninhabited
+            | ElementType::AdditiveIdentity
+            | ElementType::Int
+            | ElementType::Tuple(_) => None,
         }
     }
 
-    pub(crate) fn merged_outcome_type(&self, other: &Self) -> Option<ScalarType> {
+    pub(crate) fn merged_outcome_type(&self, other: &Self) -> Option<ElementType> {
         self.outcome_type().merged_with(&other.outcome_type())
     }
 
     fn is_numeric_compatible(&self) -> bool {
         matches!(
             self.outcome_type(),
-            ScalarType::Uninhabited | ScalarType::AdditiveIdentity | ScalarType::Int
+            ElementType::Uninhabited | ElementType::AdditiveIdentity | ElementType::Int
         )
     }
 
@@ -353,23 +383,23 @@ impl RuntimeValue {
         self.outcome_type().is_additive()
     }
 
-    fn flattened_outcome_type(&self) -> ScalarType {
+    fn flattened_outcome_type(&self) -> ElementType {
         match self {
-            RuntimeValue::Pool(_, ScalarType::Uninhabited) => ScalarType::AdditiveIdentity,
+            RuntimeValue::Pool(_, ElementType::Uninhabited) => ElementType::AdditiveIdentity,
             _ => self.outcome_type(),
         }
     }
 
-    pub(crate) fn materialize_identities(&self, outcome_type: &ScalarType) -> Self {
+    pub(crate) fn materialize_identities(&self, outcome_type: &ElementType) -> Self {
         if matches!(
             outcome_type,
-            ScalarType::Uninhabited | ScalarType::AdditiveIdentity
+            ElementType::Uninhabited | ElementType::AdditiveIdentity
         ) {
             return self.clone();
         }
-        let materialize = |value: &ScalarValue| value.materialize_identity(outcome_type);
+        let materialize = |value: &ElementValue| value.materialize_identity(outcome_type);
         match self {
-            RuntimeValue::Scalar(value) => RuntimeValue::Scalar(materialize(value)),
+            RuntimeValue::Element(value) => RuntimeValue::Element(materialize(value)),
             RuntimeValue::List(values, _) => RuntimeValue::List(
                 Rc::new(values.iter().map(materialize).collect()),
                 outcome_type.clone(),
@@ -381,9 +411,9 @@ impl RuntimeValue {
         }
     }
 
-    fn to_list(&self, repeat: usize) -> Vec<ScalarValue> {
+    fn to_list(&self, repeat: usize) -> Vec<ElementValue> {
         match self {
-            RuntimeValue::Scalar(value) => vec![value.clone(); repeat],
+            RuntimeValue::Element(value) => vec![value.clone(); repeat],
             RuntimeValue::List(list, _) => (0..repeat).flat_map(|_| list.iter().cloned()).collect(),
             RuntimeValue::Pool(pool, _) => {
                 let outcomes = sum_pool(pool, &self.outcome_type())
@@ -397,42 +427,42 @@ impl RuntimeValue {
 
     pub(crate) fn map_numeric_outcomes(&self, f: impl Fn(i32) -> i32 + Copy) -> Self {
         match self {
-            RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => f(0).into(),
-            RuntimeValue::Scalar(ScalarValue::Int(value)) => f(*value).into(),
-            RuntimeValue::List(_, ScalarType::Uninhabited | ScalarType::AdditiveIdentity) => {
+            RuntimeValue::Element(ElementValue::AdditiveIdentity) => f(0).into(),
+            RuntimeValue::Element(ElementValue::Int(value)) => f(*value).into(),
+            RuntimeValue::List(_, ElementType::Uninhabited | ElementType::AdditiveIdentity) => {
                 f(0).into()
             }
             RuntimeValue::List(list, _) => f(list.iter().map(expect_int).sum()).into(),
             RuntimeValue::Pool(
                 pool,
-                outcome_type @ (ScalarType::Uninhabited | ScalarType::AdditiveIdentity),
+                outcome_type @ (ElementType::Uninhabited | ElementType::AdditiveIdentity),
             ) => RuntimeValue::Pool(
                 Rc::new(sum_pool(pool, outcome_type).map_outcomes(|outcome| {
-                    ScalarValue::Int(f(expect_int(
-                        &outcome.materialize_identity(&ScalarType::Int),
+                    ElementValue::Int(f(expect_int(
+                        &outcome.materialize_identity(&ElementType::Int),
                     )))
                 })),
-                ScalarType::Int,
+                ElementType::Int,
             ),
             RuntimeValue::Pool(pool, _) => RuntimeValue::Pool(
                 Rc::new(
                     (**pool)
                         .clone()
-                        .map_outcomes(|outcome| ScalarValue::Int(f(expect_int(&outcome)))),
+                        .map_outcomes(|outcome| ElementValue::Int(f(expect_int(&outcome)))),
                 ),
-                ScalarType::Int,
+                ElementType::Int,
             ),
-            RuntimeValue::Scalar(ScalarValue::Enum { .. } | ScalarValue::Tuple(_)) => {
+            RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
                 unreachable!("non-numeric values are rejected before numeric mapping")
             }
         }
     }
 
-    fn to_pool(&self) -> Pool<ScalarValue> {
+    fn to_pool(&self) -> Pool<ElementValue> {
         match self {
-            RuntimeValue::Scalar(value) => Pool::from_list(1, vec![value.clone()]),
+            RuntimeValue::Element(value) => Pool::from_list(1, vec![value.clone()]),
             RuntimeValue::List(list, outcome_type) if self.is_additive() => {
-                Pool::from_list(1, vec![sum_scalars(list, outcome_type)])
+                Pool::from_list(1, vec![sum_elements(list, outcome_type)])
             }
             RuntimeValue::List(list, _) => Pool::from_list(1, (**list).clone()),
             RuntimeValue::Pool(pool, _) => (**pool).clone(),
@@ -440,13 +470,13 @@ impl RuntimeValue {
     }
 }
 
-fn expect_int(value: &ScalarValue) -> i32 {
+fn expect_int(value: &ElementValue) -> i32 {
     value
         .as_int()
-        .expect("numeric operation received a non-numeric scalar")
+        .expect("numeric operation received a non-numeric element")
 }
 
-fn sum_scalars(values: &[ScalarValue], outcome_type: &ScalarType) -> ScalarValue {
+fn sum_elements(values: &[ElementValue], outcome_type: &ElementType) -> ElementValue {
     values.iter().fold(
         outcome_type
             .additive_identity()
@@ -455,7 +485,10 @@ fn sum_scalars(values: &[ScalarValue], outcome_type: &ScalarType) -> ScalarValue
     )
 }
 
-pub(crate) fn sum_pool(pool: &Pool<ScalarValue>, outcome_type: &ScalarType) -> Pool<ScalarValue> {
+pub(crate) fn sum_pool(
+    pool: &Pool<ElementValue>,
+    outcome_type: &ElementType,
+) -> Pool<ElementValue> {
     if pool.dimension() == 1 && !pool.ordered_outcomes().is_empty() {
         return pool.clone();
     }
@@ -463,20 +496,20 @@ pub(crate) fn sum_pool(pool: &Pool<ScalarValue>, outcome_type: &ScalarType) -> P
         debug_assert!(pool.dimension() <= 1, "non-additive pool has multiple dice");
         return pool.clone();
     };
-    pool.sum_by(identity, ScalarValue::add_scaled)
+    pool.sum_by(identity, ElementValue::add_scaled)
 }
 
 impl From<i32> for RuntimeValue {
     fn from(value: i32) -> Self {
-        RuntimeValue::Scalar(ScalarValue::Int(value))
+        RuntimeValue::Element(ElementValue::Int(value))
     }
 }
 
 impl From<Rc<Vec<i32>>> for RuntimeValue {
     fn from(value: Rc<Vec<i32>>) -> Self {
         RuntimeValue::List(
-            Rc::new(value.iter().copied().map(ScalarValue::Int).collect()),
-            ScalarType::Int,
+            Rc::new(value.iter().copied().map(ElementValue::Int).collect()),
+            ElementType::Int,
         )
     }
 }
@@ -484,8 +517,8 @@ impl From<Rc<Vec<i32>>> for RuntimeValue {
 impl From<Vec<i32>> for RuntimeValue {
     fn from(value: Vec<i32>) -> Self {
         RuntimeValue::List(
-            Rc::new(value.into_iter().map(ScalarValue::Int).collect()),
-            ScalarType::Int,
+            Rc::new(value.into_iter().map(ElementValue::Int).collect()),
+            ElementType::Int,
         )
     }
 }
@@ -493,8 +526,8 @@ impl From<Vec<i32>> for RuntimeValue {
 impl From<Pool> for RuntimeValue {
     fn from(value: Pool) -> Self {
         RuntimeValue::Pool(
-            Rc::new(value.map_outcomes(ScalarValue::Int)),
-            ScalarType::Int,
+            Rc::new(value.map_outcomes(ElementValue::Int)),
+            ElementType::Int,
         )
     }
 }
@@ -563,7 +596,7 @@ pub struct UserFunction {
 #[derive(Debug, Clone)]
 struct ResolvedArgType {
     shape: StaticType,
-    outcome: Option<ScalarType>,
+    outcome: Option<ElementType>,
 }
 
 impl Function {
@@ -575,7 +608,7 @@ impl Function {
                 .map(|shape| {
                     shape.map(|shape| ResolvedArgType {
                         shape,
-                        outcome: (!primitive.accepts_non_numeric).then_some(ScalarType::Int),
+                        outcome: (!primitive.accepts_non_numeric).then_some(ElementType::Int),
                     })
                 })
                 .collect(),
@@ -797,7 +830,7 @@ impl Evaluator {
             })?;
             self.global_env.borrow_mut().insert(
                 member.value.clone(),
-                RuntimeValue::Scalar(ScalarValue::Enum {
+                RuntimeValue::Element(ElementValue::Enum {
                     value,
                     ty: Rc::clone(&ty),
                 }),
@@ -864,7 +897,7 @@ impl Evaluator {
                 }
                 let value = self.evaluate(eval_context, expr)?;
                 let field_names = if let Some(labels) = labeled {
-                    let ScalarType::Tuple(fields) = value.outcome_type() else {
+                    let ElementType::Tuple(fields) = value.outcome_type() else {
                         return Err(RuntimeError::LabelsOnNonTupleOutput {
                             range: labels.range.into(),
                         });
@@ -922,8 +955,8 @@ impl Evaluator {
             } => {
                 let condition_value = self.evaluate(eval_context, condition)?;
                 let cond_value = match condition_value {
-                    RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
-                    RuntimeValue::Scalar(ScalarValue::Int(i)) => i,
+                    RuntimeValue::Element(ElementValue::AdditiveIdentity) => 0,
+                    RuntimeValue::Element(ElementValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::InvalidCondition {
                             range: condition.range.into(),
@@ -972,7 +1005,7 @@ impl Evaluator {
                     eval_context
                         .env
                         .borrow_mut()
-                        .insert(variable.value.clone(), RuntimeValue::Scalar(value.clone()));
+                        .insert(variable.value.clone(), RuntimeValue::Element(value.clone()));
                     for statement in body {
                         let res = self.execute_statement(&nested_context, statement)?;
                         if res.is_some() {
@@ -1026,7 +1059,7 @@ impl Evaluator {
                     .iter()
                     .map(|item| self.evaluate_list_literal_item(eval_context, item))
                     .collect::<Result<Vec<_>, _>>()?;
-                let mut outcome: Option<ScalarType> = None;
+                let mut outcome: Option<ElementType> = None;
                 for item in &items {
                     let item_type = item.flattened_outcome_type();
                     merge_outcome_type(
@@ -1036,14 +1069,14 @@ impl Evaluator {
                         "list literal contains mixed outcome types",
                     )?;
                 }
-                let outcome = outcome.unwrap_or(ScalarType::Uninhabited);
+                let outcome = outcome.unwrap_or(ElementType::Uninhabited);
                 let elems = items
                     .into_iter()
                     .flat_map(|item| item.to_list(1))
                     .map(|value| {
                         if matches!(
                             outcome,
-                            ScalarType::Uninhabited | ScalarType::AdditiveIdentity
+                            ElementType::Uninhabited | ElementType::AdditiveIdentity
                         ) {
                             value
                         } else {
@@ -1087,7 +1120,7 @@ impl Evaluator {
                     name: name.clone(),
                 }
             }),
-            Expression::Int(i) => Ok(RuntimeValue::Scalar(ScalarValue::Int(*i))),
+            Expression::Int(i) => Ok(RuntimeValue::Element(ElementValue::Int(*i))),
         }
     }
 
@@ -1101,8 +1134,8 @@ impl Evaluator {
     ) -> Result<RuntimeValue, RuntimeError> {
         let repeat_count = match &item.repeat {
             Some(repeat) => match self.evaluate(eval_context, repeat)? {
-                RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
-                RuntimeValue::Scalar(ScalarValue::Int(i)) => {
+                RuntimeValue::Element(ElementValue::AdditiveIdentity) => 0,
+                RuntimeValue::Element(ElementValue::Int(i)) => {
                     usize::try_from(i.max(0)).expect("converting a positive i32 into usize")
                 }
                 repeat_value => {
@@ -1120,8 +1153,8 @@ impl Evaluator {
             BareListItem::Range(start_expr, end_expr) => {
                 let start = self.evaluate(eval_context, start_expr)?;
                 let start = match start {
-                    RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
-                    RuntimeValue::Scalar(ScalarValue::Int(i)) => i,
+                    RuntimeValue::Element(ElementValue::AdditiveIdentity) => 0,
+                    RuntimeValue::Element(ElementValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: start_expr.range.into(),
@@ -1131,8 +1164,8 @@ impl Evaluator {
                 };
                 let end = self.evaluate(eval_context, end_expr)?;
                 let end = match end {
-                    RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 0,
-                    RuntimeValue::Scalar(ScalarValue::Int(i)) => i,
+                    RuntimeValue::Element(ElementValue::AdditiveIdentity) => 0,
+                    RuntimeValue::Element(ElementValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: end_expr.range.into(),
@@ -1141,8 +1174,8 @@ impl Evaluator {
                     }
                 };
                 Ok(RuntimeValue::List(
-                    Rc::new((start..=end).map(ScalarValue::Int).collect()),
-                    ScalarType::Int,
+                    Rc::new((start..=end).map(ElementValue::Int).collect()),
+                    ElementType::Int,
                 ))
             }
         }?;
@@ -1209,11 +1242,11 @@ impl Evaluator {
         let mut args = args.clone();
         let mut results = Vec::new();
         for (values, weight) in cross_product_iterator {
-            for ((i, is_scalar, outcome_type), value) in
+            for ((i, is_element, outcome_type), value) in
                 pool_iterator_info.iter().zip(values.iter())
             {
-                if *is_scalar {
-                    args[*i] = RuntimeValue::Scalar(value[0].clone());
+                if *is_element {
+                    args[*i] = RuntimeValue::Element(value[0].clone());
                 } else {
                     args[*i] = RuntimeValue::List(
                         Rc::new(reverse_if(!self.lowest_first, value)),
@@ -1228,9 +1261,9 @@ impl Evaluator {
         }
 
         // TODO this is similar to the logic in flat_map in Pool, find a way to use that?
-        let mut total_results = BTreeMap::<ScalarValue, Rational>::new();
+        let mut total_results = BTreeMap::<ElementValue, Rational>::new();
         let mut lcm = Natural::ONE;
-        let mut result_type: Option<ScalarType> = None;
+        let mut result_type: Option<ElementType> = None;
         for (result, weight) in results {
             if let RuntimeValue::Pool(ref p, _) = result {
                 // The empty die is ignored in this context, but the empty list is not.
@@ -1270,7 +1303,7 @@ impl Evaluator {
                     Rational::from_naturals(count * &weight, total_count.clone());
             }
         }
-        let result_type = result_type.unwrap_or(ScalarType::Int);
+        let result_type = result_type.unwrap_or(ElementType::Int);
         let result = RuntimeValue::Pool(
             Rc::new(
                 total_results
@@ -1281,7 +1314,7 @@ impl Evaluator {
                         debug_assert_eq!(denominator, Natural::ONE);
                         (outcome, numerator)
                     })
-                    .collect::<Pool<ScalarValue>>(),
+                    .collect::<Pool<ElementValue>>(),
             ),
             result_type.clone(),
         );
@@ -1335,11 +1368,11 @@ fn apply_unary_op(
         UnaryOp::D => make_d(None, operand, op.range),
         UnaryOp::Negate if !operand.is_additive() => Err(RuntimeError::EnumTypeError {
             range: op.range.into(),
-            message: format!("operator {} is not defined for this scalar type", op.value),
+            message: format!("operator {} is not defined for this element type", op.value),
         }),
         UnaryOp::Invert if !operand.is_numeric_compatible() => Err(RuntimeError::EnumTypeError {
             range: op.range.into(),
-            message: format!("operator {} is not defined for this scalar type", op.value),
+            message: format!("operator {} is not defined for this element type", op.value),
         }),
         UnaryOp::Negate => negate_value(operand).map_err(|message| RuntimeError::MathError {
             range: op.range.into(),
@@ -1347,12 +1380,12 @@ fn apply_unary_op(
         }),
         UnaryOp::Invert => Ok(operand.map_numeric_outcomes(|o| if o == 0 { 1 } else { 0 })),
         UnaryOp::Length => Ok(match operand {
-            RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => 1.into(),
-            RuntimeValue::Scalar(ScalarValue::Int(i)) => i32::try_from(i.abs().to_string().len())
+            RuntimeValue::Element(ElementValue::AdditiveIdentity) => 1.into(),
+            RuntimeValue::Element(ElementValue::Int(i)) => i32::try_from(i.abs().to_string().len())
                 .expect("vector length fits in i32")
                 .into(),
-            RuntimeValue::Scalar(ScalarValue::Enum { .. }) => 1.into(),
-            RuntimeValue::Scalar(ScalarValue::Tuple(fields)) => i32::try_from(fields.len())
+            RuntimeValue::Element(ElementValue::Enum { .. }) => 1.into(),
+            RuntimeValue::Element(ElementValue::Tuple(fields)) => i32::try_from(fields.len())
                 .expect("tuple length fits in i32")
                 .into(),
             RuntimeValue::List(list, _) => i32::try_from(list.len())
@@ -1367,9 +1400,9 @@ fn apply_unary_op(
 
 fn negate_value(value: &RuntimeValue) -> Result<RuntimeValue, String> {
     match value {
-        RuntimeValue::Scalar(value) => Ok(RuntimeValue::Scalar(value.checked_neg()?)),
-        RuntimeValue::List(values, outcome_type) => Ok(RuntimeValue::Scalar(
-            sum_scalars(values, outcome_type).checked_neg()?,
+        RuntimeValue::Element(value) => Ok(RuntimeValue::Element(value.checked_neg()?)),
+        RuntimeValue::List(values, outcome_type) => Ok(RuntimeValue::Element(
+            sum_elements(values, outcome_type).checked_neg()?,
         )),
         RuntimeValue::Pool(pool, outcome_type) => Ok(RuntimeValue::Pool(
             Rc::new(
@@ -1382,69 +1415,69 @@ fn negate_value(value: &RuntimeValue) -> Result<RuntimeValue, String> {
     }
 }
 
-fn math_result_type(op: BinaryOp, left: &ScalarType, right: &ScalarType) -> Option<ScalarType> {
+fn math_result_type(op: BinaryOp, left: &ElementType, right: &ElementType) -> Option<ElementType> {
     let left = left.summed_type();
     let right = right.summed_type();
     match op {
-        BinaryOp::Add | BinaryOp::Sub => left.merged_with(&right).filter(ScalarType::is_additive),
+        BinaryOp::Add | BinaryOp::Sub => left.merged_with(&right).filter(ElementType::is_additive),
         BinaryOp::Mul
-            if matches!(left, ScalarType::Tuple(_))
+            if matches!(left, ElementType::Tuple(_))
                 && left.is_additive()
-                && matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity) =>
+                && matches!(right, ElementType::Int | ElementType::AdditiveIdentity) =>
         {
             Some(left)
         }
         BinaryOp::Mul
-            if matches!(right, ScalarType::Tuple(_))
+            if matches!(right, ElementType::Tuple(_))
                 && right.is_additive()
-                && matches!(left, ScalarType::Int | ScalarType::AdditiveIdentity) =>
+                && matches!(left, ElementType::Int | ElementType::AdditiveIdentity) =>
         {
             Some(right)
         }
         BinaryOp::Mul
-            if matches!(left, ScalarType::Int | ScalarType::AdditiveIdentity)
-                && matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity) =>
+            if matches!(left, ElementType::Int | ElementType::AdditiveIdentity)
+                && matches!(right, ElementType::Int | ElementType::AdditiveIdentity) =>
         {
             left.merged_with(&right)
         }
         BinaryOp::Div
-            if matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity)
+            if matches!(right, ElementType::Int | ElementType::AdditiveIdentity)
                 && left.is_additive() =>
         {
             Some(left)
         }
         BinaryOp::Pow | BinaryOp::Or | BinaryOp::And
-            if matches!(left, ScalarType::Int | ScalarType::AdditiveIdentity)
-                && matches!(right, ScalarType::Int | ScalarType::AdditiveIdentity) =>
+            if matches!(left, ElementType::Int | ElementType::AdditiveIdentity)
+                && matches!(right, ElementType::Int | ElementType::AdditiveIdentity) =>
         {
-            Some(ScalarType::Int)
+            Some(ElementType::Int)
         }
         _ => None,
     }
 }
 
-fn apply_scalar_math(
+fn apply_element_math(
     op: BinaryOp,
-    left: &ScalarValue,
-    right: &ScalarValue,
-) -> Result<ScalarValue, String> {
+    left: &ElementValue,
+    right: &ElementValue,
+) -> Result<ElementValue, String> {
     match op {
         BinaryOp::Pow => {
-            let left = left.materialize_identity(&ScalarType::Int);
-            let right = right.materialize_identity(&ScalarType::Int);
-            let (ScalarValue::Int(left), ScalarValue::Int(right)) = (left, right) else {
+            let left = left.materialize_identity(&ElementType::Int);
+            let right = right.materialize_identity(&ElementType::Int);
+            let (ElementValue::Int(left), ElementValue::Int(right)) = (left, right) else {
                 unreachable!("power operands were type checked")
             };
             if right < 0 {
                 Err(format!("Cannot raise {} to negative power {}", left, right))
             } else {
                 left.checked_pow(right.unsigned_abs())
-                    .map(ScalarValue::Int)
+                    .map(ElementValue::Int)
                     .ok_or_else(|| format!("Power overflow: {} ^ {}", left, right))
             }
         }
         BinaryOp::Add => match (left, right) {
-            (ScalarValue::AdditiveIdentity, other) | (other, ScalarValue::AdditiveIdentity) => {
+            (ElementValue::AdditiveIdentity, other) | (other, ElementValue::AdditiveIdentity) => {
                 Ok(other.clone())
             }
             _ => left.try_zip_ints(right, &|left, right| {
@@ -1453,56 +1486,56 @@ fn apply_scalar_math(
             }),
         },
         BinaryOp::Sub => match (left, right) {
-            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity) => {
-                Ok(ScalarValue::AdditiveIdentity)
+            (ElementValue::AdditiveIdentity, ElementValue::AdditiveIdentity) => {
+                Ok(ElementValue::AdditiveIdentity)
             }
-            (other, ScalarValue::AdditiveIdentity) => Ok(other.clone()),
-            (ScalarValue::AdditiveIdentity, other) => other.checked_neg(),
+            (other, ElementValue::AdditiveIdentity) => Ok(other.clone()),
+            (ElementValue::AdditiveIdentity, other) => other.checked_neg(),
             _ => left.try_zip_ints(right, &|left, right| {
                 left.checked_sub(right)
                     .ok_or_else(|| format!("Subtraction overflow: {} - {}", left, right))
             }),
         },
         BinaryOp::Mul => match (left, right) {
-            (ScalarValue::AdditiveIdentity, ScalarValue::AdditiveIdentity)
-            | (ScalarValue::AdditiveIdentity, ScalarValue::Int(_))
-            | (ScalarValue::Int(_), ScalarValue::AdditiveIdentity) => {
-                Ok(ScalarValue::AdditiveIdentity)
+            (ElementValue::AdditiveIdentity, ElementValue::AdditiveIdentity)
+            | (ElementValue::AdditiveIdentity, ElementValue::Int(_))
+            | (ElementValue::Int(_), ElementValue::AdditiveIdentity) => {
+                Ok(ElementValue::AdditiveIdentity)
             }
-            (ScalarValue::AdditiveIdentity, ScalarValue::Tuple(_)) => Ok(right
-                .scalar_type()
+            (ElementValue::AdditiveIdentity, ElementValue::Tuple(_)) => Ok(right
+                .element_type()
                 .additive_identity()
                 .expect("additive tuple")),
-            (ScalarValue::Tuple(_), ScalarValue::AdditiveIdentity) => Ok(left
-                .scalar_type()
+            (ElementValue::Tuple(_), ElementValue::AdditiveIdentity) => Ok(left
+                .element_type()
                 .additive_identity()
                 .expect("additive tuple")),
-            (ScalarValue::Int(left), ScalarValue::Int(right)) => left
+            (ElementValue::Int(left), ElementValue::Int(right)) => left
                 .checked_mul(*right)
-                .map(ScalarValue::Int)
+                .map(ElementValue::Int)
                 .ok_or_else(|| format!("Multiplication overflow: {} * {}", left, right)),
-            (ScalarValue::Tuple(_), ScalarValue::Int(scalar)) => left.try_map_ints(&|value| {
+            (ElementValue::Tuple(_), ElementValue::Int(element)) => left.try_map_ints(&|value| {
                 value
-                    .checked_mul(*scalar)
-                    .ok_or_else(|| format!("Multiplication overflow: {} * {}", value, scalar))
+                    .checked_mul(*element)
+                    .ok_or_else(|| format!("Multiplication overflow: {} * {}", value, element))
             }),
-            (ScalarValue::Int(scalar), ScalarValue::Tuple(_)) => right.try_map_ints(&|value| {
-                scalar
+            (ElementValue::Int(element), ElementValue::Tuple(_)) => right.try_map_ints(&|value| {
+                element
                     .checked_mul(value)
-                    .ok_or_else(|| format!("Multiplication overflow: {} * {}", scalar, value))
+                    .ok_or_else(|| format!("Multiplication overflow: {} * {}", element, value))
             }),
             _ => unreachable!("multiplication operands were type checked"),
         },
         BinaryOp::Div => {
-            let divisor = right.materialize_identity(&ScalarType::Int);
-            let ScalarValue::Int(divisor) = divisor else {
+            let divisor = right.materialize_identity(&ElementType::Int);
+            let ElementValue::Int(divisor) = divisor else {
                 unreachable!("division divisor was type checked")
             };
             if divisor == 0 {
                 return Err(format!("Cannot divide {} by zero", left));
             }
-            if matches!(left, ScalarValue::AdditiveIdentity) {
-                return Ok(ScalarValue::AdditiveIdentity);
+            if matches!(left, ElementValue::AdditiveIdentity) {
+                return Ok(ElementValue::AdditiveIdentity);
             }
             left.try_map_ints(&|value| {
                 value
@@ -1511,9 +1544,9 @@ fn apply_scalar_math(
             })
         }
         BinaryOp::Or | BinaryOp::And => {
-            let left = left.materialize_identity(&ScalarType::Int);
-            let right = right.materialize_identity(&ScalarType::Int);
-            let (ScalarValue::Int(left), ScalarValue::Int(right)) = (left, right) else {
+            let left = left.materialize_identity(&ElementType::Int);
+            let right = right.materialize_identity(&ElementType::Int);
+            let (ElementValue::Int(left), ElementValue::Int(right)) = (left, right) else {
                 unreachable!("logical operands were type checked")
             };
             let result = match op {
@@ -1521,9 +1554,9 @@ fn apply_scalar_math(
                 BinaryOp::And => left != 0 && right != 0,
                 _ => unreachable!(),
             };
-            Ok(ScalarValue::Int(i32::from(result)))
+            Ok(ElementValue::Int(i32::from(result)))
         }
-        _ => unreachable!("non-mathematical operator passed to scalar math"),
+        _ => unreachable!("non-mathematical operator passed to element math"),
     }
 }
 
@@ -1536,14 +1569,14 @@ fn apply_math_op(
         .ok_or_else(|| RuntimeError::EnumTypeError {
             range: op.range.into(),
             message: format!(
-                "operator {} is not defined for these scalar types",
+                "operator {} is not defined for these element types",
                 op.value
             ),
         })?;
     lift_math_binary_op(
         left,
         right,
-        |left, right| apply_scalar_math(op.value, left, right),
+        |left, right| apply_element_math(op.value, left, right),
         result_type,
     )
     .map_err(|message| RuntimeError::MathError {
@@ -1567,7 +1600,7 @@ fn apply_binary_op(
         return Err(RuntimeError::EnumTypeError {
             range: op.range.into(),
             message: format!(
-                "operator {} is not defined for these scalar types",
+                "operator {} is not defined for these element types",
                 op.value
             ),
         });
@@ -1589,8 +1622,8 @@ fn apply_binary_op(
                 });
             }
             let left = match left {
-                RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => Rc::new(vec![0]),
-                RuntimeValue::Scalar(ScalarValue::Int(i)) => Rc::new(vec![*i]),
+                RuntimeValue::Element(ElementValue::AdditiveIdentity) => Rc::new(vec![0]),
+                RuntimeValue::Element(ElementValue::Int(i)) => Rc::new(vec![*i]),
                 RuntimeValue::List(lst, _) => {
                     Rc::new(lst.iter().map(expect_int).collect::<Vec<_>>())
                 }
@@ -1603,41 +1636,41 @@ fn apply_binary_op(
                         found: left.runtime_type(),
                     })
                 }
-                RuntimeValue::Scalar(ScalarValue::Enum { .. } | ScalarValue::Tuple(_)) => {
+                RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
                     unreachable!()
                 }
             };
             match right {
-                RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => {
-                    Ok(RuntimeValue::Scalar(select_positions(
+                RuntimeValue::Element(ElementValue::AdditiveIdentity) => {
+                    Ok(RuntimeValue::Element(select_positions(
                         &left,
-                        &[ScalarValue::Int(0)],
-                        &ScalarType::Int,
+                        &[ElementValue::Int(0)],
+                        &ElementType::Int,
                         lowest_first,
                     )))
                 }
-                RuntimeValue::Scalar(ScalarValue::Int(i)) => {
+                RuntimeValue::Element(ElementValue::Int(i)) => {
                     let digits = i
                         .abs()
                         .to_string()
                         .chars()
                         // Unwrap here is ok as all chars for a *positive* integer are valid digits.
                         .map(|c| {
-                            ScalarValue::Int(
+                            ElementValue::Int(
                                 i32::try_from(c.to_digit(10).unwrap()).expect("digit fits in i32")
                                     * i.signum(),
                             )
                         })
                         .collect::<Vec<_>>();
-                    Ok(RuntimeValue::Scalar(select_positions(
+                    Ok(RuntimeValue::Element(select_positions(
                         &left,
                         &digits,
-                        &ScalarType::Int,
+                        &ElementType::Int,
                         lowest_first,
                     )))
                 }
                 RuntimeValue::List(lst, outcome_type) if right.is_additive() => Ok(
-                    RuntimeValue::Scalar(select_positions(&left, lst, outcome_type, false)),
+                    RuntimeValue::Element(select_positions(&left, lst, outcome_type, false)),
                 ),
                 RuntimeValue::Pool(p, outcome_type) if right.is_additive() => {
                     Ok(RuntimeValue::Pool(
@@ -1656,11 +1689,11 @@ fn apply_binary_op(
                             message: "position is out of range".to_string(),
                         });
                     }
-                    Ok(RuntimeValue::Scalar(
+                    Ok(RuntimeValue::Element(
                         lst[usize::try_from(index - 1).unwrap()].clone(),
                     ))
                 }
-                RuntimeValue::Scalar(ScalarValue::Enum { .. } | ScalarValue::Tuple(_))
+                RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_))
                 | RuntimeValue::Pool(_, _) => Err(RuntimeError::EnumTypeError {
                     range: op.range.into(),
                     message: "positional selection is not defined for this value".to_string(),
@@ -1705,10 +1738,10 @@ fn apply_binary_op(
 
 fn select_positions(
     indices: &[i32],
-    values: &[ScalarValue],
-    outcome_type: &ScalarType,
+    values: &[ElementValue],
+    outcome_type: &ElementType,
     lowest_first: bool,
-) -> ScalarValue {
+) -> ElementValue {
     indices.iter().fold(
         outcome_type
             .additive_identity()
@@ -1733,10 +1766,10 @@ fn select_positions(
 
 fn select_in_dice(
     indices: &[i32],
-    pool: &Pool<ScalarValue>,
-    outcome_type: &ScalarType,
+    pool: &Pool<ElementValue>,
+    outcome_type: &ElementType,
     lowest_first: bool,
-) -> Pool<ScalarValue> {
+) -> Pool<ElementValue> {
     let dimension = usize::try_from(pool.dimension()).expect("usize is at least 32 bits");
     let mut keep_list = vec![false; dimension];
     for &index in indices {
@@ -1756,20 +1789,20 @@ fn select_in_dice(
         outcome_type
             .additive_identity()
             .expect("position selection requires additive outcomes"),
-        ScalarValue::add_scaled,
+        ElementValue::add_scaled,
     )
 }
 
 fn lift_math_binary_op(
     left: &RuntimeValue,
     right: &RuntimeValue,
-    f: impl Fn(&ScalarValue, &ScalarValue) -> Result<ScalarValue, String>,
-    result_type: ScalarType,
+    f: impl Fn(&ElementValue, &ElementValue) -> Result<ElementValue, String>,
+    result_type: ElementType,
 ) -> Result<RuntimeValue, String> {
     let sum_operand = |operand: &RuntimeValue| match operand {
-        RuntimeValue::Scalar(value) => RuntimeValue::Scalar(value.clone()),
+        RuntimeValue::Element(value) => RuntimeValue::Element(value.clone()),
         RuntimeValue::List(values, outcome_type) => {
-            RuntimeValue::Scalar(sum_scalars(values, outcome_type))
+            RuntimeValue::Element(sum_elements(values, outcome_type))
         }
         RuntimeValue::Pool(pool, outcome_type) => {
             RuntimeValue::Pool(Rc::new(sum_pool(pool, outcome_type)), outcome_type.clone())
@@ -1778,8 +1811,8 @@ fn lift_math_binary_op(
     let left = sum_operand(left);
     let right = sum_operand(right);
     let (left_pool, right_pool) = match (&left, &right) {
-        (RuntimeValue::Scalar(a), RuntimeValue::Scalar(b)) => {
-            return Ok(RuntimeValue::Scalar(f(a, b)?));
+        (RuntimeValue::Element(a), RuntimeValue::Element(b)) => {
+            return Ok(RuntimeValue::Element(f(a, b)?));
         }
         _ => (left.to_pool(), right.to_pool()),
     };
@@ -1817,44 +1850,45 @@ fn comp_binary_op(
     int_comp: impl Fn(i32, i32) -> i32,
     list_comp: impl Fn(&[i32], &[i32]) -> i32,
 ) -> RuntimeValue {
-    let left = left.materialize_identities(&ScalarType::Int);
-    let right = right.materialize_identities(&ScalarType::Int);
+    let left = left.materialize_identities(&ElementType::Int);
+    let right = right.materialize_identities(&ElementType::Int);
     match (&left, &right) {
-        (RuntimeValue::Scalar(ScalarValue::Int(a)), RuntimeValue::Scalar(ScalarValue::Int(b))) => {
-            int_comp(*a, *b).into()
-        }
+        (
+            RuntimeValue::Element(ElementValue::Int(a)),
+            RuntimeValue::Element(ElementValue::Int(b)),
+        ) => int_comp(*a, *b).into(),
         (RuntimeValue::List(a, _), RuntimeValue::List(b, _)) => list_comp(
             &a.iter().map(expect_int).collect::<Vec<_>>(),
             &b.iter().map(expect_int).collect::<Vec<_>>(),
         )
         .into(),
-        (RuntimeValue::List(a, _), RuntimeValue::Scalar(ScalarValue::Int(b))) => a
+        (RuntimeValue::List(a, _), RuntimeValue::Element(ElementValue::Int(b))) => a
             .iter()
             .map(|a| int_comp(expect_int(a), *b))
             .sum::<i32>()
             .into(),
-        (RuntimeValue::Scalar(ScalarValue::Int(a)), RuntimeValue::List(b, _)) => b
+        (RuntimeValue::Element(ElementValue::Int(a)), RuntimeValue::List(b, _)) => b
             .iter()
             .map(|b| int_comp(*a, expect_int(b)))
             .sum::<i32>()
             .into(),
         _ => {
             // At least one is a pool
-            let left_pool = sum_pool(&left.to_pool(), &ScalarType::Int);
-            let right_pool = sum_pool(&right.to_pool(), &ScalarType::Int);
+            let left_pool = sum_pool(&left.to_pool(), &ElementType::Int);
+            let right_pool = sum_pool(&right.to_pool(), &ElementType::Int);
             RuntimeValue::Pool(
                 Rc::new(left_pool.flat_map(|left_outcome| {
                     right_pool
                         .clone()
                         .map_outcomes(|right_outcome| {
-                            ScalarValue::Int(int_comp(
+                            ElementValue::Int(int_comp(
                                 expect_int(&left_outcome[0]),
                                 expect_int(&right_outcome),
                             ))
                         })
                         .into()
                 })),
-                ScalarType::Int,
+                ElementType::Int,
             )
         }
     }
@@ -1867,14 +1901,14 @@ fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) ->
         .summed_type();
     let left = left.materialize_identities(&outcome_type);
     let right = right.materialize_identities(&outcome_type);
-    let compare = |a: &ScalarValue, b: &ScalarValue| i32::from((a == b) == equal);
+    let compare = |a: &ElementValue, b: &ElementValue| i32::from((a == b) == equal);
     match (&left, &right) {
-        (RuntimeValue::Scalar(a), RuntimeValue::Scalar(b)) => compare(a, b).into(),
+        (RuntimeValue::Element(a), RuntimeValue::Element(b)) => compare(a, b).into(),
         (RuntimeValue::List(a, _), RuntimeValue::List(b, _)) => i32::from((a == b) == equal).into(),
-        (RuntimeValue::List(a, _), RuntimeValue::Scalar(b)) => {
+        (RuntimeValue::List(a, _), RuntimeValue::Element(b)) => {
             a.iter().map(|a| compare(a, b)).sum::<i32>().into()
         }
-        (RuntimeValue::Scalar(a), RuntimeValue::List(b, _)) => {
+        (RuntimeValue::Element(a), RuntimeValue::List(b, _)) => {
             b.iter().map(|b| compare(a, b)).sum::<i32>().into()
         }
         _ => {
@@ -1885,11 +1919,11 @@ fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) ->
                     right_pool
                         .clone()
                         .map_outcomes(|right_outcome| {
-                            ScalarValue::Int(compare(&left_outcome[0], &right_outcome))
+                            ElementValue::Int(compare(&left_outcome[0], &right_outcome))
                         })
                         .into()
                 })),
-                ScalarType::Int,
+                ElementType::Int,
             )
         }
     }
@@ -1901,21 +1935,21 @@ enum DiceCount {
 }
 
 enum DRightSide {
-    List(Vec<ScalarValue>),
-    Pool(Rc<Pool<ScalarValue>>),
+    List(Vec<ElementValue>),
+    Pool(Rc<Pool<ElementValue>>),
 }
 
 fn normalize_dice_count(arg: &RuntimeValue) -> DiceCount {
     match arg {
-        RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => DiceCount::Int(0),
-        RuntimeValue::Scalar(ScalarValue::Int(i)) => DiceCount::Int(*i),
+        RuntimeValue::Element(ElementValue::AdditiveIdentity) => DiceCount::Int(0),
+        RuntimeValue::Element(ElementValue::Int(i)) => DiceCount::Int(*i),
         RuntimeValue::List(list, _) => DiceCount::Int(list.iter().map(expect_int).sum()),
         RuntimeValue::Pool(pool, _) => DiceCount::Pool(Rc::new(
             (**pool)
                 .clone()
                 .map_outcomes(|outcome| expect_int(&outcome)),
         )),
-        RuntimeValue::Scalar(ScalarValue::Enum { .. } | ScalarValue::Tuple(_)) => {
+        RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
             unreachable!("non-numeric values are rejected before numeric operations")
         }
     }
@@ -1936,24 +1970,24 @@ fn make_d(
     let repeat = left.map_or(DiceCount::Int(1), normalize_dice_count);
     let outcome_type = right.outcome_type();
     let right = match right {
-        RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => {
-            DRightSide::List(vec![ScalarValue::Int(0)])
+        RuntimeValue::Element(ElementValue::AdditiveIdentity) => {
+            DRightSide::List(vec![ElementValue::Int(0)])
         }
-        RuntimeValue::Scalar(ScalarValue::Int(sides)) => {
+        RuntimeValue::Element(ElementValue::Int(sides)) => {
             if *sides > 0 {
-                DRightSide::List((1..=*sides).map(ScalarValue::Int).collect())
+                DRightSide::List((1..=*sides).map(ElementValue::Int).collect())
             } else if *sides == 0 {
-                DRightSide::List(vec![ScalarValue::Int(0)])
+                DRightSide::List(vec![ElementValue::Int(0)])
             } else {
-                DRightSide::List((*sides..=-1).map(ScalarValue::Int).collect())
+                DRightSide::List((*sides..=-1).map(ElementValue::Int).collect())
             }
         }
         RuntimeValue::List(list, _) => DRightSide::List((**list).clone()),
         RuntimeValue::Pool(d, _) => DRightSide::Pool(Rc::clone(d)),
-        RuntimeValue::Scalar(ScalarValue::Enum { .. } | ScalarValue::Tuple(_)) => {
+        RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
             return Err(RuntimeError::EnumTypeError {
                 range: range.into(),
-                message: "a non-numeric scalar cannot specify die sides; use a sequence"
+                message: "a non-numeric element cannot specify die sides; use a sequence"
                     .to_string(),
             })
         }
@@ -2038,7 +2072,7 @@ fn make_d(
     Ok(result)
 }
 
-fn make_pool(n: i32, sides: Vec<ScalarValue>) -> Result<Pool<ScalarValue>, String> {
+fn make_pool(n: i32, sides: Vec<ElementValue>) -> Result<Pool<ElementValue>, String> {
     let sides = if n < 0 {
         sides
             .into_iter()
@@ -2056,8 +2090,8 @@ fn make_pool(n: i32, sides: Vec<ScalarValue>) -> Result<Pool<ScalarValue>, Strin
 }
 
 fn merge_outcome_type(
-    accumulated: &mut Option<ScalarType>,
-    next: ScalarType,
+    accumulated: &mut Option<ElementType>,
+    next: ElementType,
     range: ast::Range,
     error_message: &'static str,
 ) -> Result<(), RuntimeError> {
@@ -2098,13 +2132,13 @@ fn coerce_arg(
         actual_outcome = required.clone();
     }
     match (arg, expected.shape) {
-        (value @ RuntimeValue::Scalar(_), StaticType::Int) => Ok(value),
-        (RuntimeValue::Scalar(value), StaticType::List) => {
-            let outcome_type = value.scalar_type();
+        (value @ RuntimeValue::Element(_), StaticType::Int) => Ok(value),
+        (RuntimeValue::Element(value), StaticType::List) => {
+            let outcome_type = value.element_type();
             Ok(RuntimeValue::List(Rc::new(vec![value]), outcome_type))
         }
-        (RuntimeValue::Scalar(value), StaticType::Pool) => {
-            let outcome_type = value.scalar_type();
+        (RuntimeValue::Element(value), StaticType::Pool) => {
+            let outcome_type = value.element_type();
             Ok(RuntimeValue::Pool(
                 Rc::new(Pool::from_list(1, vec![value])),
                 outcome_type,
@@ -2113,11 +2147,11 @@ fn coerce_arg(
         (RuntimeValue::List(list, outcome_type), StaticType::Int)
             if actual_outcome.is_additive() =>
         {
-            Ok(RuntimeValue::Scalar(sum_scalars(&list, &outcome_type)))
+            Ok(RuntimeValue::Element(sum_elements(&list, &outcome_type)))
         }
         (RuntimeValue::List(_, _), StaticType::Int) => Err(RuntimeError::EnumTypeError {
             range: range.into(),
-            message: "a non-additive sequence cannot be summed into a scalar".to_string(),
+            message: "a non-additive sequence cannot be summed into a element".to_string(),
         }),
         (value @ RuntimeValue::List(_, _), StaticType::List) => Ok(value),
         (RuntimeValue::List(list, outcome_type), StaticType::Pool) => Ok(RuntimeValue::Pool(
@@ -2418,7 +2452,7 @@ mod tests {
 
         let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
         match result {
-            Ok(RuntimeValue::Scalar(ScalarValue::Int(5))) => {}
+            Ok(RuntimeValue::Element(ElementValue::Int(5))) => {}
             _ => panic!("Expected successful division result of 5"),
         }
 
@@ -2432,7 +2466,7 @@ mod tests {
 
         let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
         match result {
-            Ok(RuntimeValue::Scalar(ScalarValue::Int(8))) => {}
+            Ok(RuntimeValue::Element(ElementValue::Int(8))) => {}
             _ => panic!("Expected successful exponentiation result of 8"),
         }
     }

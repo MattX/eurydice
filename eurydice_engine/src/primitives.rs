@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 use crate::{
     ast::{self, StaticType},
     dice::{explode, reroll, Pool},
-    eval::{Function, RuntimeError, RuntimeValue, ScalarValue},
+    eval::{ElementValue, Function, RuntimeError, RuntimeValue},
 };
 
 type PrimitiveExecutor = fn(
@@ -50,9 +50,9 @@ fn contains_execute(
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     let error = || crate::eval::RuntimeError::EnumTypeError {
         range: function_range.into(),
-        message: "[contains] requires a sequence and scalar with the same outcome type".to_string(),
+        message: "[contains] requires a sequence and element with the same outcome type".to_string(),
     };
-    let (RuntimeValue::List(_, _), RuntimeValue::Scalar(_)) = (&args[0], &args[1]) else {
+    let (RuntimeValue::List(_, _), RuntimeValue::Element(_)) = (&args[0], &args[1]) else {
         return Err(error());
     };
     let outcome_type = args[0]
@@ -61,7 +61,8 @@ fn contains_execute(
         .summed_type();
     let haystack = args[0].materialize_identities(&outcome_type);
     let needle = args[1].materialize_identities(&outcome_type);
-    let (RuntimeValue::List(haystack, _), RuntimeValue::Scalar(needle)) = (haystack, needle) else {
+    let (RuntimeValue::List(haystack, _), RuntimeValue::Element(needle)) = (haystack, needle)
+    else {
         unreachable!("contains argument shapes were checked")
     };
     let result = haystack.iter().any(|value| value == &needle);
@@ -188,7 +189,7 @@ fn highest_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Scalar(ScalarValue::Int(i)), RuntimeValue::Pool(d, _)) =
+    if let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
         (&args[0], &args[1])
     {
         let keep_list = keep_list_for_primitive(
@@ -211,7 +212,7 @@ fn lowest_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Scalar(ScalarValue::Int(i)), RuntimeValue::Pool(d, _)) =
+    if let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
         (&args[0], &args[1])
     {
         let keep_list = keep_list_for_primitive(
@@ -234,7 +235,7 @@ fn middle_execute(
     _lowest_first: bool,
     function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Scalar(ScalarValue::Int(i)), RuntimeValue::Pool(d, _)) =
+    if let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
         (&args[0], &args[1])
     {
         let keep_list = keep_list_for_primitive(
@@ -257,8 +258,10 @@ fn highest_of_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Scalar(ScalarValue::Int(i)), RuntimeValue::Scalar(ScalarValue::Int(j))) =
-        (&args[0], &args[1])
+    if let (
+        RuntimeValue::Element(ElementValue::Int(i)),
+        RuntimeValue::Element(ElementValue::Int(j)),
+    ) = (&args[0], &args[1])
     {
         Ok((*(i.max(j))).into())
     } else {
@@ -273,8 +276,10 @@ fn lowest_of_execute(
     _lowest_first: bool,
     _function_range: ast::Range,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Scalar(ScalarValue::Int(i)), RuntimeValue::Scalar(ScalarValue::Int(j))) =
-        (&args[0], &args[1])
+    if let (
+        RuntimeValue::Element(ElementValue::Int(i)),
+        RuntimeValue::Element(ElementValue::Int(j)),
+    ) = (&args[0], &args[1])
     {
         Ok((*(i.min(j))).into())
     } else {
@@ -311,7 +316,7 @@ fn choose_execute(
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let (
         RuntimeValue::Pool(first, first_type),
-        RuntimeValue::Scalar(ScalarValue::Int(condition)),
+        RuntimeValue::Element(ElementValue::Int(condition)),
         RuntimeValue::Pool(second, second_type),
     ) = (&args[0], &args[1], &args[2])
     {
@@ -375,20 +380,20 @@ fn tuple_execute(
     let fields = args
         .iter()
         .map(|arg| match arg {
-            RuntimeValue::Scalar(ScalarValue::AdditiveIdentity) => Ok(ScalarValue::Int(0)),
-            RuntimeValue::Scalar(value @ (ScalarValue::Int(_) | ScalarValue::Enum { .. })) => {
+            RuntimeValue::Element(ElementValue::AdditiveIdentity) => Ok(ElementValue::Int(0)),
+            RuntimeValue::Element(value @ (ElementValue::Int(_) | ElementValue::Enum { .. })) => {
                 Ok(value.clone())
             }
-            RuntimeValue::Scalar(ScalarValue::Tuple(_)) => Err(RuntimeError::EnumTypeError {
+            RuntimeValue::Element(ElementValue::Tuple(_)) => Err(RuntimeError::EnumTypeError {
                 range: function_range.into(),
                 message: "nested tuples are not supported".to_string(),
             }),
             RuntimeValue::List(_, _) | RuntimeValue::Pool(_, _) => {
-                unreachable!("tuple arguments are coerced to scalars")
+                unreachable!("tuple arguments are coerced to elements")
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(RuntimeValue::Scalar(ScalarValue::Tuple(fields.into())))
+    Ok(RuntimeValue::Element(ElementValue::Tuple(fields.into())))
 }
 
 macro_rules! tuple_executor {
@@ -417,8 +422,8 @@ fn element_execute(
     function_range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
     let (
-        RuntimeValue::Scalar(ScalarValue::Int(index)),
-        RuntimeValue::Scalar(ScalarValue::Tuple(fields)),
+        RuntimeValue::Element(ElementValue::Int(index)),
+        RuntimeValue::Element(ElementValue::Tuple(fields)),
     ) = (&args[0], &args[1])
     else {
         return Err(RuntimeError::EnumTypeError {
@@ -435,10 +440,10 @@ fn element_execute(
             message: format!("tuple index must be between 1 and {}", fields.len()),
         });
     };
-    Ok(RuntimeValue::Scalar(value.clone()))
+    Ok(RuntimeValue::Element(value.clone()))
 }
 
-fn numeric_pool(pool: &Pool<ScalarValue>) -> Pool<i32> {
+fn numeric_pool(pool: &Pool<ElementValue>) -> Pool<i32> {
     pool.clone().map_outcomes(|outcome| {
         outcome
             .as_int()
@@ -446,7 +451,7 @@ fn numeric_pool(pool: &Pool<ScalarValue>) -> Pool<i32> {
     })
 }
 
-fn numeric_list(list: &[ScalarValue]) -> Vec<i32> {
+fn numeric_list(list: &[ElementValue]) -> Vec<i32> {
     list.iter()
         .map(|outcome| {
             outcome
@@ -711,7 +716,7 @@ mod tests {
         value.into()
     }
 
-    fn to_nat_list(outcomes: &[(ScalarValue, Natural)]) -> Vec<(i32, i32)> {
+    fn to_nat_list(outcomes: &[(ElementValue, Natural)]) -> Vec<(i32, i32)> {
         outcomes
             .iter()
             .map(|(i, w)| (i.as_int().unwrap(), w.try_into().unwrap()))

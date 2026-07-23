@@ -67,28 +67,41 @@ Errors are fatal and terminate program execution.
 
 ## Data types
 
-There are three kinds of scalars in Eurydice:
+The type grammar for Eurydice is
 
-* `int`: a 32-bit signed integer
-* _enums_ are user-declared types which each contain a set of nominal, non-numeric values, which can be used to represent discrete outcomes, booleans, etc.
+```
+Scalar  = int | uninhabited | E
+          where E ranges over declared enums
+Element = Scalar | (Scalar, Scalar[, Scalar[, Scalar]])
+Type    = Element | list Element | pool Element | additive_identity
+```
+
+There are three primary kinds of values, called _element types_:
+
+* `int`: values of this type hold a 32-bit signed integer
+* _enums_: user-declared types which each contain a set of nominal, non-numeric values, which can be used to represent discrete outcomes, booleans, etc.
 * _tuples_ are fixed-size, ordered products of two to four `int` or enum values. Tuple types are structural: the type of a tuple is determined by the number and types of its fields.
 
 > [!IMPORTANT]
-> AnyDice does not support enums or tuples; all scalar values are numeric.
+> AnyDice does not support enums or tuples; `Scalar` and `Element` both collapse to `int`. AnyDice also does not require an `additive_identity` type, since all sums are `int`-valued.
+>
+> AnyDice does not restrict integers, or pool outcomes, to 32-bit values. Experimentation suggests that AnyDice outcomes are represented as double-precision floats (`output 9007199254740993` returns 9007199254740992).
 
-And two additional types built on scalar types:
+Two kinds of containers are built on these:
 
-* `list`: values of this type hold a list of scalars.
-* `pool`: values of this type hold a pool, which is composed of a mapping of outcomes (each of which is a scalar) to probabilities (whose representation is unspecified), together with an unsigned count of dice, which is called the _dimension_.
+* _lists_: values of this type hold a list of one particular element type.
+* _pools_: values of this type hold a pool of one element type `e`, which is composed of a mapping of outcomes (each of which is of type `e`) to probabilities (whose representation is unspecified), together with an unsigned count of dice, which is called the _dimension_.
 
-Scalars, lists, and pools have an _outcome type_: `int`, one particular enum, or a particular structural tuple type. Lists and pools are homogeneous and cannot mix values with different outcome types. For example, all tuples in one list must have the same arity and corresponding field types.
+Lists and pools are homogeneous and cannot mix values with different outcome types. For example, all tuples in one list must have the same arity and corresponding field types.
 
-A bare empty literal has an initially uninhabited outcome type: because it contains no values, it is compatible with any outcome type supplied by its context. This differs from an explicitly typed empty literal such as `{MISS:0}`, `{[tuple 1 2]:0}`, or `{1:0}`, which retains the type of its repeated expression. Summing an untyped empty sequence or pool produces a universal additive identity. That identity remains polymorphic through additive arithmetic until a concrete additive type is supplied; if it is still unconstrained when displayed or used by an operation requiring integers, it becomes the integer `0`.
+Finally, two additional types arise out of technical necessity during type inference:
+
+* `uninhabited`: A bare empty list literal has an initially uninhabited outcome type: because it contains no values, it is compatible with any outcome type supplied by its context. This differs from an explicitly typed empty literal such as `{MISS:0}`, `{[tuple 1 2]:0}`, or `{1:0}`, which retains the type of its repeated expression.
+* `additive_identity`: Summing an untyped empty sequence or pool produces a universal additive identity. That identity remains polymorphic through additive arithmetic until a concrete additive type is supplied; if it is still unconstrained when displayed or used by an operation requiring integers, it becomes the integer `0`.
 
 The maximum number of elements in a list, or of outcomes in a pool, is 2^31-1.
 
-> [!IMPORTANT]
-> AnyDice does not restrict integers, or pool outcomes, to 32-bit values. Experimentation suggests that AnyDice outcomes are represented as double-precision floats (`output 9007199254740993` returns 9007199254740992).
+There are no first-class functions.
 
 ### Enums
 
@@ -131,8 +144,6 @@ output [element 1 of JOINT]
 
 > [!IMPORTANT]
 > AnyDice does not support tuples or multi-valued distributions.
-
-There are no first-class functions.
 
 ### Pools
 

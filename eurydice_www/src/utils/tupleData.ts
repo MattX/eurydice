@@ -9,7 +9,7 @@ export type WireTupleFieldSchema =
   | "Int"
   | { Enum: { enum_name: string; labels: string[] } };
 
-export interface WireTupleScalar {
+export interface WireTupleElement {
   fields: WireTupleFieldSchema[];
   values: number[];
 }
@@ -36,8 +36,8 @@ export function normalizeFieldSchema(
   };
 }
 
-/** A tuple scalar becomes a distribution with a single, certain outcome. */
-export function normalizeTupleScalar(wire: WireTupleScalar): TupleDistribution {
+/** A tuple element becomes a distribution with a single, certain outcome. */
+export function normalizeTupleElement(wire: WireTupleElement): TupleDistribution {
   return {
     fields: wire.fields.map(normalizeFieldSchema),
     probabilities: [[wire.values, 1]],

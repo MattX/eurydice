@@ -1,5 +1,5 @@
 use eurydice_engine::{
-    eval::{EvaluatedOutput, Evaluator, RuntimeValue, ScalarValue},
+    eval::{ElementValue, EvaluatedOutput, Evaluator, RuntimeValue},
     grammar,
     output::{Distribution, OutputValue, TupleFieldSchema},
 };
@@ -38,7 +38,7 @@ fn attack_function_returns_enum_distribution() {
     let RuntimeValue::Pool(pool, _) = &outputs[0].value else {
         panic!("expected enum pool, got {:?}", outputs[0].value);
     };
-    let ScalarValue::Enum { ty: enum_type, .. } = &pool.ordered_outcomes()[0].0 else {
+    let ElementValue::Enum { ty: enum_type, .. } = &pool.ordered_outcomes()[0].0 else {
         panic!("expected enum outcome");
     };
     assert_eq!(enum_type.name, "ATTACK_RESULT");
@@ -68,7 +68,7 @@ fn untyped_empty_list_adopts_an_enum_outcome_type() {
     };
     assert!(matches!(
         values.as_slice(),
-        [ScalarValue::Enum { value: 0, .. }]
+        [ElementValue::Enum { value: 0, .. }]
     ));
 }
 
@@ -102,9 +102,9 @@ fn supports_enum_shape_constraints_and_safe_operations() {
         enum: RESULT { MISS, HIT }
         function: pool D:d { result: D }
         function: sequence S:s { result: [reverse S] }
-        function: generic scalar X:n { result: X }
+        function: generic element X:n { result: X }
         output [pool d{MISS, HIT}]
-        output [generic scalar d{MISS, HIT}]
+        output [generic element d{MISS, HIT}]
         output [[sequence {MISS, HIT}] contains MISS]
         output [count {HIT} in [sequence {MISS, HIT, HIT}]]
         output 1@{MISS, HIT}
@@ -117,7 +117,7 @@ fn supports_enum_shape_constraints_and_safe_operations() {
     assert_eq!(outputs[3].value, 2.into());
     assert!(matches!(
         outputs[4].value,
-        RuntimeValue::Scalar(ScalarValue::Enum { value: 0, .. })
+        RuntimeValue::Element(ElementValue::Enum { value: 0, .. })
     ));
     assert_eq!(outputs[5].value, 2.into());
 }
@@ -180,18 +180,18 @@ fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
 }
 
 #[test]
-fn enum_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
+fn enum_elements_and_lists_are_converted_to_distributions_in_the_engine() {
     let mut outputs = run(
-        "enum: RESULT { MISS, HIT } output HIT named \"scalar\" output {MISS, HIT, HIT} named \"list\"",
+        "enum: RESULT { MISS, HIT } output HIT named \"element\" output {MISS, HIT, HIT} named \"list\"",
     )
     .unwrap();
 
-    let OutputValue::Distribution(scalar) = OutputValue::from(outputs.remove(0).value) else {
-        panic!("expected scalar distribution");
+    let OutputValue::Distribution(element) = OutputValue::from(outputs.remove(0).value) else {
+        panic!("expected element distribution");
     };
-    assert_eq!(scalar.probabilities, [(1, 1.0)]);
-    assert_eq!(scalar.enum_name.as_deref(), Some("RESULT"));
-    assert_eq!(scalar.labels.unwrap(), ["MISS", "HIT"]);
+    assert_eq!(element.probabilities, [(1, 1.0)]);
+    assert_eq!(element.enum_name.as_deref(), Some("RESULT"));
+    assert_eq!(element.labels.unwrap(), ["MISS", "HIT"]);
 
     let OutputValue::Distribution(list) = OutputValue::from(outputs.remove(0).value) else {
         panic!("expected list distribution");

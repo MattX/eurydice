@@ -1,5 +1,5 @@
 use eurydice_engine::{
-    eval::{EvaluatedOutput, Evaluator, RuntimeValue, ScalarValue},
+    eval::{ElementValue, EvaluatedOutput, Evaluator, RuntimeValue},
     grammar,
     output::OutputValue,
 };
@@ -18,8 +18,8 @@ fn run(program: &str) -> Result<Vec<EvaluatedOutput>, String> {
     Ok(evaluator.take_outputs())
 }
 
-fn tuple_ints(value: &ScalarValue) -> Vec<i32> {
-    let ScalarValue::Tuple(fields) = value else {
+fn tuple_ints(value: &ElementValue) -> Vec<i32> {
+    let ElementValue::Tuple(fields) = value else {
         panic!("expected tuple, got {value:?}");
     };
     fields
@@ -58,15 +58,15 @@ fn constructs_and_projects_tuples() {
 
     assert!(matches!(
         outputs[0].value,
-        RuntimeValue::Scalar(ScalarValue::Tuple(_))
+        RuntimeValue::Element(ElementValue::Tuple(_))
     ));
     assert!(matches!(
         outputs[1].value,
-        RuntimeValue::Scalar(ScalarValue::Tuple(_))
+        RuntimeValue::Element(ElementValue::Tuple(_))
     ));
     assert!(matches!(
         outputs[2].value,
-        RuntimeValue::Scalar(ScalarValue::Tuple(_))
+        RuntimeValue::Element(ElementValue::Tuple(_))
     ));
     assert_eq!(outputs[3].value, 20.into());
     assert_eq!(outputs[4].value, 3.into());
@@ -118,7 +118,7 @@ fn risk_round_returns_joint_distribution() {
 }
 
 #[test]
-fn tuple_distribution_can_be_projected_through_scalar_parameter() {
+fn tuple_distribution_can_be_projected_through_element_parameter() {
     let outputs = run(&format!(
         r#"
         {RISK_PROGRAM}
@@ -158,13 +158,13 @@ fn tuples_support_enum_fields() {
         output [element 2 of T]
         "#)
     .unwrap();
-    let RuntimeValue::Scalar(ScalarValue::Tuple(fields)) = &outputs[0].value else {
+    let RuntimeValue::Element(ElementValue::Tuple(fields)) = &outputs[0].value else {
         panic!("expected tuple");
     };
-    assert!(matches!(fields[1], ScalarValue::Enum { value: 1, .. }));
+    assert!(matches!(fields[1], ElementValue::Enum { value: 1, .. }));
     assert!(matches!(
         outputs[1].value,
-        RuntimeValue::Scalar(ScalarValue::Enum { value: 1, .. })
+        RuntimeValue::Element(ElementValue::Enum { value: 1, .. })
     ));
 }
 
@@ -208,8 +208,8 @@ fn integer_tuples_support_vector_arithmetic() {
     for (output, expected) in outputs.iter().zip(expected) {
         assert_eq!(
             tuple_ints(match &output.value {
-                RuntimeValue::Scalar(value) => value,
-                _ => panic!("expected tuple scalar"),
+                RuntimeValue::Element(value) => value,
+                _ => panic!("expected tuple element"),
             }),
             expected
         );
@@ -217,7 +217,7 @@ fn integer_tuples_support_vector_arithmetic() {
 }
 
 #[test]
-fn tuple_sequences_sum_during_arithmetic_and_scalar_coercion() {
+fn tuple_sequences_sum_during_arithmetic_and_element_coercion() {
     let outputs = run(r#"
         function: identity VALUE:n { result: VALUE }
         output {[tuple 1 2], [tuple 3 4]} + [tuple 10 20]
@@ -230,7 +230,7 @@ fn tuple_sequences_sum_during_arithmetic_and_scalar_coercion() {
         outputs
             .iter()
             .map(|output| match &output.value {
-                RuntimeValue::Scalar(value) => tuple_ints(value),
+                RuntimeValue::Element(value) => tuple_ints(value),
                 RuntimeValue::Pool(_, _) => {
                     tuple_output_distribution(output.value.clone())[0].0.clone()
                 }
@@ -339,14 +339,14 @@ fn pool_evaluated_functions_merge_identity_and_tuple_results() {
 }
 
 #[test]
-fn tuple_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
+fn tuple_elements_and_lists_are_converted_to_distributions_in_the_engine() {
     let mut outputs =
         run("output [tuple 1 2] output {[tuple 1 2], [tuple 3 4], [tuple 1 2]}").unwrap();
 
-    let OutputValue::TupleDistribution(scalar) = OutputValue::from(outputs.remove(0).value) else {
-        panic!("expected tuple scalar distribution");
+    let OutputValue::TupleDistribution(element) = OutputValue::from(outputs.remove(0).value) else {
+        panic!("expected tuple element distribution");
     };
-    assert_eq!(scalar.probabilities, [(vec![1, 2], 1.0)]);
+    assert_eq!(element.probabilities, [(vec![1, 2], 1.0)]);
 
     let OutputValue::TupleDistribution(list) = OutputValue::from(outputs.remove(0).value) else {
         panic!("expected tuple list distribution");
@@ -361,14 +361,14 @@ fn tuple_scalars_and_lists_are_converted_to_distributions_in_the_engine() {
 fn tuple_outputs_accept_interpolated_labels_and_named_in_either_order() {
     let outputs = run(r#"
         N: 2
-        output [tuple 1 2] labeled "First [N]", "Second" named "scalar"
+        output [tuple 1 2] labeled "First [N]", "Second" named "element"
         output {[tuple 1 2], [tuple 3 4]} named "list" labeled "Left", "Right"
         output d{[tuple 1 2], [tuple 3 4]} labeled "X", "Y"
         output [tuple 1 2] labeled "", ""
         "#)
     .unwrap();
 
-    assert_eq!(outputs[0].name, "scalar");
+    assert_eq!(outputs[0].name, "element");
     assert_eq!(
         outputs[0].field_names.as_ref().unwrap(),
         &vec!["First 2".to_string(), "Second".to_string()]
