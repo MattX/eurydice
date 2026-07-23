@@ -116,7 +116,7 @@ fn explode_execute(
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let RuntimeValue::Pool(d, _) = &args[0] {
         if d.is_empty() {
-            return Ok(Pool::from_list(1, vec![]).into());
+            return Ok(args[0].clone());
         }
         let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
         let highest_value = die.last().unwrap().0;
@@ -135,7 +135,7 @@ fn explode_on_execute(
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let (RuntimeValue::Pool(d, _), RuntimeValue::List(cond, _)) = (&args[0], &args[1]) {
         if d.is_empty() {
-            return Ok(Pool::from_list(1, vec![]).into());
+            return Ok(args[0].clone());
         }
         let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
         Ok(Pool::from(explode(die, &numeric_list(cond), explode_depth)).into())
@@ -153,7 +153,7 @@ fn reroll_execute(
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let RuntimeValue::Pool(d, _) = &args[0] {
         if d.is_empty() {
-            return Ok(Pool::from_list(1, vec![]).into());
+            return Ok(args[0].clone());
         }
         let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
         let highest_value = die.last().unwrap().0;
@@ -172,7 +172,7 @@ fn reroll_on_execute(
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let (RuntimeValue::Pool(d, _), RuntimeValue::List(cond, _)) = (&args[0], &args[1]) {
         if d.is_empty() {
-            return Ok(Pool::from_list(1, vec![]).into());
+            return Ok(args[0].clone());
         }
         let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
         Ok(Pool::from(reroll(die, &numeric_list(cond), explode_depth)).into())

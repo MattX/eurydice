@@ -36,11 +36,11 @@ pub struct Pool<T = i32> {
 
 impl std::fmt::Display for Pool<i32> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.dimension != 1 {
-            write!(f, "{}", self.dimension)?;
-        }
         if self.ordered_outcomes.is_empty() {
             return write!(f, "d{{}}");
+        }
+        if self.dimension != 1 {
+            write!(f, "{}", self.dimension)?;
         }
         if self.ordered_outcomes == [(0, Natural::ONE)] {
             return write!(f, "d0");
@@ -105,7 +105,10 @@ impl Pool<i32> {
 
     /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
     pub fn sum(&self) -> Pool<i32> {
-        if self.dimension == 1 && !self.is_empty() {
+        if self.dimension == 0 {
+            return self.clone();
+        }
+        if self.dimension == 1 && !self.ordered_outcomes.is_empty() {
             return self.clone();
         }
         self.sum_by(0, sum_mapper)
@@ -1438,7 +1441,7 @@ mod tests {
         let pool = Pool::from_list(2, vec![-1, -2, -3]);
         assert_eq!(format!("{}", pool), "2d{-3, -2, -1}");
         assert_eq!(Pool::from_list(1, vec![]).to_string(), "d{}");
-        assert_eq!(Pool::from_list(2, vec![]).to_string(), "2d{}");
+        assert_eq!(Pool::from_list(2, vec![]).to_string(), "d{}");
         assert_eq!(Pool::from_list(1, vec![0]).to_string(), "d0");
     }
 

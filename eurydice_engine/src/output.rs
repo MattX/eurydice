@@ -72,7 +72,11 @@ fn tuple_values(values: &[ScalarValue]) -> Vec<i32> {
 
 fn pool_output(pool: &Pool<ScalarValue>, outcome_type: &ScalarType, sum: bool) -> OutputValue {
     let pool = if sum {
-        sum_pool(pool, outcome_type)
+        if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ScalarType::Uninhabited) {
+            pool.clone()
+        } else {
+            sum_pool(pool, outcome_type)
+        }
     } else {
         pool.clone()
     };
@@ -166,10 +170,15 @@ pub fn to_probabilities_generic<T: Clone>(ordered_outcomes: &[(T, Natural)]) -> 
 }
 
 pub fn export_anydice_format(name: &str, pool: &Pool) -> String {
-    let probabilities = to_probabilities(pool.sum().ordered_outcomes());
+    let pool = pool_for_output(pool);
+    let probabilities = to_probabilities(pool.ordered_outcomes());
     let mean = mean(&probabilities);
     let stddev = stddev(&probabilities, mean);
-    let (min, max) = min_and_max(&probabilities);
+    let (min, max) = if probabilities.is_empty() {
+        (0, 0)
+    } else {
+        min_and_max(&probabilities)
+    };
 
     let mut string = String::new();
     writeln!(string, "\"{}\",{},{},{},{}", name, mean, stddev, min, max).unwrap();
@@ -178,6 +187,14 @@ pub fn export_anydice_format(name: &str, pool: &Pool) -> String {
         writeln!(string, "{},{}", outcome, prob * 100.0).unwrap();
     }
     string
+}
+
+fn pool_for_output(pool: &Pool) -> Pool {
+    if pool.is_empty() {
+        pool.clone()
+    } else {
+        pool.sum()
+    }
 }
 
 pub fn to_probabilities(ordered_outcomes: &[(i32, Natural)]) -> Vec<(i32, f64)> {

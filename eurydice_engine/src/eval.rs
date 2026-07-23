@@ -456,7 +456,7 @@ fn sum_scalars(values: &[ScalarValue], outcome_type: &ScalarType) -> ScalarValue
 }
 
 pub(crate) fn sum_pool(pool: &Pool<ScalarValue>, outcome_type: &ScalarType) -> Pool<ScalarValue> {
-    if pool.dimension() == 1 && !pool.is_empty() {
+    if pool.dimension() == 1 && !pool.ordered_outcomes().is_empty() {
         return pool.clone();
     }
     let Some(identity) = outcome_type.additive_identity() else {
@@ -2008,7 +2008,12 @@ fn make_pool(n: i32, sides: Vec<ScalarValue>) -> Result<Pool<ScalarValue>, Strin
     } else {
         sides
     };
-    Ok(Pool::from_list(n.unsigned_abs(), sides))
+    let dimension = if sides.is_empty() {
+        0
+    } else {
+        n.unsigned_abs()
+    };
+    Ok(Pool::from_list(dimension, sides))
 }
 
 fn merge_outcome_type(

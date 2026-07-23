@@ -4,6 +4,4 @@
 .claude/
 .codex/
 .playwright-mcp/
-
-compat-campaign/
-
+/compat-campaign/
