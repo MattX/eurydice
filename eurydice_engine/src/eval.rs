@@ -971,6 +971,9 @@ fn make_pool(mut n: i32, mut sides: Vec<i32>) -> Pool {
         }
         n = -n;
     }
+    if sides.is_empty() {
+        n = 0;
+    }
     Pool::from_list(u32::try_from(n).expect("n is positive"), sides)
 }
 

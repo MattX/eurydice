@@ -32,6 +32,9 @@ pub struct Pool {
 
 impl std::fmt::Display for Pool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.ordered_outcomes.is_empty() {
+            return write!(f, "d{{}}");
+        }
         if self.dimension != 1 {
             write!(f, "{}", self.dimension)?;
         }
@@ -232,7 +235,10 @@ impl Pool {
 
     /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
     pub fn sum(&self) -> Pool {
-        if self.is_empty() {
+        if self.dimension == 0 {
+            return self.clone();
+        }
+        if self.ordered_outcomes.is_empty()  {
             return Pool {
                 dimension: 1,
                 ordered_outcomes: vec![(0, Natural::ONE)],

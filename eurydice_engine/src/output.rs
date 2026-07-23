@@ -16,7 +16,7 @@ impl From<RuntimeValue> for Distribution {
         let pool = match value {
             RuntimeValue::Int(i) => Pool::from_list(1, vec![i]),
             RuntimeValue::List(values) => Pool::from_list(1, values.to_vec()),
-            RuntimeValue::Pool(pool) => pool.sum(),
+            RuntimeValue::Pool(pool) => pool_for_output(&pool),
         };
         let probabilities = to_probabilities(pool.ordered_outcomes());
         Distribution { probabilities }
@@ -24,10 +24,15 @@ impl From<RuntimeValue> for Distribution {
 }
 
 pub fn export_anydice_format(name: &str, pool: &Pool) -> String {
-    let probabilities = to_probabilities(pool.sum().ordered_outcomes());
+    let pool = pool_for_output(pool);
+    let probabilities = to_probabilities(pool.ordered_outcomes());
     let mean = mean(&probabilities);
     let stddev = stddev(&probabilities, mean);
-    let (min, max) = min_and_max(&probabilities);
+    let (min, max) = if probabilities.is_empty() {
+        (0, 0)
+    } else {
+        min_and_max(&probabilities)
+    };
 
     let mut string = String::new();
     writeln!(string, "\"{}\",{},{},{},{}", name, mean, stddev, min, max).unwrap();
@@ -36,6 +41,14 @@ pub fn export_anydice_format(name: &str, pool: &Pool) -> String {
         writeln!(string, "{},{}", outcome, prob * 100.0).unwrap();
     }
     string
+}
+
+fn pool_for_output(pool: &Pool) -> Pool {
+    if pool.is_empty() {
+        pool.clone()
+    } else {
+        pool.sum()
+    }
 }
 
 pub fn to_probabilities(ordered_outcomes: &[(i32, Natural)]) -> Vec<(i32, f64)> {

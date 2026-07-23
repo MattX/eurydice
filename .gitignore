@@ -2,5 +2,6 @@
 /eurydice_wasm/pkg/
 
 .claude/
+.codex/
 .playwright-mcp/
-
+/compat-campaign/
