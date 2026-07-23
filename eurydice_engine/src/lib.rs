@@ -1,8 +1,12 @@
 pub mod ast;
 pub mod dice;
+pub mod error;
 pub mod eval;
 pub mod output;
 pub mod primitives;
+pub mod value;
+
+mod operators;
 
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(

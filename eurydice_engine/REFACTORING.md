@@ -57,30 +57,22 @@ for now. Reconsider encapsulation only if concrete invariant bugs appear or a
 future value/module refactor provides wrappers with enough behavior to remove
 more code than they introduce.
 
-## 3. Slim down `eval.rs`
+## 3. Slim down `eval.rs` — completed
 
-`eval.rs` currently owns several distinct systems:
+The cohesive value, operator, and diagnostic systems were extracted without
+changing their behavior:
 
-- runtime values and element types;
-- environments and functions;
-- statement and expression interpretation;
-- operator semantics and distribution lifting;
-- dice construction; and
-- runtime diagnostics.
+- `value.rs` owns runtime values, element types, display, and distribution
+  summation;
+- `operators.rs` owns unary and binary operators, broadcasting, positional
+  selection, and dice construction;
+- `error.rs` owns runtime diagnostics and source-range conversion; and
+- `eval.rs` retains environments, functions, and statement/expression
+  interpretation.
 
-After establishing clearer runtime-value boundaries, these could be separated
-into modules such as:
-
-```text
-value.rs
-environment.rs
-operators.rs
-error.rs
-eval.rs
-```
-
-Splitting the existing file without first improving the boundaries would
-mostly move complexity around, so this should follow the first two changes.
+The existing public `eval` paths for runtime values and errors are preserved
+through re-exports. The environment representation was deliberately left
+unchanged.
 
 ### Environment representation
 
