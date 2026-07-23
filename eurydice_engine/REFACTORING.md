@@ -74,16 +74,17 @@ The existing public `eval` paths for runtime values and errors are preserved
 through re-exports. The environment representation was deliberately left
 unchanged.
 
-### Environment representation
+### Environment representation — completed
 
-`ValEnv` uses an `Rc<RefCell<_>>` parent chain, although user functions do not
-retain closure environments. If the intended AnyDice-compatible behavior is
-confirmed to be dynamic scoping, an explicit stack of frames may express the
-semantics more directly.
+`ValEnv` now uses an explicit stack of binding frames. Function entry pushes a
+frame, lookup searches from the newest frame to the global frame, and function
+exit pops the frame even when evaluation returns an error. This directly
+expresses the confirmed AnyDice-compatible dynamic scoping behavior without
+`Rc<RefCell<_>>` indirection.
 
-This could make function scope, block scope, recursion, and mutation easier to
-reason about. It should only be attempted with focused dynamic-scope and
-assignment tests in place.
+Blocks and loops continue to share their containing frame, preserving existing
+assignment behavior. Focused tests cover nearest dynamic lookup, caller
+isolation, recursion, and cleanup after runtime errors.
 
 ## 4. Add a high-level engine API
 
@@ -165,7 +166,7 @@ Module extraction should follow clearer ownership and invariants.
 3. Move operator and value behavior out of `eval.rs`.
 4. Reassess whether the resulting module boundaries naturally justify distinct
    pool and distribution types.
-5. Consider replacing the environment parent chain with explicit frames.
+5. Replace the environment parent chain with explicit frames — completed.
 6. Add the high-level `Engine` façade and migrate the CLI and WASM frontends.
 
 The primitive-table cleanup (§6) is independent of the above and can be done at

@@ -1,0 +1,46 @@
+X: 1
+
+function: read dynamic { result: X }
+function: middle X:n { result: [read dynamic] }
+function: nearest frame {
+ X: 7
+ result: [middle 9]
+}
+output [nearest frame] named "nearest dynamic frame"
+
+function: assign in frame {
+ X: 2
+ if 1 { X: 3 }
+ loop I over {4} { X: X + I }
+ result: X
+}
+output [assign in frame] named "function assignment"
+output X named "caller binding"
+
+function: descend N:n {
+ if N { result: [descend N - 1] }
+ result: X
+}
+function: recursive caller {
+ X: 7
+ result: [descend 2]
+}
+output [recursive caller] named "recursive dynamic binding"
+
+\\\ Result \\\
+
+"nearest dynamic frame",9,0,9,9
+#,%
+9,100
+
+"function assignment",7,0,7,7
+#,%
+7,100
+
+"caller binding",1,0,1,1
+#,%
+1,100
+
+"recursive dynamic binding",7,0,7,7
+#,%
+7,100

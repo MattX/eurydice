@@ -1,7 +1,6 @@
 //! A simple tree walking interpreter.
 
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -23,52 +22,51 @@ pub use crate::{
     value::{ElementType, ElementValue, EnumType, RuntimeValue},
 };
 
-/// Represents the environment at some point during program execution.
-///
-/// Lambdas capture their arguments, so we need RCs to keep the environments alive;
-/// we also need RefCells because the bindings are mutable.
+/// Runtime bindings, organized as a stack of dynamically scoped function frames.
 #[derive(Debug)]
 struct ValEnv {
-    parent: Option<RcValEnv>,
-    env: HashMap<String, RuntimeValue>,
+    frames: Vec<HashMap<String, RuntimeValue>>,
 }
-type RcValEnv = Rc<RefCell<ValEnv>>;
 
 impl ValEnv {
     fn new() -> Self {
         Self {
-            parent: None,
-            env: HashMap::new(),
+            frames: vec![HashMap::new()],
         }
     }
 
-    fn with_parent(parent: RcValEnv) -> Self {
-        Self {
-            parent: Some(parent),
-            env: HashMap::new(),
-        }
+    fn push_frame(&mut self) {
+        self.frames.push(HashMap::new());
+    }
+
+    fn pop_frame(&mut self) {
+        assert!(
+            self.frames.len() > 1,
+            "the global environment frame cannot be popped"
+        );
+        self.frames.pop();
     }
 
     fn get(&self, key: &str) -> Option<RuntimeValue> {
-        if let Some(value) = self.env.get(key) {
-            Some(value.clone())
-        } else if let Some(parent) = &self.parent {
-            parent.borrow().get(key)
-        } else {
-            None
-        }
+        self.frames
+            .iter()
+            .rev()
+            .find_map(|frame| frame.get(key))
+            .cloned()
     }
 
     fn insert(&mut self, key: String, value: RuntimeValue) {
-        self.env.insert(key, value);
+        self.frames
+            .last_mut()
+            .expect("an environment always has a global frame")
+            .insert(key, value);
     }
 
     fn contains(&self, key: &str) -> bool {
-        self.env.contains_key(key)
-            || self
-                .parent
-                .as_ref()
-                .is_some_and(|parent| parent.borrow().contains(key))
+        self.frames
+            .iter()
+            .rev()
+            .any(|frame| frame.contains_key(key))
     }
 }
 
@@ -109,15 +107,13 @@ impl Function {
 }
 
 struct EvalContext {
-    env: RcValEnv,
     recursion_depth: usize,
     block_depth: usize,
 }
 
 impl EvalContext {
-    fn new(env: RcValEnv) -> Self {
+    fn new() -> Self {
         Self {
-            env,
             recursion_depth: 0,
             block_depth: 0,
         }
@@ -125,7 +121,6 @@ impl EvalContext {
 
     fn nested_block(&self) -> Self {
         Self {
-            env: Rc::clone(&self.env),
             recursion_depth: self.recursion_depth,
             block_depth: self.block_depth + 1,
         }
@@ -155,7 +150,7 @@ impl std::fmt::Display for EnumIdentifierKind {
 }
 
 pub struct Evaluator {
-    global_env: RcValEnv,
+    env: ValEnv,
     outputs: Vec<EvaluatedOutput>,
     functions: HashMap<String, Function>,
     enums: HashMap<String, Rc<EnumType>>,
@@ -185,7 +180,7 @@ impl Evaluator {
         let mut functions = HashMap::new();
         register_primitives(&mut functions);
         Self {
-            global_env: Rc::new(RefCell::new(ValEnv::new())),
+            env: ValEnv::new(),
             outputs: Vec::new(),
             functions,
             enums: HashMap::new(),
@@ -202,7 +197,7 @@ impl Evaluator {
     }
 
     pub fn execute(&mut self, statement: &WithRange<Statement>) -> Result<(), RuntimeError> {
-        let eval_context = EvalContext::new(Rc::clone(&self.global_env));
+        let eval_context = EvalContext::new();
         let result = self.execute_statement(&eval_context, statement)?;
         debug_assert!(
             result.is_none(),
@@ -272,7 +267,7 @@ impl Evaluator {
                 ),
             });
         }
-        if eval_context.env.borrow().contains(&definition.name.value) {
+        if self.env.contains(&definition.name.value) {
             return Err(RuntimeError::EnumTypeError {
                 range: definition.name.range.into(),
                 message: format!("{} is already bound as a variable", definition.name.value),
@@ -302,7 +297,7 @@ impl Evaluator {
                     ),
                 });
             }
-            if eval_context.env.borrow().contains(&member.value) {
+            if self.env.contains(&member.value) {
                 return Err(RuntimeError::EnumTypeError {
                     range: member.range.into(),
                     message: format!("{} is already bound as a variable", member.value),
@@ -319,7 +314,7 @@ impl Evaluator {
                 range: member.range.into(),
                 message: "enum has too many members".to_string(),
             })?;
-            self.global_env.borrow_mut().insert(
+            self.env.insert(
                 member.value.clone(),
                 RuntimeValue::Element(ElementValue::Enum {
                     value,
@@ -342,10 +337,7 @@ impl Evaluator {
             Statement::Assignment { name, value } => {
                 self.validate_binding_name(&name.value, name.range, BindingKind::Assignment)?;
                 let value = self.evaluate(eval_context, value)?;
-                eval_context
-                    .env
-                    .borrow_mut()
-                    .insert(name.value.clone(), value);
+                self.env.insert(name.value.clone(), value);
             }
             Statement::FunctionDefinition(fd) => {
                 for arg in &fd.args {
@@ -404,14 +396,14 @@ impl Evaluator {
                         labels
                             .value
                             .iter()
-                            .map(|label| interpolate_variable_names(label, &eval_context.env))
+                            .map(|label| interpolate_variable_names(label, &self.env))
                             .collect::<Result<Vec<_>, _>>()?,
                     )
                 } else {
                     None
                 };
                 let name = match named {
-                    Some(name) => interpolate_variable_names(name, &eval_context.env)?,
+                    Some(name) => interpolate_variable_names(name, &self.env)?,
                     None => format!("output {}", self.outputs.len() + 1),
                 };
                 self.outputs.push(EvaluatedOutput {
@@ -423,7 +415,7 @@ impl Evaluator {
             Statement::Print { expr, named } => {
                 let value = self.evaluate(eval_context, expr)?;
                 let name = match named {
-                    Some(name) => interpolate_variable_names(name, &eval_context.env)?,
+                    Some(name) => interpolate_variable_names(name, &self.env)?,
                     None => "".to_string(),
                 };
                 if let Some(ref callback) = self.print_callback {
@@ -493,9 +485,7 @@ impl Evaluator {
                 };
                 let nested_context = eval_context.nested_block();
                 for value in range.iter() {
-                    eval_context
-                        .env
-                        .borrow_mut()
+                    self.env
                         .insert(variable.value.clone(), RuntimeValue::Element(value.clone()));
                     for statement in body {
                         let res = self.execute_statement(&nested_context, statement)?;
@@ -605,12 +595,14 @@ impl Evaluator {
                 };
                 self.evaluate_function_call(eval_context, &func_with_range, args)
             }
-            Expression::Reference(name) => eval_context.env.borrow().get(name).ok_or_else(|| {
-                RuntimeError::UndefinedReference {
-                    range: expression.range.into(),
-                    name: name.clone(),
-                }
-            }),
+            Expression::Reference(name) => {
+                self.env
+                    .get(name)
+                    .ok_or_else(|| RuntimeError::UndefinedReference {
+                        range: expression.range.into(),
+                        name: name.clone(),
+                    })
+            }
             Expression::Int(i) => Ok(RuntimeValue::Element(ElementValue::Int(*i))),
         }
     }
@@ -807,24 +799,27 @@ impl Evaluator {
                 },
             ),
             Function::UserDefined(user_function) => {
-                let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));
+                self.env.push_frame();
                 for (arg, formal) in args.iter().zip(user_function.definition.args.iter()) {
-                    new_env.insert(formal.value.name.clone(), arg.clone());
+                    self.env.insert(formal.value.name.clone(), arg.clone());
                 }
                 let new_context = EvalContext {
-                    env: Rc::new(RefCell::new(new_env)),
                     recursion_depth: eval_context.recursion_depth + 1,
                     block_depth: eval_context.block_depth + 1,
                 };
-                let mut result = None;
-                for statement in &user_function.definition.body {
-                    result = self.execute_statement(&new_context, statement)?;
-                    if result.is_some() {
-                        break;
+                let result = (|| {
+                    let mut result = None;
+                    for statement in &user_function.definition.body {
+                        result = self.execute_statement(&new_context, statement)?;
+                        if result.is_some() {
+                            break;
+                        }
                     }
-                }
-                // If there's no result, there was no return statement in the function.
-                Ok(result.unwrap_or(Pool::from_list(1, vec![]).into()))
+                    // If there's no result, there was no return statement in the function.
+                    Ok(result.unwrap_or(Pool::from_list(1, vec![]).into()))
+                })();
+                self.env.pop_frame();
+                result
             }
         }
     }
@@ -908,7 +903,7 @@ fn coerce_arg(
 }
 fn interpolate_variable_names(
     template: &WithRange<String>,
-    vars: &RcValEnv,
+    vars: &ValEnv,
 ) -> Result<String, RuntimeError> {
     let mut result = String::new();
     let mut char_iter = template.value.chars();
@@ -929,7 +924,7 @@ fn interpolate_variable_names(
                 if valid_end {
                     result.push(']');
                 }
-            } else if let Some(value) = vars.borrow().get(&name) {
+            } else if let Some(value) = vars.get(&name) {
                 result.push_str(&value.to_string());
             } else {
                 return Err(RuntimeError::UndefinedReference {
@@ -968,10 +963,10 @@ mod tests {
             }
         }
 
-        let env = Rc::new(RefCell::new(ValEnv::new()));
-        env.borrow_mut().insert("A".to_string(), 1.into());
-        env.borrow_mut().insert("B".to_string(), 2.into());
-        env.borrow_mut().insert("C".to_string(), 3.into());
+        let mut env = ValEnv::new();
+        env.insert("A".to_string(), 1.into());
+        env.insert("B".to_string(), 2.into());
+        env.insert("C".to_string(), 3.into());
         assert_eq!(
             interpolate_variable_names(&ranged("A + B = [A] + [B]"), &env).unwrap(),
             "A + B = 1 + 2"
