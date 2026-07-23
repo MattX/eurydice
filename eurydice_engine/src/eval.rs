@@ -918,13 +918,19 @@ fn interpolate_variable_names(
                 }
                 name.push(chr);
             }
-            if !valid_end || name.is_empty() || name.chars().any(|c| !c.is_ascii_uppercase()) {
+            if !valid_end
+                || name.is_empty()
+                || name.chars().any(|c| !c.is_ascii_uppercase() && c != '_')
+            {
                 result.push('[');
                 result.push_str(&name);
                 if valid_end {
                     result.push(']');
                 }
-            } else if let Some(value) = vars.get(&name) {
+            } else if let Some(mut value) = vars.get(&name) {
+                if matches!(value.outcome_type(), ElementType::AdditiveIdentity) {
+                    value = value.materialize_identities(&ElementType::Int);
+                }
                 result.push_str(&value.to_string());
             } else {
                 return Err(RuntimeError::UndefinedReference {
@@ -967,6 +973,11 @@ mod tests {
         env.insert("A".to_string(), 1.into());
         env.insert("B".to_string(), 2.into());
         env.insert("C".to_string(), 3.into());
+        env.insert("_MY_VAR".to_string(), 4.into());
+        env.insert(
+            "IDENTITY".to_string(),
+            RuntimeValue::Element(ElementValue::AdditiveIdentity),
+        );
         assert_eq!(
             interpolate_variable_names(&ranged("A + B = [A] + [B]"), &env).unwrap(),
             "A + B = 1 + 2"
@@ -981,6 +992,40 @@ mod tests {
         assert_eq!(
             interpolate_variable_names(&ranged("A + B = [A] + [B] + [C"), &env).unwrap(),
             "A + B = 1 + 2 + [C"
+        );
+        assert_eq!(
+            interpolate_variable_names(&ranged("[_MY_VAR], [IDENTITY]"), &env).unwrap(),
+            "4, 0"
+        );
+    }
+
+    #[test]
+    fn additive_identity_is_inspectable_in_print_but_defaulted_in_output() {
+        use std::{cell::RefCell, rc::Rc};
+
+        let printed = Rc::new(RefCell::new(None));
+        let callback_result = Rc::clone(&printed);
+        let mut evaluator = Evaluator::new();
+        evaluator.set_print_callback(Box::new(move |value, name| {
+            *callback_result.borrow_mut() = Some((value.to_string(), name));
+        }));
+
+        let statements = crate::grammar::BodyParser::new()
+            .parse(r#"X: {} + {} print X named "[X]" output X named "[X]""#)
+            .unwrap();
+        for statement in statements {
+            evaluator.execute(&statement).unwrap();
+        }
+
+        assert_eq!(
+            printed.borrow().as_ref().unwrap(),
+            &("\u{1d452}".to_string(), "0".to_string())
+        );
+        let output = evaluator.take_outputs().remove(0);
+        assert_eq!(output.name, "0");
+        assert_eq!(
+            crate::output::Distribution::from(output.value).probabilities,
+            [(vec![0], 1.0)]
         );
     }
 

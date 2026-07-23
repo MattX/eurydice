@@ -1,0 +1,15 @@
+X: {} + {}
+output X named "[X]"
+
+_MY_VAR: 1
+output _MY_VAR named "[_MY_VAR]"
+
+\\\ Result \\\
+
+"0",0,0,0,0
+#,%
+0,100
+
+"1",1,0,1,1
+#,%
+1,100

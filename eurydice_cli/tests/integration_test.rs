@@ -92,7 +92,7 @@ fn test_anydice_programs() {
                     "Mismatch in file {}: expected {} outputs, got {}",
                     path.display(),
                     expected_results.len(),
-                    evaluator.take_outputs().len()
+                    outputs.len()
                 );
             }
 
@@ -101,21 +101,13 @@ fn test_anydice_programs() {
                 .zip(expected_results.iter())
                 .zip(expected_results_strings.iter())
             {
-                let d = match output.value {
-                    eval::RuntimeValue::Element(value) => {
-                        Pool::from_list(1, vec![value.as_int().expect("numeric fixture output")])
+                let d = match numeric_fixture_pool(output.value) {
+                    Ok(d) => d,
+                    Err(error) => {
+                        paths_with_errors.insert(path_string.clone());
+                        println!("Unsupported output in file {}: {}", path.display(), error);
+                        continue;
                     }
-                    eval::RuntimeValue::List(values, _) => Pool::from_list(
-                        1,
-                        values
-                            .iter()
-                            .map(|value| value.as_int().expect("numeric fixture output"))
-                            .collect(),
-                    ),
-                    eval::RuntimeValue::Pool(d, _) => d
-                        .as_ref()
-                        .clone()
-                        .map_outcomes(|value| value.as_int().expect("numeric fixture output")),
                 };
                 let actual_result = create_expected_result(&output.name, &d);
                 if !compare_expected_results(&actual_result, expected) {
@@ -142,6 +134,29 @@ fn test_anydice_programs() {
         println!("❌ {}", path);
     }
     assert_eq!(paths_with_errors.len(), 0, "Some test files had errors");
+}
+
+fn numeric_fixture_pool(value: eval::RuntimeValue) -> Result<Pool, &'static str> {
+    let to_int = |value: eval::ElementValue| match value {
+        eval::ElementValue::AdditiveIdentity => Ok(0),
+        eval::ElementValue::Int(value) => Ok(value),
+        eval::ElementValue::Enum { .. } | eval::ElementValue::Tuple(_) => {
+            Err("AnyDice fixtures must have numeric outputs")
+        }
+    };
+
+    match value {
+        eval::RuntimeValue::Element(value) => Ok(Pool::from_list(1, vec![to_int(value)?])),
+        eval::RuntimeValue::List(values, _) => {
+            let values = values
+                .iter()
+                .cloned()
+                .map(to_int)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Pool::from_list(1, values))
+        }
+        eval::RuntimeValue::Pool(pool, _) => pool.as_ref().clone().try_map_outcomes(to_int),
+    }
 }
 
 #[derive(Debug)]

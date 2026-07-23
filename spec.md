@@ -97,7 +97,7 @@ Lists and pools are homogeneous and cannot mix values with different outcome typ
 Finally, two additional types arise out of technical necessity during type inference:
 
 * `uninhabited`: A bare empty list literal has an initially uninhabited outcome type: because it contains no values, it is compatible with any outcome type supplied by its context. This differs from an explicitly typed empty literal such as `{MISS:0}`, `{[tuple 1 2]:0}`, or `{1:0}`, which retains the type of its repeated expression.
-* `additive_identity`: Summing an untyped empty sequence or pool produces a universal additive identity. That identity remains polymorphic through additive arithmetic until a concrete additive type is supplied; if it is still unconstrained when displayed or used by an operation requiring integers, it becomes the integer `0`.
+* `additive_identity`: Summing an untyped empty sequence or pool produces a universal additive identity. That identity remains polymorphic through additive arithmetic until a concrete additive type is supplied; if it is still unconstrained when used in an output or by an operation requiring integers, it becomes the integer `0`. The `print` statement instead displays it as italic `𝑒`.
 
 The maximum number of elements in a list, or of outcomes in a pool, is 2^31-1.
 
