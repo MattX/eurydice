@@ -37,8 +37,8 @@ StatementInner: Statement = {
         }),
     "output" <e:Expr> <options:OutputOptions> => Statement::Output {
         expr: e,
-        named: options.0,
-        labeled: options.1,
+        named: options.named,
+        labeled: options.labeled,
     },
     "print" <e:Expr> <n:OutputName?> => Statement::Print { expr: e, named: n },
     "result" ":" <e:Expr> => Statement::Return { value: e },
@@ -152,12 +152,14 @@ OutputLabel: WithRange<String> = {
         WithRange::new(start, end, apply_string_escapes(&l[1..l.len()-1])),
 }
 
-OutputOptions: (Option<WithRange<String>>, Option<WithRange<Vec<WithRange<String>>>>) = {
-    => (None, None),
-    <name:OutputName> => (Some(name), None),
-    <labels:OutputLabels> => (None, Some(labels)),
-    <name:OutputName> <labels:OutputLabels> => (Some(name), Some(labels)),
-    <labels:OutputLabels> <name:OutputName> => (Some(name), Some(labels)),
+OutputOptions: OutputOptions = {
+    => OutputOptions::default(),
+    <name:OutputName> => OutputOptions { named: Some(name), labeled: None },
+    <labels:OutputLabels> => OutputOptions { named: None, labeled: Some(labels) },
+    <name:OutputName> <labels:OutputLabels> =>
+        OutputOptions { named: Some(name), labeled: Some(labels) },
+    <labels:OutputLabels> <name:OutputName> =>
+        OutputOptions { named: Some(name), labeled: Some(labels) },
 }
 
 List: ListLiteral = {

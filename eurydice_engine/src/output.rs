@@ -159,11 +159,7 @@ pub fn export_anydice_format(name: &str, pool: &Pool) -> String {
     let probabilities = to_probabilities(pool.ordered_outcomes());
     let mean = mean(&probabilities);
     let stddev = stddev(&probabilities, mean);
-    let (min, max) = if probabilities.is_empty() {
-        (0, 0)
-    } else {
-        min_and_max(&probabilities)
-    };
+    let (min, max) = min_and_max(&probabilities);
 
     let mut string = String::new();
     writeln!(string, "\"{}\",{},{},{},{}", name, mean, stddev, min, max).unwrap();
@@ -202,9 +198,13 @@ pub fn stddev(probabilities: &[(i32, f64)], mean: f64) -> f64 {
 }
 
 pub fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
-    let min = probabilities.iter().map(|(outcome, _)| *outcome).min();
-    let max = probabilities.iter().map(|(outcome, _)| *outcome).max();
-    (min.unwrap(), max.unwrap())
+    let mut outcomes = probabilities.iter().map(|(outcome, _)| *outcome);
+    let Some(first) = outcomes.next() else {
+        return (0, 0);
+    };
+    outcomes.fold((first, first), |(min, max), outcome| {
+        (min.min(outcome), max.max(outcome))
+    })
 }
 
 #[cfg(test)]
@@ -252,5 +252,11 @@ mod tests {
             distribution.probabilities,
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
+    }
+
+    #[test]
+    fn min_and_max_handles_empty_and_nonempty_distributions() {
+        assert_eq!(min_and_max(&[]), (0, 0));
+        assert_eq!(min_and_max(&[(3, 0.25), (-2, 0.5), (1, 0.25)]), (-2, 3));
     }
 }

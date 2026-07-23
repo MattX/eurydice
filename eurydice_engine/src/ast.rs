@@ -82,6 +82,16 @@ pub struct EnumDefinition {
     pub members: Vec<WithRange<String>>,
 }
 
+/// Optional presentation metadata parsed after an `output` expression.
+///
+/// This is kept separate from `Statement::Output` because the grammar accepts
+/// `named` and `labeled` in either order before assembling the final statement.
+#[derive(Debug, Clone, Default)]
+pub struct OutputOptions {
+    pub named: Option<WithRange<String>>,
+    pub labeled: Option<WithRange<Vec<WithRange<String>>>>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FunctionDefinition {
     pub name: WithRange<String>,
@@ -295,16 +305,13 @@ pub fn make_function_call<L: std::fmt::Debug, T: std::fmt::Debug>(
     range: Range,
     items: Vec<WithRange<FunctionCallItem>>,
 ) -> Result<Expression, ParseError<L, T, ParseActionError>> {
-    let range_start = items
-        .first()
-        .map(|i| i.range.start)
-        .ok_or_else(|| ParseError::<L, T, ParseActionError>::User {
+    let Some((first, remaining)) = items.split_first() else {
+        return Err(ParseError::<L, T, ParseActionError>::User {
             error: ParseActionError::EmptyFunctionCall { range },
-        })?;
-    let range_end = items
-        .last()
-        .map(|i| i.range.end)
-        .expect("we've just checked the items are not empty");
+        });
+    };
+    let range_start = first.range.start;
+    let range_end = remaining.last().unwrap_or(first).range.end;
     let mut name = Vec::new();
     let mut args = Vec::new();
     for item in items.into_iter() {

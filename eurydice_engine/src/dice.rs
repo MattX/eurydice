@@ -11,8 +11,6 @@
 //! [^icepool]: Liu, A. J. (2022). Icepool: Efficient Computation of Dice Pool Probabilities.
 //! _Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital
 //! Entertainment_, 18(1), 258-265. https://doi.org/10.1609/aiide.v18i1.21971
-// TODO some functions in this file take ownership (or a mutable reference), but don't really need to.
-
 use lazy_static::lazy_static;
 use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::base::num::basic::traits::{One, Zero};
@@ -106,9 +104,7 @@ where
         }
     }
 
-    /// Sets the number of dice in the pool, resetting the keep list.
-    ///
-    /// Panics if `n` is negative.
+    /// Sets the number of dice in the pool.
     pub fn set_dimension(&mut self, dimension: u32) {
         self.dimension = dimension;
     }
@@ -160,15 +156,6 @@ where
                 .map(|(outcome, weight)| (outcome, f(weight)))
                 .collect(),
             ..self
-        }
-    }
-
-    fn from_weights(outcomes: impl Iterator<Item = (T, Natural)>) -> Self {
-        let mut ordered_outcomes = outcomes.collect::<Vec<_>>();
-        ordered_outcomes.sort_unstable();
-        Self {
-            dimension: 1,
-            ordered_outcomes,
         }
     }
 
@@ -337,7 +324,7 @@ where
                 (outcome, numerator)
             })
             .collect::<BTreeMap<_, _>>();
-        Pool::<U>::from_weights(new_outcomes.into_iter())
+        new_outcomes.into_iter().collect()
     }
 
     /// Maps multiset outcomes to a single value each.
@@ -473,15 +460,19 @@ where
         if self.values.is_none() {
             return;
         }
-        let values = self.values.as_mut().unwrap();
+        let Some(values) = self.values.as_mut() else {
+            return;
+        };
         let mut stopped = false;
         for (idx, iterator) in self.sub_iterators.iter_mut().enumerate() {
             let (new_val, cont) = match iterator.next() {
                 Some((outcome, ways)) => ((Rc::new(outcome), ways), false),
                 None => {
                     iterator.reset();
-                    // OK to unwrap here: if any iterators were empty after reset, we have gotten here
-                    let (outcome, ways) = iterator.next().unwrap();
+                    let Some((outcome, ways)) = iterator.next() else {
+                        self.values = None;
+                        return;
+                    };
                     ((Rc::new(outcome), ways), true)
                 }
             };
@@ -522,14 +513,13 @@ where
 }
 
 /// For each group of consecutive equal values in the outcomes, this computes
-/// factorial(numer of same outcomes). The result is the product of all these
+/// factorial(number of same outcomes). The result is the product of all these
 /// factorials.
 fn item_factorials<T: Eq>(outcome: &[T]) -> Natural {
     let mut product = Natural::ONE;
     let mut count = 1u64;
-    for i in 1..outcome.len() {
-        let prev = outcome.get(i - 1);
-        if prev.is_some() && *prev.unwrap() == outcome[i] {
+    for pair in outcome.windows(2) {
+        if pair[0] == pair[1] {
             count += 1;
         } else {
             product *= Natural::factorial(count);
@@ -542,21 +532,22 @@ fn item_factorials<T: Eq>(outcome: &[T]) -> Natural {
 
 impl<T: Ord> FromIterator<(T, Natural)> for Pool<T> {
     fn from_iter<I: IntoIterator<Item = (T, Natural)>>(iter: I) -> Self {
-        let mut ordered_outcomes = iter.into_iter().collect::<Vec<_>>();
-        ordered_outcomes.sort_unstable();
+        let mut outcomes = BTreeMap::new();
+        for (outcome, weight) in iter {
+            if weight != 0 {
+                *outcomes.entry(outcome).or_insert(Natural::ZERO) += weight;
+            }
+        }
         Self {
             dimension: 1,
-            ordered_outcomes,
+            ordered_outcomes: outcomes.into_iter().collect(),
         }
     }
 }
 
-impl<T> From<Vec<(T, Natural)>> for Pool<T> {
+impl<T: Ord> From<Vec<(T, Natural)>> for Pool<T> {
     fn from(ordered_outcomes: Vec<(T, Natural)>) -> Self {
-        Self {
-            dimension: 1,
-            ordered_outcomes,
-        }
+        ordered_outcomes.into_iter().collect()
     }
 }
 
@@ -686,6 +677,21 @@ mod tests {
 
     fn to_counter<T: Hash + Eq>(v: Vec<(T, usize)>) -> HashMap<T, Natural> {
         v.into_iter().map(|(k, v)| (k, Natural::from(v))).collect()
+    }
+
+    #[test]
+    fn weighted_pool_construction_canonicalizes_outcomes() {
+        let pool = Pool::from(vec![
+            (2, Natural::from(3u32)),
+            (1, Natural::ZERO),
+            (2, Natural::from(4u32)),
+            (1, Natural::from(2u32)),
+        ]);
+
+        assert_eq!(
+            pool.ordered_outcomes(),
+            &[(1, Natural::from(2u32)), (2, Natural::from(7u32)),]
+        );
     }
 
     #[test]
