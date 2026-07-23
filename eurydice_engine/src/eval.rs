@@ -1213,7 +1213,7 @@ impl Evaluator {
         // This vector will contain references to pools which match an int or list arguments. These
         // are the pools over which we need to iterate to get the argument values.
         let mut pools = Vec::new();
-        // Contains (index, is_int, outcome_type) for the corresponding pool.
+        // Contains (index, is_element, outcome_type) for the corresponding pool.
         let mut pool_iterator_info = Vec::new();
         for (i, (arg, expected_type)) in args.iter().zip(expected_types.iter()).enumerate() {
             let pool = match arg {
@@ -1331,10 +1331,12 @@ impl Evaluator {
         match &function.value {
             Function::Primitive(primitive) => (primitive.execute)(
                 args,
-                arg_ranges,
-                self.explode_depth,
-                self.lowest_first,
-                function.range,
+                crate::primitives::PrimitiveCtx {
+                    arg_ranges,
+                    explode_depth: self.explode_depth,
+                    lowest_first: self.lowest_first,
+                    function_range: function.range,
+                },
             ),
             Function::UserDefined(user_function) => {
                 let mut new_env = ValEnv::with_parent(Rc::clone(&eval_context.env));

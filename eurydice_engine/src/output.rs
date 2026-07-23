@@ -65,21 +65,32 @@ impl Distribution {
 /// Flattens any output outcome to raw `i32`s. Scalar outcomes have one value;
 /// tuples have one per field, and enum values are represented by their ordinal.
 fn output_values(value: &ElementValue) -> Vec<i32> {
-    match value {
-        ElementValue::AdditiveIdentity => {
-            unreachable!("additive identities are materialized before output")
+    /// Ordinal of a single (non-tuple) field. Enum values map to their member index.
+    fn field_ordinal(field: &ElementValue) -> i32 {
+        match field {
+            ElementValue::AdditiveIdentity => 0,
+            ElementValue::Int(value) | ElementValue::Enum { value, .. } => *value,
+            ElementValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
         }
-        ElementValue::Int(value) | ElementValue::Enum { value, .. } => vec![*value],
-        ElementValue::Tuple(fields) => fields
-            .iter()
-            .map(|field| match field {
-                ElementValue::AdditiveIdentity => 0,
-                ElementValue::Int(value) | ElementValue::Enum { value, .. } => *value,
-                ElementValue::Tuple(_) => {
-                    unreachable!("nested tuples are rejected by the evaluator")
-                }
-            })
-            .collect(),
+    }
+    match value {
+        ElementValue::Tuple(fields) => fields.iter().map(field_ordinal).collect(),
+        other => vec![field_ordinal(other)],
+    }
+}
+
+/// Describes a single concrete (non-tuple) field's schema.
+fn field_schema(ty: &ElementType) -> FieldSchema {
+    match ty {
+        ElementType::Int => FieldSchema::Int,
+        ElementType::Enum(ty) => FieldSchema::Enum {
+            enum_name: ty.name.clone(),
+            labels: ty.members.clone(),
+        },
+        ElementType::Uninhabited | ElementType::AdditiveIdentity => {
+            unreachable!("defaulted outcome types are concrete")
+        }
+        ElementType::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
     }
 }
 
@@ -109,30 +120,8 @@ fn pool_output(
         pool
     };
     let fields = match &outcome_type {
-        ElementType::Uninhabited | ElementType::AdditiveIdentity => {
-            unreachable!("defaulted outcome types are concrete")
-        }
-        ElementType::Int => vec![FieldSchema::Int],
-        ElementType::Enum(ty) => vec![FieldSchema::Enum {
-            enum_name: ty.name.clone(),
-            labels: ty.members.clone(),
-        }],
-        ElementType::Tuple(field_types) => field_types
-            .iter()
-            .map(|ty| match ty {
-                ElementType::Uninhabited | ElementType::AdditiveIdentity => {
-                    unreachable!("tuple fields always have concrete types")
-                }
-                ElementType::Int => FieldSchema::Int,
-                ElementType::Enum(ty) => FieldSchema::Enum {
-                    enum_name: ty.name.clone(),
-                    labels: ty.members.clone(),
-                },
-                ElementType::Tuple(_) => {
-                    unreachable!("nested tuples are rejected by the evaluator")
-                }
-            })
-            .collect(),
+        ElementType::Tuple(field_types) => field_types.iter().map(field_schema).collect(),
+        other => vec![field_schema(other)],
     };
     Distribution {
         fields,
@@ -194,20 +183,7 @@ fn pool_for_output(pool: &Pool) -> Pool {
 }
 
 pub fn to_probabilities(ordered_outcomes: &[(i32, Natural)]) -> Vec<(i32, f64)> {
-    let total: Natural = ordered_outcomes.iter().map(|(_, count)| count).sum();
-    ordered_outcomes
-        .iter()
-        .map(|(outcome, count)| {
-            (
-                *outcome,
-                f64::rounding_from(
-                    Rational::from_naturals(count.clone(), total.clone()),
-                    RoundingMode::Nearest,
-                )
-                .0,
-            )
-        })
-        .collect()
+    to_probabilities_generic(ordered_outcomes)
 }
 
 pub fn mean(probabilities: &[(i32, f64)]) -> f64 {

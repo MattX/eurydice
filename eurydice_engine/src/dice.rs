@@ -34,49 +34,10 @@ pub struct Pool<T = i32> {
     ordered_outcomes: Vec<(T, Natural)>,
 }
 
-// impl std::fmt::Display for Pool<i32> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         if self.ordered_outcomes.is_empty() {
-//             return write!(f, "d{{}}");
-//         }
-//         if self.dimension != 1 {
-//             write!(f, "{}", self.dimension)?;
-//         }
-//         if self.ordered_outcomes == [(0, Natural::ONE)] {
-//             return write!(f, "d0");
-//         }
-//         if self
-//             .ordered_outcomes
-//             .iter()
-//             .enumerate()
-//             .all(|(i, (outcome, weight))| {
-//                 usize::try_from(*outcome).ok() == Some(i + 1) && *weight == Natural::ONE
-//             })
-//         {
-//             // This is a standard dn with no repeats.
-//             write!(f, "d{}", self.ordered_outcomes.len())
-//         } else {
-//             write!(
-//                 f,
-//                 "d{{{}}}",
-//                 self.ordered_outcomes
-//                     .iter()
-//                     .map(|(outcome, weight)| if weight == &Natural::ONE {
-//                         outcome.to_string()
-//                     } else {
-//                         format!("{}:{}", outcome, weight)
-//                     })
-//                     .collect::<Vec<_>>()
-//                     .join(", ")
-//             )
-//         }
-//     }
-// }
-
 /// Cache key for the Icepool algorithm. `n` is the number of dice remaining, and
 /// `remaining_count` is the number of outcomes remaining.
 ///
-/// The outcomes that remain in consideration are the `remaining_count` smallest outcomes.`
+/// The outcomes that remain in consideration are the `remaining_count` smallest outcomes.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Copy)]
 struct SubPool {
     dimension: u32,

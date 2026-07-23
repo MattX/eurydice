@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
+use malachite::Natural;
 
 use crate::{
     ast::{self, StaticType},
@@ -8,13 +9,22 @@ use crate::{
     eval::{ElementValue, Function, RuntimeError, RuntimeValue},
 };
 
-type PrimitiveExecutor = fn(
-    &[RuntimeValue],
-    &[ast::Range],
-    usize,      // explode_depth
-    bool,       // lowest_first
-    ast::Range, // function_range
-) -> Result<RuntimeValue, crate::eval::RuntimeError>;
+/// Evaluation context passed to every primitive, bundling the ambient settings
+/// and per-call metadata that most primitives don't need but a few do.
+#[derive(Debug, Clone, Copy)]
+pub struct PrimitiveCtx<'a> {
+    /// Source ranges of the arguments, parallel to `args`.
+    pub arg_ranges: &'a [ast::Range],
+    /// The configured `set "explode depth"`.
+    pub explode_depth: usize,
+    /// Whether positional order is lowest-first (`set "position order"`).
+    pub lowest_first: bool,
+    /// Source range of the whole function call, used for error reporting.
+    pub function_range: ast::Range,
+}
+
+type PrimitiveExecutor =
+    fn(&[RuntimeValue], PrimitiveCtx) -> Result<RuntimeValue, crate::eval::RuntimeError>;
 
 #[derive(Debug)]
 pub struct Primitive {
@@ -32,10 +42,7 @@ enum PrimitiveType {
 
 fn absolute_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     let arg = &args[0];
     Ok(arg.map_numeric_outcomes(i32::abs))
@@ -43,13 +50,10 @@ fn absolute_execute(
 
 fn contains_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     let error = || crate::eval::RuntimeError::EnumTypeError {
-        range: function_range.into(),
+        range: ctx.function_range.into(),
         message: "[contains] requires a sequence and element with the same outcome type".to_string(),
     };
     let (RuntimeValue::List(_, _), RuntimeValue::Element(_)) = (&args[0], &args[1]) else {
@@ -71,13 +75,10 @@ fn contains_execute(
 
 fn count_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     let error = || crate::eval::RuntimeError::EnumTypeError {
-        range: function_range.into(),
+        range: ctx.function_range.into(),
         message: "[count] requires sequences with the same outcome type".to_string(),
     };
     if !matches!(
@@ -108,155 +109,106 @@ fn count_execute(
         .into())
 }
 
+type DieTransform = fn(Vec<(i32, Natural)>, &[i32], usize) -> Vec<(i32, Natural)>;
+
+/// Shared body of the explode/reroll primitives. `on` is the sequence argument
+/// naming the triggering faces; `None` (the bare `explode`/`reroll` forms) uses
+/// the pool's highest face.
+fn transform_die(
+    args: &[RuntimeValue],
+    on: Option<&RuntimeValue>,
+    explode_depth: usize,
+    transform: DieTransform,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    let RuntimeValue::Pool(d, _) = &args[0] else {
+        panic!("wrong argument types to explode/reroll primitive");
+    };
+    if d.is_empty() {
+        return Ok(args[0].clone());
+    }
+    let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
+    let on = match on {
+        None => vec![die.last().unwrap().0],
+        Some(RuntimeValue::List(cond, _)) => numeric_list(cond),
+        Some(_) => panic!("wrong argument types to explode/reroll primitive"),
+    };
+    Ok(Pool::from(transform(die, &on, explode_depth)).into())
+}
+
 fn explode_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::Pool(d, _) = &args[0] {
-        if d.is_empty() {
-            return Ok(args[0].clone());
-        }
-        let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
-        let highest_value = die.last().unwrap().0;
-        Ok(Pool::from(explode(die, &[highest_value], explode_depth)).into())
-    } else {
-        panic!("wrong argument types to [explode]");
-    }
+    transform_die(args, None, ctx.explode_depth, explode)
 }
 
 fn explode_on_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Pool(d, _), RuntimeValue::List(cond, _)) = (&args[0], &args[1]) {
-        if d.is_empty() {
-            return Ok(args[0].clone());
-        }
-        let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
-        Ok(Pool::from(explode(die, &numeric_list(cond), explode_depth)).into())
-    } else {
-        panic!("wrong argument types to [explode on]");
-    }
+    transform_die(args, Some(&args[1]), ctx.explode_depth, explode)
 }
 
 fn reroll_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::Pool(d, _) = &args[0] {
-        if d.is_empty() {
-            return Ok(args[0].clone());
-        }
-        let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
-        let highest_value = die.last().unwrap().0;
-        Ok(Pool::from(reroll(die, &[highest_value], explode_depth)).into())
-    } else {
-        panic!("wrong argument types to [reroll]");
-    }
+    transform_die(args, None, ctx.explode_depth, reroll)
 }
 
 fn reroll_on_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Pool(d, _), RuntimeValue::List(cond, _)) = (&args[0], &args[1]) {
-        if d.is_empty() {
-            return Ok(args[0].clone());
-        }
-        let die: Vec<_> = numeric_pool(d).sum().into_die_iter().collect();
-        Ok(Pool::from(reroll(die, &numeric_list(cond), explode_depth)).into())
-    } else {
-        panic!("wrong argument types to [reroll on]");
-    }
+    transform_die(args, Some(&args[1]), ctx.explode_depth, reroll)
+}
+
+/// Shared body of `highest {} of {}`, `lowest {} of {}` and `middle {} of {}`:
+/// keep `i` dice from pool `d` according to `primitive`, then sum.
+fn keep_execute(
+    primitive: PrimitiveType,
+    args: &[RuntimeValue],
+    ctx: PrimitiveCtx,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
+        (&args[0], &args[1])
+    else {
+        panic!("wrong argument types to [{primitive:?}]");
+    };
+    let keep_list = keep_list_for_primitive(
+        primitive,
+        *i,
+        ctx.arg_ranges[0],
+        d.dimension() as usize,
+        ctx.function_range,
+    )?;
+    Ok(numeric_pool(d).sum_with_keep_list(&keep_list).into())
 }
 
 fn highest_execute(
     args: &[RuntimeValue],
-    arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
-        (&args[0], &args[1])
-    {
-        let keep_list = keep_list_for_primitive(
-            PrimitiveType::Highest,
-            *i,
-            arg_ranges[0],
-            d.dimension() as usize,
-            function_range,
-        )?;
-        Ok(numeric_pool(d).sum_with_keep_list(&keep_list).into())
-    } else {
-        panic!("wrong argument types to [highest]");
-    }
+    keep_execute(PrimitiveType::Highest, args, ctx)
 }
 
 fn lowest_execute(
     args: &[RuntimeValue],
-    arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
-        (&args[0], &args[1])
-    {
-        let keep_list = keep_list_for_primitive(
-            PrimitiveType::Lowest,
-            *i,
-            arg_ranges[0],
-            d.dimension() as usize,
-            function_range,
-        )?;
-        Ok(numeric_pool(d).sum_with_keep_list(&keep_list).into())
-    } else {
-        panic!("wrong argument types to [lowest]");
-    }
+    keep_execute(PrimitiveType::Lowest, args, ctx)
 }
 
 fn middle_execute(
     args: &[RuntimeValue],
-    arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
-        (&args[0], &args[1])
-    {
-        let keep_list = keep_list_for_primitive(
-            PrimitiveType::Middle,
-            *i,
-            arg_ranges[0],
-            d.dimension() as usize,
-            function_range,
-        )?;
-        Ok(numeric_pool(d).sum_with_keep_list(&keep_list).into())
-    } else {
-        panic!("wrong argument types to [middle]");
-    }
+    keep_execute(PrimitiveType::Middle, args, ctx)
 }
 
 fn highest_of_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let (
         RuntimeValue::Element(ElementValue::Int(i)),
@@ -271,10 +223,7 @@ fn highest_of_execute(
 
 fn lowest_of_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let (
         RuntimeValue::Element(ElementValue::Int(i)),
@@ -289,10 +238,7 @@ fn lowest_of_execute(
 
 fn maximum_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let RuntimeValue::Pool(d, _) = &args[0] {
         Ok(numeric_pool(d)
@@ -309,10 +255,7 @@ fn maximum_execute(
 
 fn choose_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let (
         RuntimeValue::Pool(first, first_type),
@@ -332,10 +275,7 @@ fn choose_execute(
 
 fn reverse_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    _function_range: ast::Range,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     match &args[0] {
         RuntimeValue::List(lst, outcome_type) => Ok(RuntimeValue::List(
@@ -348,14 +288,11 @@ fn reverse_execute(
 
 fn sort_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    lowest_first: bool,
-    _function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let RuntimeValue::List(lst, outcome_type) = &args[0] {
         let mut lst = (**lst).clone();
-        if lowest_first {
+        if ctx.lowest_first {
             lst.sort_unstable();
         } else {
             lst.sort_unstable_by_key(|outcome| {
@@ -373,9 +310,11 @@ fn sort_execute(
     }
 }
 
+/// Builds a tuple from its arguments. Registered for each supported arity; the
+/// arity is enforced by function-name matching, not by this executor.
 fn tuple_execute(
     args: &[RuntimeValue],
-    function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, RuntimeError> {
     let fields = args
         .iter()
@@ -385,7 +324,7 @@ fn tuple_execute(
                 Ok(value.clone())
             }
             RuntimeValue::Element(ElementValue::Tuple(_)) => Err(RuntimeError::EnumTypeError {
-                range: function_range.into(),
+                range: ctx.function_range.into(),
                 message: "nested tuples are not supported".to_string(),
             }),
             RuntimeValue::List(_, _) | RuntimeValue::Pool(_, _) => {
@@ -396,30 +335,9 @@ fn tuple_execute(
     Ok(RuntimeValue::Element(ElementValue::Tuple(fields.into())))
 }
 
-macro_rules! tuple_executor {
-    ($name:ident) => {
-        fn $name(
-            args: &[RuntimeValue],
-            _arg_ranges: &[ast::Range],
-            _explode_depth: usize,
-            _lowest_first: bool,
-            function_range: ast::Range,
-        ) -> Result<RuntimeValue, RuntimeError> {
-            tuple_execute(args, function_range)
-        }
-    };
-}
-
-tuple_executor!(tuple_2_execute);
-tuple_executor!(tuple_3_execute);
-tuple_executor!(tuple_4_execute);
-
 fn element_execute(
     args: &[RuntimeValue],
-    _arg_ranges: &[ast::Range],
-    _explode_depth: usize,
-    _lowest_first: bool,
-    function_range: ast::Range,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, RuntimeError> {
     let (
         RuntimeValue::Element(ElementValue::Int(index)),
@@ -427,7 +345,7 @@ fn element_execute(
     ) = (&args[0], &args[1])
     else {
         return Err(RuntimeError::EnumTypeError {
-            range: function_range.into(),
+            range: ctx.function_range.into(),
             message: "[element I of T] requires an integer index and a tuple".to_string(),
         });
     };
@@ -436,7 +354,7 @@ fn element_execute(
         .and_then(|index| usize::try_from(index).ok());
     let Some(value) = index.and_then(|index| fields.get(index)) else {
         return Err(RuntimeError::EnumTypeError {
-            range: function_range.into(),
+            range: ctx.function_range.into(),
             message: format!("tuple index must be between 1 and {}", fields.len()),
         });
     };
@@ -549,17 +467,17 @@ lazy_static! {
     pub static ref TUPLE_2_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int); 2],
         accepts_non_numeric: true,
-        execute: tuple_2_execute,
+        execute: tuple_execute,
     };
     pub static ref TUPLE_3_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int); 3],
         accepts_non_numeric: true,
-        execute: tuple_3_execute,
+        execute: tuple_execute,
     };
     pub static ref TUPLE_4_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int); 4],
         accepts_non_numeric: true,
-        execute: tuple_4_execute,
+        execute: tuple_execute,
     };
     pub static ref ELEMENT_PRIMITIVE: Primitive = Primitive {
         arg_types: vec![Some(StaticType::Int); 2],
@@ -704,6 +622,15 @@ mod tests {
         Range { start: 0, end: 0 }
     }
 
+    fn ctx(arg_ranges: &[Range], explode_depth: usize, lowest_first: bool) -> PrimitiveCtx {
+        PrimitiveCtx {
+            arg_ranges,
+            explode_depth,
+            lowest_first,
+            function_range: dummy_range(),
+        }
+    }
+
     fn int_value(value: i32) -> RuntimeValue {
         value.into()
     }
@@ -726,11 +653,11 @@ mod tests {
     #[test]
     fn test_absolute_execute() {
         let args = vec![int_value(-5)];
-        let result = absolute_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = absolute_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(5));
 
         let args = vec![int_value(3)];
-        let result = absolute_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = absolute_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(3));
     }
 
@@ -738,12 +665,12 @@ mod tests {
     fn test_contains_execute() {
         let haystack = vec![1, 2, 3, 3, 4, 5];
         let args = vec![list_value(haystack), int_value(3)];
-        let result = contains_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = contains_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(1));
 
         let haystack = vec![1, 2, 4, 5];
         let args = vec![list_value(haystack), int_value(3)];
-        let result = contains_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = contains_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(0));
     }
 
@@ -752,7 +679,7 @@ mod tests {
         let needle = vec![1, 2, 2];
         let haystack = vec![1, 2, 2, 3, 2, 1];
         let args = vec![list_value(needle), list_value(haystack)];
-        let result = count_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = count_execute(&args, ctx(&[], 0, false)).unwrap();
         // Should count: 1 appears 2 times, 2 appears 3 times -> 1*2 + 2*3 = 8
         assert_eq!(result, int_value(8));
     }
@@ -761,7 +688,7 @@ mod tests {
     fn test_explode_execute() {
         let pool = Pool::from_list(1, vec![1, 2, 3]);
         let args = vec![pool_value(pool)];
-        let result = explode_execute(&args, &[], 2, false, dummy_range()).unwrap();
+        let result = explode_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 3s explode
         if let RuntimeValue::Pool(result_pool, _) = result {
             assert_eq!(
@@ -778,7 +705,7 @@ mod tests {
         let pool = Pool::from_list(3, vec![1, 2, 3, 4, 5, 6]);
         let args = vec![int_value(2), pool_value(pool)];
         let ranges = vec![dummy_range(), dummy_range()];
-        let result = highest_execute(&args, &ranges, 0, false, dummy_range()).unwrap();
+        let result = highest_execute(&args, ctx(&ranges, 0, false)).unwrap();
         // Should keep the highest 2 dice from a 3d6 roll
         if let RuntimeValue::Pool(result_pool, _) = result {
             assert_eq!(
@@ -807,7 +734,7 @@ mod tests {
         let pool = Pool::from_list(3, vec![1, 2, 3, 4, 5, 6]);
         let args = vec![int_value(2), pool_value(pool)];
         let ranges = vec![dummy_range(), dummy_range()];
-        let result = lowest_execute(&args, &ranges, 0, false, dummy_range()).unwrap();
+        let result = lowest_execute(&args, ctx(&ranges, 0, false)).unwrap();
         // Should keep the lowest 2 dice from a 3d6 roll
         if let RuntimeValue::Pool(result_pool, _) = result {
             assert_eq!(
@@ -836,7 +763,7 @@ mod tests {
         let pool = Pool::from_list(3, vec![1, 2, 3, 4, 5, 6]);
         let args = vec![int_value(1), pool_value(pool)];
         let ranges = vec![dummy_range(), dummy_range()];
-        let result = middle_execute(&args, &ranges, 0, false, dummy_range()).unwrap();
+        let result = middle_execute(&args, ctx(&ranges, 0, false)).unwrap();
         // Should keep the middle 1 die from a 3d6 roll
         if let RuntimeValue::Pool(result_pool, _) = result {
             assert_eq!(
@@ -851,22 +778,22 @@ mod tests {
     #[test]
     fn test_highest_of_execute() {
         let args = vec![int_value(5), int_value(3)];
-        let result = highest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = highest_of_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(5));
 
         let args = vec![int_value(2), int_value(7)];
-        let result = highest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = highest_of_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(7));
     }
 
     #[test]
     fn test_lowest_of_execute() {
         let args = vec![int_value(5), int_value(3)];
-        let result = lowest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = lowest_of_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(3));
 
         let args = vec![int_value(2), int_value(7)];
-        let result = lowest_of_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = lowest_of_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(2));
     }
 
@@ -874,13 +801,13 @@ mod tests {
     fn test_maximum_execute() {
         let pool = Pool::from_list(1, vec![1, 3, 2]);
         let args = vec![pool_value(pool)];
-        let result = maximum_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = maximum_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(3));
 
         // Test empty pool
         let empty_pool = Pool::from_list(1, vec![]);
         let args = vec![pool_value(empty_pool)];
-        let result = maximum_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = maximum_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(0));
     }
 
@@ -889,24 +816,13 @@ mod tests {
         let first = pool_value(Pool::ndn(2, 6));
         let second = pool_value(Pool::ndn(1, 20));
 
-        let result = choose_execute(
-            &[first.clone(), int_value(-1), second.clone()],
-            &[],
-            0,
-            false,
-            dummy_range(),
-        )
-        .unwrap();
+        let result =
+            choose_execute(&[first.clone(), int_value(-1), second.clone()], ctx(&[], 0, false))
+                .unwrap();
         assert_eq!(result, first);
 
-        let result = choose_execute(
-            &[first, int_value(0), second.clone()],
-            &[],
-            0,
-            false,
-            dummy_range(),
-        )
-        .unwrap();
+        let result =
+            choose_execute(&[first, int_value(0), second.clone()], ctx(&[], 0, false)).unwrap();
         assert_eq!(result, second);
     }
 
@@ -937,7 +853,7 @@ mod tests {
     fn test_reverse_execute() {
         let list = vec![1, 2, 3, 4, 5];
         let args = vec![list_value(list)];
-        let result = reverse_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = reverse_execute(&args, ctx(&[], 0, false)).unwrap();
         if let RuntimeValue::List(reversed, _) = result {
             assert_eq!(numeric_list(&reversed), vec![5, 4, 3, 2, 1]);
         } else {
@@ -951,7 +867,7 @@ mod tests {
         let args = vec![list_value(list)];
 
         // Test lowest first (ascending)
-        let result = sort_execute(&args, &[], 0, true, dummy_range()).unwrap();
+        let result = sort_execute(&args, ctx(&[], 0, true)).unwrap();
         if let RuntimeValue::List(sorted, _) = result {
             assert_eq!(numeric_list(&sorted), vec![1, 1, 3, 4, 5]);
         } else {
@@ -961,7 +877,7 @@ mod tests {
         // Test highest first (descending)
         let list = vec![3, 1, 4, 1, 5];
         let args = vec![list_value(list)];
-        let result = sort_execute(&args, &[], 0, false, dummy_range()).unwrap();
+        let result = sort_execute(&args, ctx(&[], 0, false)).unwrap();
         if let RuntimeValue::List(sorted, _) = result {
             assert_eq!(numeric_list(&sorted), vec![5, 4, 3, 1, 1]);
         } else {
@@ -974,7 +890,7 @@ mod tests {
         let pool = Pool::from_list(1, vec![1, 2, 3]);
         let condition = vec![2, 3];
         let args = vec![pool_value(pool), list_value(condition)];
-        let result = explode_on_execute(&args, &[], 2, false, dummy_range()).unwrap();
+        let result = explode_on_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 2s and 3s explode
         if let RuntimeValue::Pool(result_pool, _) = result {
             // 1 stays as 1, 2 explodes to 2+reroll, 3 explodes to 3+reroll
@@ -1000,7 +916,7 @@ mod tests {
     fn test_reroll_execute() {
         let pool = Pool::from_list(1, vec![1, 2, 3]);
         let args = vec![pool_value(pool)];
-        let result = reroll_execute(&args, &[], 2, false, dummy_range()).unwrap();
+        let result = reroll_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 3s reroll (without keeping the original value)
         if let RuntimeValue::Pool(result_pool, _) = result {
             assert_eq!(
@@ -1017,7 +933,7 @@ mod tests {
         let pool = Pool::from_list(1, vec![1, 2, 3, 4]);
         let condition = vec![1, 4];
         let args = vec![pool_value(pool), list_value(condition)];
-        let result = reroll_on_execute(&args, &[], 2, false, dummy_range()).unwrap();
+        let result = reroll_on_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 1s and 4s reroll
         if let RuntimeValue::Pool(result_pool, _) = result {
             assert_eq!(
