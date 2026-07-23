@@ -484,7 +484,6 @@ dependencies = [
  "console_error_panic_hook",
  "eurydice_engine",
  "js-sys",
- "lalrpop-util",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",

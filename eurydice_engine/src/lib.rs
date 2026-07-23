@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod dice;
+pub mod engine;
 pub mod error;
 pub mod eval;
 pub mod output;
@@ -7,6 +8,8 @@ pub mod primitives;
 pub mod value;
 
 mod operators;
+
+pub use engine::{Engine, EngineError, EngineOutput};
 
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(

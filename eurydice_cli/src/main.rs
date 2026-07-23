@@ -1,46 +1,33 @@
 use eurydice_cli::{format_output_probabilities, print_diagnostic};
-use eurydice_engine::output::Distribution;
-use lalrpop_util::ParseError;
+use eurydice_engine::Engine;
 
 fn main() {
-    let parser = eurydice_engine::grammar::BodyParser::new();
     let mut rl = rustyline::DefaultEditor::new().unwrap();
-    let mut evaluator = eurydice_engine::eval::Evaluator::new();
-    evaluator.set_print_callback(Box::new(|value, name| {
+    let mut engine = Engine::new();
+    engine.set_print_callback(|value, name| {
         println!("{}: {}", name, value);
-    }));
+    });
     let mut code = String::new();
     while let Ok(line) = rl.readline(if code.is_empty() { "> " } else { ". " }) {
         code.push_str(&line);
-        let statements = match parser.parse(&code) {
-            Ok(expr) => expr,
-            Err(ParseError::UnrecognizedEof { .. }) => {
+        let outputs = match engine.run(&code) {
+            Ok(outputs) => outputs,
+            Err(error) if error.is_incomplete() => {
+                code.push('\n');
                 continue;
             }
-            Err(err) => {
-                eprintln!("Error: {}", err);
+            Err(error) => {
+                print_diagnostic(error, &code);
                 code.clear();
                 continue;
             }
         };
         code.clear();
 
-        for statement in statements {
-            match evaluator.execute(&statement) {
-                Ok(()) => {}
-                Err(e) => {
-                    print_diagnostic(e, &line);
-                    continue;
-                }
-            }
-        }
-        for output in evaluator.take_outputs() {
+        for output in outputs {
             let (width, _) = crossterm::terminal::size().unwrap_or((80, 0));
             println!("{}:", output.name);
-            let labeled_probabilities = format_output_probabilities(Distribution::from_runtime(
-                output.value,
-                output.field_names,
-            ));
+            let labeled_probabilities = format_output_probabilities(output.distribution);
             display_distribution(&labeled_probabilities, width);
         }
     }

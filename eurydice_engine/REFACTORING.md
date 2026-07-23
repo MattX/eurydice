@@ -86,9 +86,9 @@ Blocks and loops continue to share their containing frame, preserving existing
 assignment behavior. Focused tests cover nearest dynamic lookup, caller
 isolation, recursion, and cleanup after runtime errors.
 
-## 4. Add a high-level engine API
+## 4. Add a high-level engine API — completed
 
-The CLI and WASM frontends currently repeat the same workflow:
+The CLI and WASM frontends previously repeated the same workflow:
 
 1. construct the generated parser;
 2. parse source text;
@@ -97,9 +97,15 @@ The CLI and WASM frontends currently repeat the same workflow:
 5. drain outputs; and
 6. convert runtime values into output distributions.
 
-A façade such as `Engine::run(source)` could own this workflow and expose a
-stable public API, while keeping the parser, AST, evaluator internals, and
-runtime values available only where needed.
+The stateful `Engine::run(source)` façade now owns this workflow and returns
+named, serialized output distributions. It exposes owned, source-ranged parse
+and runtime diagnostics, including an incomplete-input signal for interactive
+frontends, and adapts `print` callbacks to display strings so runtime values do
+not cross the façade.
+
+The CLI and WASM frontends use this API. Parser, AST, evaluator, and runtime
+value APIs remain available for lower-level engine tests and specialized
+integrations, but are no longer needed by either frontend.
 
 Expected benefits:
 
