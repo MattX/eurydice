@@ -117,6 +117,12 @@ export default defineConfig(({ isSsrBuild }) => ({
             workbox: {
               globPatterns: ["**/*.{html,js,css,wasm,svg,ico}"],
               cleanupOutdatedCaches: true,
+              // Keep the SPA navigation fallback from swallowing static files
+              // served from `public/`. Without this, a repeat visitor whose
+              // service worker is installed gets `index.html` for these routes
+              // (they are navigation requests and are not precached), so the
+              // sitemap and robots.txt effectively stop being served.
+              navigateFallbackDenylist: [/^\/robots\.txt$/, /^\/sitemap\.xml$/],
             },
           }),
         ]
