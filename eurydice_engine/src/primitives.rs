@@ -27,6 +27,7 @@ type PrimitiveExecutor =
 
 #[derive(Debug)]
 pub struct Primitive {
+    pub identifier: &'static str,
     pub arg_types: &'static [Option<StaticType>],
     pub accepts_non_numeric: bool,
     pub execute: PrimitiveExecutor,
@@ -426,6 +427,7 @@ macro_rules! define_primitives {
     ) => {
         $(
             pub static $constant: Primitive = Primitive {
+                identifier: $name,
                 arg_types: $arg_types,
                 accepts_non_numeric: $accepts_non_numeric,
                 execute: $execute,

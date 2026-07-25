@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use crate::{
     ast::{self, BinaryOp, StaticType},
+    diagnostic::{EvaluationFrame, SourceId},
     value::RuntimeValue,
 };
 
@@ -17,6 +18,15 @@ impl From<ast::Range> for SourceSpan {
 #[derive(Debug, Error, Diagnostic)]
 #[error("Runtime error")]
 pub enum RuntimeError {
+    #[error("{source}")]
+    InFunction {
+        #[label = "error occurred here"]
+        range: SourceSpan,
+        source: Box<RuntimeError>,
+        body_source: SourceId,
+        frame: Box<EvaluationFrame>,
+    },
+
     #[error("Enum type error: {message}")]
     EnumTypeError {
         #[label = "{message}"]
@@ -143,6 +153,7 @@ pub enum RuntimeError {
 impl RuntimeError {
     pub fn range(&self) -> ast::Range {
         match self {
+            RuntimeError::InFunction { range, .. } => range.into(),
             RuntimeError::EnumTypeError { range, .. } => range.into(),
             RuntimeError::LabelsOnNonTupleOutput { range } => range.into(),
             RuntimeError::OutputLabelCountMismatch { range, .. } => range.into(),

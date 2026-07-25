@@ -10,6 +10,10 @@ use crate::{
         self, BareListItem, EnumDefinition, Expression, FunctionDefinition, ListItem,
         PositionOrder, SetParam, Statement, StaticType, WithRange,
     },
+    diagnostic::{
+        DiagnosticDetails, DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame,
+        LabelStyle, SourceId, SourceRange, TraceBinding, summarize_value,
+    },
     dice::{MultisetCrossProductIterator, Pool},
     operators::{apply_binary_op, apply_unary_op},
     primitives::{Primitive, register_primitives},
@@ -68,6 +72,13 @@ impl ValEnv {
             .rev()
             .any(|frame| frame.contains_key(key))
     }
+
+    fn names(&self) -> impl Iterator<Item = &str> {
+        self.frames
+            .iter()
+            .rev()
+            .flat_map(|frame| frame.keys().map(String::as_str))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +91,7 @@ pub enum Function {
 pub struct UserFunction {
     definition: FunctionDefinition,
     arg_types: Vec<Option<ResolvedArgType>>,
+    source_id: SourceId,
 }
 
 #[derive(Debug, Clone)]
@@ -109,13 +121,15 @@ impl Function {
 struct EvalContext {
     recursion_depth: usize,
     block_depth: usize,
+    source_id: SourceId,
 }
 
 impl EvalContext {
-    fn new() -> Self {
+    fn new(source_id: SourceId) -> Self {
         Self {
             recursion_depth: 0,
             block_depth: 0,
+            source_id,
         }
     }
 
@@ -123,6 +137,7 @@ impl EvalContext {
         Self {
             recursion_depth: self.recursion_depth,
             block_depth: self.block_depth + 1,
+            source_id: self.source_id,
         }
     }
 }
@@ -159,6 +174,8 @@ pub struct Evaluator {
     recursion_depth: usize,
     lowest_first: bool,
     print_callback: Option<Box<dyn Fn(RuntimeValue, String)>>,
+    source_id: SourceId,
+    diagnostics: Vec<EngineDiagnostic>,
 }
 
 /// A top-level output and its presentation metadata.
@@ -189,7 +206,97 @@ impl Evaluator {
             recursion_depth: 10,
             lowest_first: false,
             print_callback: None,
+            source_id: SourceId(0),
+            diagnostics: Vec::new(),
         }
+    }
+
+    pub fn begin_submission(&mut self, source_id: SourceId) {
+        self.source_id = source_id;
+        self.diagnostics.clear();
+    }
+
+    pub fn take_diagnostics(&mut self) -> Vec<EngineDiagnostic> {
+        std::mem::take(&mut self.diagnostics)
+    }
+
+    pub(crate) fn variable_suggestions(&self, name: &str) -> Vec<String> {
+        closest_names(name, self.env.names())
+    }
+
+    pub(crate) fn function_suggestions(&self, name: &str) -> Vec<String> {
+        closest_names(name, self.functions.keys().map(String::as_str))
+    }
+
+    fn push_warning(&mut self, diagnostic: EngineDiagnostic) {
+        let primary = diagnostic.primary_range();
+        if self
+            .diagnostics
+            .iter()
+            .any(|existing| existing.code == diagnostic.code && existing.primary_range() == primary)
+        {
+            return;
+        }
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn warn_pool_reuse(&mut self, source: SourceId, range: ast::Range, description: String) {
+        self.push_warning(EngineDiagnostic {
+            code: "evaluation.independent_pool_reuse".to_string(),
+            severity: DiagnosticSeverity::Warning,
+            summary: "The same dice pool is sampled independently more than once".to_string(),
+            labels: vec![DiagnosticLabel {
+                range: SourceRange { source, range },
+                message: format!("{description} refers to the same pool"),
+                style: LabelStyle::Primary,
+            }],
+            notes: vec![
+                "Assigning a dice pool to a variable stores its distribution; it does not roll \
+                 the dice and remember one result."
+                    .to_string(),
+            ],
+            help: Some(
+                "To reuse one roll, pass the pool to an `n` parameter and reuse that parameter \
+                 inside the function."
+                    .to_string(),
+            ),
+            fixes: Vec::new(),
+            trace: Vec::new(),
+            details: DiagnosticDetails::PoolReuse { name: description },
+            incomplete: false,
+        });
+    }
+
+    fn warn_limit(
+        &mut self,
+        source: SourceId,
+        range: ast::Range,
+        code: &str,
+        setting: &str,
+        value: usize,
+        summary: &str,
+    ) {
+        self.push_warning(EngineDiagnostic {
+            code: code.to_string(),
+            severity: DiagnosticSeverity::Warning,
+            summary: summary.to_string(),
+            labels: vec![DiagnosticLabel {
+                range: SourceRange { source, range },
+                message: format!("`{setting}` is currently {value}"),
+                style: LabelStyle::Primary,
+            }],
+            notes: vec!["The returned distribution is bounded by this setting.".to_string()],
+            help: Some(format!(
+                "Change it with `set \"{setting}\" to N` if you need a different bound."
+            )),
+            fixes: Vec::new(),
+            trace: Vec::new(),
+            details: DiagnosticDetails::Limit {
+                setting: setting.to_string(),
+                value,
+            },
+            incomplete: false,
+        });
     }
 
     pub fn set_print_callback(&mut self, callback: Box<dyn Fn(RuntimeValue, String)>) {
@@ -197,7 +304,7 @@ impl Evaluator {
     }
 
     pub fn execute(&mut self, statement: &WithRange<Statement>) -> Result<(), RuntimeError> {
-        let eval_context = EvalContext::new();
+        let eval_context = EvalContext::new(self.source_id);
         let result = self.execute_statement(&eval_context, statement)?;
         debug_assert!(
             result.is_none(),
@@ -362,6 +469,7 @@ impl Evaluator {
                     Function::UserDefined(Rc::new(UserFunction {
                         definition: fd.clone(),
                         arg_types,
+                        source_id: eval_context.source_id,
                     })),
                 );
             }
@@ -526,6 +634,20 @@ impl Evaluator {
             Expression::BinaryOp { op, left, right } => {
                 let left_value = self.evaluate(eval_context, left)?;
                 let right_value = self.evaluate(eval_context, right)?;
+                if same_pool(&left_value, &right_value) {
+                    let description = match (&left.value, &right.value) {
+                        (Expression::Reference(left), Expression::Reference(right))
+                            if left == right =>
+                        {
+                            format!("Both uses of `{left}`")
+                        }
+                        (Expression::Reference(left), Expression::Reference(right)) => {
+                            format!("`{left}` and `{right}`")
+                        }
+                        _ => "Both operands".to_string(),
+                    };
+                    self.warn_pool_reuse(eval_context.source_id, op.range, description);
+                }
                 Ok(apply_binary_op(
                     op,
                     &left_value,
@@ -677,6 +799,14 @@ impl Evaluator {
         args: Vec<WithRange<RuntimeValue>>,
     ) -> Result<RuntimeValue, RuntimeError> {
         if eval_context.recursion_depth >= self.recursion_depth {
+            self.warn_limit(
+                eval_context.source_id,
+                function.range,
+                "evaluation.maximum_function_depth",
+                "maximum function depth",
+                self.recursion_depth,
+                "Maximum function depth stopped this call",
+            );
             return Ok(RuntimeValue::empty_list());
         }
 
@@ -686,6 +816,26 @@ impl Evaluator {
             panic!(
                 "wrong number of arguments; this should have been caught by function name matching"
             );
+        }
+        for left_index in 0..args.len() {
+            for right_index in left_index + 1..args.len() {
+                let samples_left = expected_types[left_index]
+                    .as_ref()
+                    .is_some_and(|expected| expected.shape != StaticType::Pool);
+                let samples_right = expected_types[right_index]
+                    .as_ref()
+                    .is_some_and(|expected| expected.shape != StaticType::Pool);
+                if samples_left
+                    && samples_right
+                    && same_pool(&args[left_index].value, &args[right_index].value)
+                {
+                    self.warn_pool_reuse(
+                        eval_context.source_id,
+                        function.range,
+                        format!("Arguments {} and {}", left_index + 1, right_index + 1),
+                    );
+                }
+            }
         }
         let arg_ranges = args.iter().map(|arg| arg.range).collect::<Vec<_>>();
         let args = args
@@ -790,15 +940,27 @@ impl Evaluator {
         arg_ranges: &[ast::Range],
     ) -> Result<RuntimeValue, RuntimeError> {
         match &function.value {
-            Function::Primitive(primitive) => (primitive.execute)(
-                args,
-                crate::primitives::PrimitiveCtx {
-                    arg_ranges,
-                    explode_depth: self.explode_depth,
-                    lowest_first: self.lowest_first,
-                    function_range: function.range,
-                },
-            ),
+            Function::Primitive(primitive) => {
+                if transform_depth_affects_result(primitive.identifier, args) {
+                    self.warn_limit(
+                        eval_context.source_id,
+                        function.range,
+                        "evaluation.explode_depth",
+                        "explode depth",
+                        self.explode_depth,
+                        "Explode depth bounds this distribution",
+                    );
+                }
+                (primitive.execute)(
+                    args,
+                    crate::primitives::PrimitiveCtx {
+                        arg_ranges,
+                        explode_depth: self.explode_depth,
+                        lowest_first: self.lowest_first,
+                        function_range: function.range,
+                    },
+                )
+            }
             Function::UserDefined(user_function) => {
                 self.env.push_frame();
                 for (arg, formal) in args.iter().zip(user_function.definition.args.iter()) {
@@ -807,8 +969,9 @@ impl Evaluator {
                 let new_context = EvalContext {
                     recursion_depth: eval_context.recursion_depth + 1,
                     block_depth: eval_context.block_depth + 1,
+                    source_id: user_function.source_id,
                 };
-                let result = (|| {
+                let result: Result<RuntimeValue, RuntimeError> = (|| {
                     let mut result = None;
                     for statement in &user_function.definition.body {
                         result = self.execute_statement(&new_context, statement)?;
@@ -820,7 +983,35 @@ impl Evaluator {
                     Ok(result.unwrap_or_else(RuntimeValue::empty_pool))
                 })();
                 self.env.pop_frame();
-                result
+                result.map_err(|source| {
+                    let range = source.range();
+                    RuntimeError::InFunction {
+                        range: range.into(),
+                        source: Box::new(source),
+                        body_source: user_function.source_id,
+                        frame: Box::new(EvaluationFrame {
+                            function: user_function.definition.name.value.clone(),
+                            call: SourceRange {
+                                source: eval_context.source_id,
+                                range: function.range,
+                            },
+                            definition: Some(SourceRange {
+                                source: user_function.source_id,
+                                range: user_function.definition.name.range,
+                            }),
+                            bindings: user_function
+                                .definition
+                                .args
+                                .iter()
+                                .zip(args)
+                                .map(|(formal, value)| TraceBinding {
+                                    name: formal.value.name.clone(),
+                                    value: summarize_value(value),
+                                })
+                                .collect(),
+                        }),
+                    }
+                })
             }
         }
     }
@@ -1011,6 +1202,69 @@ fn reverse_if<T: Clone>(should_reverse: bool, values: &[T]) -> Vec<T> {
     } else {
         values.into()
     }
+}
+
+fn same_pool(left: &RuntimeValue, right: &RuntimeValue) -> bool {
+    matches!(
+        (left, right),
+        (RuntimeValue::Pool(left, _), RuntimeValue::Pool(right, _))
+            if Rc::ptr_eq(left, right)
+    )
+}
+
+fn transform_depth_affects_result(identifier: &str, args: &[RuntimeValue]) -> bool {
+    if !identifier.starts_with("explode ") && !identifier.starts_with("reroll ") {
+        return false;
+    }
+    let Some(RuntimeValue::Pool(pool, _)) = args.first() else {
+        return false;
+    };
+    if pool.ordered_outcomes().is_empty() {
+        return false;
+    }
+    let Some(condition) = args.get(1) else {
+        // Bare explode/reroll triggers on the highest outcome, which exists for
+        // every nonempty pool.
+        return true;
+    };
+    let RuntimeValue::List(condition, _) = condition else {
+        return false;
+    };
+    pool.ordered_outcomes()
+        .iter()
+        .any(|(outcome, _)| condition.contains(outcome))
+}
+
+fn closest_names<'a>(needle: &str, candidates: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut ranked = candidates
+        .map(|candidate| (edit_distance(needle, candidate), candidate))
+        .collect::<Vec<_>>();
+    ranked.sort();
+    ranked.dedup_by(|left, right| left.1 == right.1);
+    let threshold = 2.max(needle.chars().count() / 3);
+    ranked
+        .into_iter()
+        .filter(|(distance, _)| *distance <= threshold)
+        .take(3)
+        .map(|(_, candidate)| candidate.to_string())
+        .collect()
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (left_index, left_character) in left.chars().enumerate() {
+        let mut current = vec![left_index + 1];
+        for (right_index, right_character) in right.iter().enumerate() {
+            current.push(
+                (previous[right_index + 1] + 1)
+                    .min(current[right_index] + 1)
+                    .min(previous[right_index] + usize::from(left_character != *right_character)),
+            );
+        }
+        previous = current;
+    }
+    previous[right.len()]
 }
 
 #[cfg(test)]

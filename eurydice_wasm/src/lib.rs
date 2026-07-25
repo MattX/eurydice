@@ -17,6 +17,21 @@ pub fn run(input: &str, print_callback: Function) -> JsValue {
     serde_wasm_bindgen::to_value(&run_inner(input, callback)).unwrap()
 }
 
+/// Structured engine output for richer diagnostic frontends. The existing
+/// `run` export remains unchanged for compatibility with the current website.
+#[wasm_bindgen(js_name = runWithDiagnostics)]
+pub fn run_with_diagnostics(input: &str, print_callback: Function) -> JsValue {
+    set_panic_hook();
+    let callback = move |value: String, name: String| {
+        print_callback
+            .call2(&JsValue::NULL, &value.into(), &name.into())
+            .unwrap();
+    };
+    let mut engine = Engine::new();
+    engine.set_print_callback(callback);
+    serde_wasm_bindgen::to_value(&engine.run_with_diagnostics(input)).unwrap()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Error {
     message: String,
@@ -36,8 +51,8 @@ where
             let range = error.range();
             Error {
                 message: error.to_string(),
-                from: range.start,
-                to: range.end,
+                from: byte_to_utf16(input, range.start),
+                to: byte_to_utf16(input, range.end),
             }
         })
         .map(|outputs| {
@@ -48,9 +63,17 @@ where
         })
 }
 
+fn byte_to_utf16(source: &str, byte_offset: usize) -> usize {
+    let mut byte_offset = byte_offset.min(source.len());
+    while !source.is_char_boundary(byte_offset) {
+        byte_offset -= 1;
+    }
+    source[..byte_offset].encode_utf16().count()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::run_inner;
+    use super::{byte_to_utf16, run_inner};
 
     #[test]
     fn labeled_tuple_metadata_reaches_wasm_output() {
@@ -61,5 +84,11 @@ mod tests {
             distribution.field_names.as_ref().unwrap(),
             &["Left".to_string(), "Right".to_string()]
         );
+    }
+
+    #[test]
+    fn converts_engine_byte_offsets_to_javascript_offsets() {
+        assert_eq!(byte_to_utf16("éMISSING", 2), 1);
+        assert_eq!(byte_to_utf16("😀MISSING", 4), 2);
     }
 }
