@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef } from "react";
 
 import { WorkerWrapper } from "./worker-wrapper";
 import { NamedDistribution, isNamedScalarDistribution } from "./util";
-import { WireDistribution, normalizeDistribution } from "./utils/tupleData";
+import { normalizeDistribution } from "./utils/tupleData";
 import OutputPane from "./components/OutputPane";
 import ExportModal from "./components/ExportModal";
 import EditorPane from "./components/EditorPane";
@@ -13,6 +13,11 @@ import EurydiceWorker from "./worker?worker";
 import { Toaster } from "react-hot-toast";
 import { numericOutcomeRange } from "./utils/chartData";
 import { Group, Panel, Separator } from "react-resizable-panels";
+import {
+  currentSourceId,
+  EurydiceDiagnostic,
+  RunReport,
+} from "./diagnostics";
 
 export default function App() {
   return (
@@ -30,7 +35,8 @@ function AppInner() {
       : localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
   });
   const [output, setOutput] = React.useState<NamedDistribution[]>([]);
-  const [error, setError] = React.useState<EurydiceError | null>(null);
+  const [diagnostics, setDiagnostics] = React.useState<EurydiceDiagnostic[]>([]);
+  const [diagnosticSourceId, setDiagnosticSourceId] = React.useState<number | null>(null);
   const [runLive, setRunLiveInner] = React.useState(
     () => localStorage.getItem("eurydice0_run_live") !== "false"
   );
@@ -69,16 +75,16 @@ function AppInner() {
 
   const attachOnMessage = useCallback((worker: WorkerWrapper) => {
     worker.setOnMessage((event: MessageEvent<EurydiceMessage>) => {
-      if ("Err" in event.data) {
+      if ("Report" in event.data) {
         runningRef.current = false;
         setRunning(false);
-        setError(event.data.Err);
-      } else if ("Ok" in event.data) {
-        runningRef.current = false;
-        setRunning(false);
-        setError(null);
-        const distributions: NamedDistribution[] = event.data.Ok.map(
-          ([name, distribution]) => [name, normalizeDistribution(distribution)]
+        const report = event.data.Report;
+        const sourceId = currentSourceId(report);
+        const nextDiagnostics = [...report.diagnostics];
+        setDiagnosticSourceId(sourceId);
+
+        const distributions: NamedDistribution[] = report.outputs.map(
+          ({ name, distribution }) => [name, normalizeDistribution(distribution)]
         );
         const chartData = distributions.filter(isNamedScalarDistribution);
 
@@ -90,14 +96,22 @@ function AppInner() {
               ([, distribution]) => distribution.fields.length > 1
             )
           );
-          setError({
-            message: `Range of outcomes (${range}) is too large to display. Maximum range is 5000.`,
-            from: 0,
-            to: 0,
-          });
-        } else {
+          nextDiagnostics.push(
+            frontendDiagnostic(
+              `Range of outcomes (${range}) is too large to display. Maximum range is 5000.`,
+              sourceId,
+            ),
+          );
+        } else if (!nextDiagnostics.some((diagnostic) => diagnostic.severity === "error")) {
           setOutput(distributions);
         }
+        setDiagnostics(nextDiagnostics);
+      } else if ("InternalError" in event.data) {
+        runningRef.current = false;
+        setRunning(false);
+        setDiagnostics([
+          frontendDiagnostic(event.data.InternalError, null),
+        ]);
       } else if ("Print" in event.data) {
         const printOutput = event.data.Print;
         setPrintOutputs((printOutputs) => [...printOutputs, printOutput]);
@@ -121,7 +135,7 @@ function AppInner() {
     runningRef.current = true;
     setRunning(true);
     setPrintOutputs([]);
-    setError(null);
+    setDiagnostics([]);
     worker.postMessage(val);
   }, [attachOnMessage]);
 
@@ -182,7 +196,8 @@ function AppInner() {
         setRunLive={setRunLive}
         running={running}
         run={() => run(editorText)}
-        error={error}
+        diagnostics={diagnostics}
+        diagnosticSourceId={diagnosticSourceId}
         printOutputs={printOutputs}
         exportButton={exportButton}
       />
@@ -239,12 +254,31 @@ function AppInner() {
 }
 
 type EurydiceMessage =
-  | { Ok: [string, WireDistribution][] }
-  | { Err: EurydiceError }
+  | { Report: RunReport }
+  | { InternalError: string }
   | { Print: [string, string] };
 
-interface EurydiceError {
-  message: string;
-  from: number;
-  to: number;
+function frontendDiagnostic(
+  summary: string,
+  sourceId: number | null,
+): EurydiceDiagnostic {
+  return {
+    code: "frontend.display_error",
+    severity: "error",
+    summary,
+    labels:
+      sourceId === null
+        ? []
+        : [{
+            range: { source: sourceId, range: { start: 0, end: 0 } },
+            message: "",
+            style: "primary",
+          }],
+    notes: [],
+    help: null,
+    fixes: [],
+    trace: [],
+    details: { kind: "evaluation" },
+    incomplete: false,
+  };
 }

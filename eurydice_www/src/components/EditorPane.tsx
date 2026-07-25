@@ -15,33 +15,61 @@ import WithTooltip from "./Tooltip";
 import { DarkModeContext } from "./DarkModeContext";
 import React from "react";
 import { toast } from "react-hot-toast";
+import {
+  applyTextEdits,
+  EurydiceDiagnostic,
+  SuggestedFix,
+} from "../diagnostics";
 
 export default function EditorPane(props: EditorPaneProps) {
   const isDarkMode = React.useContext(DarkModeContext);
 
   const eurydiceLinter = linter(() => {
-    if (props.error === null) {
-      return [];
-    }
-    return [
-      {
-        // Clamp values here - a slightly delayed worker response can cause
-        // a crash if the error is now out of bounds.
-        from: Math.min(props.error.from, props.editorText.length),
-        to: Math.min(props.error.to, props.editorText.length),
-        message: props.error.message,
-        severity: "error",
-      },
-    ];
+    return props.diagnostics.flatMap((diagnostic) =>
+      diagnostic.labels
+        .filter((label) => label.range.source === props.diagnosticSourceId)
+        .map((label) => ({
+          // Clamp values here - a slightly delayed worker response can cause
+          // a crash if the diagnostic is now out of bounds.
+          from: Math.min(label.range.range.start, props.editorText.length),
+          to: Math.min(label.range.range.end, props.editorText.length),
+          message: [
+            diagnostic.summary,
+            label.message || null,
+            diagnostic.help,
+          ].filter(Boolean).join(" — "),
+          severity: diagnostic.severity,
+        })),
+    );
   });
 
-  let errorIcon = null;
-  if (props.error) {
-    errorIcon = (
-      <WithTooltip text="This code contains errors. Hover red marks in the editor to see details.">
-        <Warning />
+  const errorCount = props.diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "error",
+  ).length;
+  const warningCount = props.diagnostics.length - errorCount;
+  let diagnosticIcon = null;
+  if (errorCount > 0) {
+    diagnosticIcon = (
+      <WithTooltip text={`${errorCount} error${errorCount === 1 ? "" : "s"}. See the diagnostics below the editor.`}>
+        <Warning color="var(--danger)" />
       </WithTooltip>
     );
+  } else if (warningCount > 0) {
+    diagnosticIcon = (
+      <WithTooltip text={`${warningCount} warning${warningCount === 1 ? "" : "s"}. See the diagnostics below the editor.`}>
+        <Warning color="var(--warning)" />
+      </WithTooltip>
+    );
+  }
+
+  function applyFix(fix: SuggestedFix) {
+    if (
+      props.diagnosticSourceId === null ||
+      fix.edits.some((edit) => edit.range.source !== props.diagnosticSourceId)
+    ) {
+      return;
+    }
+    props.onChange(applyTextEdits(props.editorText, fix.edits));
   }
 
   let outputs = null;
@@ -103,7 +131,7 @@ export default function EditorPane(props: EditorPaneProps) {
         <div className="ml-auto flex items-center gap-2">
           {props.running && <Spinner />}
           {outputIcon}
-          {errorIcon}
+          {diagnosticIcon}
           {props.exportButton}
         </div>
       </div>
@@ -118,6 +146,23 @@ export default function EditorPane(props: EditorPaneProps) {
           theme={isDarkMode ? githubDark : githubLight}
         />
       </div>
+      {props.diagnostics.length > 0 && (
+        <div className="mt-3 space-y-2" aria-label="Diagnostics">
+          {props.diagnostics.map((diagnostic, diagnosticIndex) => (
+            <DiagnosticCard
+              key={`${diagnostic.code}-${diagnosticIndex}`}
+              diagnostic={diagnostic}
+              canApplyFix={(fix) =>
+                props.diagnosticSourceId !== null &&
+                fix.edits.every(
+                  (edit) => edit.range.source === props.diagnosticSourceId,
+                )
+              }
+              applyFix={applyFix}
+            />
+          ))}
+        </div>
+      )}
       {outputs}
     </>
   );
@@ -133,10 +178,70 @@ export interface EditorPaneProps {
   running: boolean;
   run: () => void;
 
-  error: { from: number; to: number; message: string } | null;
+  diagnostics: EurydiceDiagnostic[];
+  diagnosticSourceId: number | null;
   printOutputs: [string, string][];
 
   exportButton?: React.ReactNode;
+}
+
+function DiagnosticCard({
+  diagnostic,
+  canApplyFix,
+  applyFix,
+}: {
+  diagnostic: EurydiceDiagnostic;
+  canApplyFix: (fix: SuggestedFix) => boolean;
+  applyFix: (fix: SuggestedFix) => void;
+}) {
+  const color = diagnostic.severity === "error" ? "var(--danger)" : "var(--warning)";
+  return (
+    <section
+      className="rounded-lg border p-3 text-sm"
+      style={{ borderLeftColor: color, borderLeftWidth: 3, background: "var(--surface-2)" }}
+    >
+      <div className="flex items-start gap-2">
+        <Warning color={color} />
+        <div className="min-w-0 grow">
+          <div className="font-semibold">{diagnostic.summary}</div>
+          <div className="mt-0.5 font-mono text-xs text-[var(--text-muted)]">
+            {diagnostic.code}
+          </div>
+          {diagnostic.help && <p className="mt-2">{diagnostic.help}</p>}
+          {diagnostic.notes.map((note, index) => (
+            <p className="mt-1 text-[var(--text-muted)]" key={index}>
+              {note}
+            </p>
+          ))}
+          {diagnostic.trace.length > 0 && (
+            <div className="mt-2 space-y-1 font-mono text-xs">
+              {diagnostic.trace.map((frame, index) => {
+                const bindings = frame.bindings
+                  .map((binding) => `${binding.name} = ${binding.value.preview}`)
+                  .join(", ");
+                return (
+                  <div key={index}>
+                    while calling [{frame.function.split("{}").join("…")}]
+                    {bindings && ` with ${bindings}`}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {diagnostic.fixes.filter(canApplyFix).map((fix, index) => (
+            <button
+              type="button"
+              className="btn btn-secondary mt-2 mr-2"
+              onClick={() => applyFix(fix)}
+              key={index}
+            >
+              {fix.message}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 const parserWithMetadata = parser.configure({

@@ -1,15 +1,15 @@
-import { run } from "eurydice_wasm";
+import { runWithDiagnostics } from "eurydice_wasm";
 
 self.onmessage = (event) => {
   try {
-    const result = run(event.data, (value, name) => {
+    const report = runWithDiagnostics(event.data, (value, name) => {
       self.postMessage({ Print: [value, name] });
     });
-    self.postMessage(result);
+    self.postMessage({ Report: report });
   } catch (e) {
     console.error(e);
     self.postMessage({
-      Err: { message: "Internal error", from: 0, to: 0 },
+      InternalError: "The evaluation worker encountered an internal error.",
     });
   }
 };

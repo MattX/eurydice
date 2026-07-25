@@ -24,6 +24,7 @@
     --accent-border: #7dd3fc;
     --ring: rgba(2, 132, 199, 0.35);
     --danger: #c0392b;
+    --warning: #a16207;
     color-scheme: light;
   }
 
@@ -44,6 +45,7 @@
       --accent-border: #1e4a63;
       --ring: rgba(56, 189, 248, 0.45);
       --danger: #e57373;
+      --warning: #facc15;
       color-scheme: dark;
     }
   }
