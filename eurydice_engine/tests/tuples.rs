@@ -435,3 +435,68 @@ fn rejects_invalid_tuple_operations() {
         assert!(run(program).is_err(), "expected error for {program}");
     }
 }
+
+#[test]
+fn depth_limited_recursion_truncates_tuple_accumulation() {
+    // Hitting the maximum function depth returns an empty list whose outcome
+    // type is uninhabited, so it sums to the polymorphic additive identity.
+    // A hand-rolled explode that accumulates a tuple therefore truncates
+    // cleanly instead of trying to add a tuple to the integer 0.
+    let outputs = run(r#"
+        set "maximum function depth" to 2
+        function: recur N:n {
+          if N <= 0 { result: [tuple 0 0] }
+          result: [tuple 1 1] + [recur N - 1]
+        }
+        output [recur 5]
+        "#)
+    .unwrap();
+    assert_eq!(
+        tuple_output_distribution(outputs[0].value.clone()),
+        [(vec![1, 1], 1.0)]
+    );
+}
+
+#[test]
+fn hand_rolled_explode_accumulates_a_joint_distribution() {
+    // The canonical reason the polymorphic identity earns its keep: recursion
+    // bounded only by the depth limit, accumulating (damage, crit count).
+    let outputs = run(r#"
+        set "maximum function depth" to 2
+        function: attack DIE:n {
+          if DIE = 6 { result: [tuple 6 1] + [attack d6] }
+          result: [tuple DIE 0]
+        }
+        output [attack d6]
+        "#)
+    .unwrap();
+    assert_eq!(
+        tuple_output_distribution(outputs[0].value.clone()),
+        vec![
+            (vec![1, 0], 1.0 / 6.0),
+            (vec![2, 0], 1.0 / 6.0),
+            (vec![3, 0], 1.0 / 6.0),
+            (vec![4, 0], 1.0 / 6.0),
+            (vec![5, 0], 1.0 / 6.0),
+            // The explosion is cut short by the depth limit: the truncated
+            // call sums to the additive identity and leaves (6, 1) intact.
+            (vec![6, 1], 1.0 / 6.0),
+        ]
+    );
+}
+
+#[test]
+fn function_without_result_contributes_no_outcomes_to_tuple_results() {
+    // A missing `result` yields an empty dimension-one pool, which contributes
+    // nothing rather than summing to zero. Its outcome type is uninhabited, so
+    // it merges with tuple-valued branches instead of forcing `int`.
+    let outputs = run(r#"
+        function: maybe X:n { if X > 1 { result: [tuple 1 1] } }
+        output [maybe d2]
+        "#)
+    .unwrap();
+    assert_eq!(
+        tuple_output_distribution(outputs[0].value.clone()),
+        [(vec![1, 1], 1.0)]
+    );
+}

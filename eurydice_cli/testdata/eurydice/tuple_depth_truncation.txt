@@ -1,0 +1,40 @@
+\\\ A tuple accumulator cut short by the "maximum function depth" setting.
+\\\ The truncated call sums to the polymorphic additive identity rather than
+\\\ to the integer 0, so adding it to a tuple stays well-typed and the
+\\\ recursion degrades gracefully instead of raising a type error.
+
+set "maximum function depth" to 3
+
+function: recur N:n {
+  if N <= 0 { result: [tuple 0 0] }
+  result: [tuple 1 1] + [recur N - 1]
+}
+
+TRUNCATED: [recur 10]
+output [element 1 of TRUNCATED] named "first field"
+output [element 2 of TRUNCATED] named "second field"
+
+\\\ A function with no result statement returns an empty dimension-one pool,
+\\\ which contributes no outcomes at all rather than summing to zero.
+function: maybe X:n { if X > 1 { result: [tuple 7 8] } }
+MAYBE: [maybe d2]
+output [element 1 of MAYBE] named "no-result first field"
+output [element 2 of MAYBE] named "no-result second field"
+
+\\\ Result \\\
+
+"first field",2,0,2,2
+#,%
+2,100
+
+"second field",2,0,2,2
+#,%
+2,100
+
+"no-result first field",7,0,7,7
+#,%
+7,100
+
+"no-result second field",8,0,8,8
+#,%
+8,100

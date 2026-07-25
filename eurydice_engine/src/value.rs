@@ -325,6 +325,26 @@ fn display_pool(pool: &Pool<ElementValue>, outcome_type: &ElementType) -> String
 }
 
 impl RuntimeValue {
+    /// The empty list returned by a call cut short by the maximum function
+    /// depth. Its outcome type is uninhabited rather than `int`, so that
+    /// summing it yields the polymorphic additive identity: a recursion that
+    /// accumulates tuples still truncates cleanly instead of failing to add a
+    /// tuple to `0`.
+    pub(crate) fn empty_list() -> Self {
+        RuntimeValue::List(Rc::new(Vec::new()), ElementType::Uninhabited)
+    }
+
+    /// The empty distribution returned by a function with no `result`
+    /// statement. Unlike [`Self::empty_list`], this is a dimension-one pool
+    /// with no outcomes, so it contributes nothing to the caller rather than
+    /// summing to zero; AnyDice distinguishes the two.
+    pub(crate) fn empty_pool() -> Self {
+        RuntimeValue::Pool(
+            Rc::new(Pool::from_list(1, Vec::new())),
+            ElementType::Uninhabited,
+        )
+    }
+
     pub(crate) fn runtime_type(&self) -> StaticType {
         match self {
             RuntimeValue::Element(_) => StaticType::Int,

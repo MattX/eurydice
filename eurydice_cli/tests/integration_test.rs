@@ -11,11 +11,26 @@ use pretty_assertions::StrComparison;
 use std::{collections::HashSet, fs, path::Path};
 use thiserror::Error;
 
+/// Fixtures whose expected output was captured from AnyDice itself, and so
+/// double as compatibility tests.
 #[test]
 fn test_anydice_programs() {
+    run_fixture_directory("anydice");
+}
+
+/// Fixtures for Eurydice-only features, which have no AnyDice equivalent.
+/// Their expected output is recorded from this implementation rather than
+/// from AnyDice, so they guard against regressions rather than proving
+/// compatibility.
+#[test]
+fn test_eurydice_programs() {
+    run_fixture_directory("eurydice");
+}
+
+fn run_fixture_directory(directory: &str) {
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("testdata")
-        .join("anydice");
+        .join(directory);
     let mut paths_with_errors = HashSet::new();
     let mut paths = HashSet::new();
     for entry in fs::read_dir(test_dir).expect("Failed to read test directory") {

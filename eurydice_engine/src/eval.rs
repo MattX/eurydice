@@ -676,7 +676,7 @@ impl Evaluator {
         args: Vec<WithRange<RuntimeValue>>,
     ) -> Result<RuntimeValue, RuntimeError> {
         if eval_context.recursion_depth >= self.recursion_depth {
-            return Ok(vec![].into());
+            return Ok(RuntimeValue::empty_list());
         }
 
         // First, convert the arguments to the expected types.
@@ -816,7 +816,7 @@ impl Evaluator {
                         }
                     }
                     // If there's no result, there was no return statement in the function.
-                    Ok(result.unwrap_or(Pool::from_list(1, vec![]).into()))
+                    Ok(result.unwrap_or_else(RuntimeValue::empty_pool))
                 })();
                 self.env.pop_frame();
                 result
