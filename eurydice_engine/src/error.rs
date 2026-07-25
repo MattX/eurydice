@@ -77,6 +77,11 @@ pub enum RuntimeError {
         #[label = "No function named [{name}]"]
         range: SourceSpan,
         name: String,
+        /// Set when a function with the same words but a different number of
+        /// arguments exists, which usually means adjacent arguments were
+        /// accidentally parsed as a single expression.
+        #[help]
+        help: Option<String>,
     },
 
     #[error("Conditions to `if` statements must be numbers.")]

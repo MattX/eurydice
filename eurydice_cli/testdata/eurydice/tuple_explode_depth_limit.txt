@@ -12,13 +12,13 @@ function: attack DIE:n {
 \\\ Encoding both fields inside one function call keeps the joint
 \\\ distribution: damage is at most 54 and explosions at most 9.
 function: encode PAIR:n {
-  result: [element 1 of PAIR] * 10 + [element 2 of PAIR]
+  result: [field 1 of PAIR] * 10 + [field 2 of PAIR]
 }
 
 ATTACK: [attack d6]
 output [encode ATTACK] named "damage and explosions"
-output [element 1 of ATTACK] named "damage"
-output [element 2 of ATTACK] named "explosions"
+output [field 1 of ATTACK] named "damage"
+output [field 2 of ATTACK] named "explosions"
 
 \\\ Result \\\
 

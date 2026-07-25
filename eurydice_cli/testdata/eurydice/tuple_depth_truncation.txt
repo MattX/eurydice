@@ -11,15 +11,15 @@ function: recur N:n {
 }
 
 TRUNCATED: [recur 10]
-output [element 1 of TRUNCATED] named "first field"
-output [element 2 of TRUNCATED] named "second field"
+output [field 1 of TRUNCATED] named "first field"
+output [field 2 of TRUNCATED] named "second field"
 
 \\\ A function with no result statement returns an empty dimension-one pool,
 \\\ which contributes no outcomes at all rather than summing to zero.
 function: maybe X:n { if X > 1 { result: [tuple 7 8] } }
 MAYBE: [maybe d2]
-output [element 1 of MAYBE] named "no-result first field"
-output [element 2 of MAYBE] named "no-result second field"
+output [field 1 of MAYBE] named "no-result first field"
+output [field 2 of MAYBE] named "no-result second field"
 
 \\\ Result \\\
 

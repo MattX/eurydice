@@ -574,6 +574,7 @@ impl Evaluator {
                     .ok_or_else(|| RuntimeError::UndefinedFunction {
                         range: expression.range.into(),
                         name: name.value.clone(),
+                        help: arity_mismatch_help(&self.functions, &name.value),
                     })?
                     .clone();
                 let ranges = args.iter().map(|arg| arg.range).collect::<Vec<_>>();
@@ -823,6 +824,65 @@ impl Evaluator {
             }
         }
     }
+}
+
+/// Splits a function identifier such as `"field {} of {}"` into its words and
+/// its number of argument positions.
+fn identifier_shape(identifier: &str) -> (String, usize) {
+    let mut words = Vec::new();
+    let mut arity = 0;
+    for token in identifier.split_whitespace() {
+        if token == "{}" {
+            arity += 1;
+        } else {
+            words.push(token);
+        }
+    }
+    (words.join(" "), arity)
+}
+
+/// Builds a hint for a call that did not resolve, when a function with the same
+/// words but a different number of arguments does exist.
+///
+/// This is overwhelmingly caused by two adjacent arguments being parsed as one
+/// expression: `d` binds tighter than argument separation, so `[tuple d6 d8]`
+/// reads as the single argument `d(6d8)`. Suggesting a comma turns a confusing
+/// "no such function" into an actionable fix.
+fn arity_mismatch_help(functions: &HashMap<String, Function>, name: &str) -> Option<String> {
+    let (words, arity) = identifier_shape(name);
+    let mut available = functions
+        .keys()
+        .filter_map(|identifier| {
+            let (other_words, other_arity) = identifier_shape(identifier);
+            (other_words == words && other_arity != arity).then_some(other_arity)
+        })
+        .collect::<Vec<_>>();
+    if available.is_empty() {
+        return None;
+    }
+    available.sort_unstable();
+    available.dedup();
+    let counts = match available.as_slice() {
+        [only] => format!("{only} argument{}", if *only == 1 { "" } else { "s" }),
+        [rest @ .., last] => format!(
+            "{} or {last} arguments",
+            rest.iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        [] => unreachable!("checked non-empty above"),
+    };
+    let described = if words.is_empty() {
+        "a function with no words".to_string()
+    } else {
+        format!("[{words}]")
+    };
+    Some(format!(
+        "{described} takes {counts}, but this call passes {arity}. If two arguments were \
+         joined into one expression, separate them with a comma: `d` binds tighter than \
+         argument separation, so `[f d6 d8]` passes one argument and `[f d6, d8]` passes two."
+    ))
 }
 
 fn merge_outcome_type(

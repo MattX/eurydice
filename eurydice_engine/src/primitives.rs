@@ -343,7 +343,7 @@ fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
     Ok(RuntimeValue::Element(ElementValue::Tuple(fields.into())))
 }
 
-fn element_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
+fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
     let (
         RuntimeValue::Element(ElementValue::Int(index)),
         RuntimeValue::Element(ElementValue::Tuple(fields)),
@@ -351,7 +351,7 @@ fn element_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeVa
     else {
         return Err(RuntimeError::EnumTypeError {
             range: ctx.function_range.into(),
-            message: "[element I of T] requires an integer index and a tuple".to_string(),
+            message: "[field I of T] requires an integer index and a tuple".to_string(),
         });
     };
     let index = index
@@ -483,10 +483,10 @@ pub static TUPLE_4_PRIMITIVE: Primitive = Primitive {
     accepts_non_numeric: true,
     execute: tuple_execute,
 };
-pub static ELEMENT_PRIMITIVE: Primitive = Primitive {
+pub static FIELD_PRIMITIVE: Primitive = Primitive {
     arg_types: &[Some(StaticType::Int); 2],
     accepts_non_numeric: true,
-    execute: element_execute,
+    execute: field_execute,
 };
 
 fn keep_list_for_primitive(
@@ -551,7 +551,7 @@ pub fn register_primitives(functions: &mut HashMap<String, Function>) {
         ("tuple {} {}", &TUPLE_2_PRIMITIVE),
         ("tuple {} {} {}", &TUPLE_3_PRIMITIVE),
         ("tuple {} {} {} {}", &TUPLE_4_PRIMITIVE),
-        ("element {} of {}", &ELEMENT_PRIMITIVE),
+        ("field {} of {}", &FIELD_PRIMITIVE),
     ];
     functions.extend(
         primitives
@@ -922,7 +922,7 @@ mod tests {
         assert!(functions.contains_key("tuple {} {}"));
         assert!(functions.contains_key("tuple {} {} {}"));
         assert!(functions.contains_key("tuple {} {} {} {}"));
-        assert!(functions.contains_key("element {} of {}"));
+        assert!(functions.contains_key("field {} of {}"));
 
         // Should have registered exactly 20 functions
         assert_eq!(functions.len(), 20);

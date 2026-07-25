@@ -191,7 +191,7 @@ FunctionCall: Expression = {
 
 FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
     <start: @L> <w:Word> <end: @R> => vec![WithRange::new(start, end, FunctionCallItem::Word(w))],
-    <e:Expr> <es:SafeExpr*> <start: @L> <w:Word> <end: @R> => {
+    <e:Expr> <es:ArgumentTail*> <start: @L> <w:Word> <end: @R> => {
         let mut items = vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))];
         items.extend(es.into_iter().map(|e| WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))));
         items.push(WithRange::new(start, end, FunctionCallItem::Word(w)));
@@ -200,19 +200,40 @@ FunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
 };
 
 FinalFunctionCallItem: Vec<WithRange<FunctionCallItem>> = {
-    <e:Expr> <es:SafeExpr*> => {
+    <e:Expr> <es:ArgumentTail*> => {
         let mut items = vec![WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))];
         items.extend(es.into_iter().map(|e| WithRange::new(e.range.start, e.range.end, FunctionCallItem::Expr(e.value))));
         items
     }
 }
 
+// An argument following another one, with no intervening word. Without a
+// separating comma the argument must be a `SafeExpr`, which cannot be a suffix
+// of the preceding expression; a comma removes that ambiguity, so any `Expr` is
+// allowed after one. Commas are pure separators and are not part of the
+// function's identifier.
+ArgumentTail: WithRange<Expression> = {
+    <e:SafeExpr> => e,
+    "," <e:Expr> => e,
+}
+
 pub(crate) FunctionDefinition: FunctionDefinition = {
-    "function" ":" <items:FunctionDefinitionItem+> "{" <b:Block> "}" => make_function_definition(items, b),
+    "function" ":" <items:FunctionDefinitionItem+> "{" <b:Block> "}" =>
+        make_function_definition(items.into_iter().flatten().collect(), b),
 };
 
-FunctionDefinitionItem: WithRange<FunctionDefinitionItem> = {
-    <start: @L> <w:Word> <end: @R> => WithRange::new(start, end, FunctionDefinitionItem::Word(w)),
+FunctionDefinitionItem: Vec<WithRange<FunctionDefinitionItem>> = {
+    <start: @L> <w:Word> <end: @R> => vec![WithRange::new(start, end, FunctionDefinitionItem::Word(w))],
+    // Adjacent parameters may be separated by commas, mirroring call syntax.
+    // The comma is a pure separator: it does not affect the function identifier.
+    <first:PositionalArg> <rest:("," <PositionalArg>)*> => {
+        let mut items = vec![first];
+        items.extend(rest);
+        items
+    },
+};
+
+PositionalArg: WithRange<FunctionDefinitionItem> = {
     <start: @L> <id:SingleArg> <end: @R> => WithRange::new(start, end, id),
 };
 

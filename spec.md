@@ -140,12 +140,12 @@ Tuples are constructed by the built-in functions `[tuple A B]`, `[tuple A B C]`,
 
 ```
 PAIR: [tuple 3 5]
-output [element 1 of PAIR]  \ Outputs 3
-output [element 2 of PAIR]  \ Outputs 5
+output [field 1 of PAIR]  \ Outputs 3
+output [field 2 of PAIR]  \ Outputs 5
 output #PAIR                \ Outputs 2
 ```
 
-Tuple fields are selected with `[element INDEX of TUPLE]`. Indices are one-based and must be within the tuple's bounds; an invalid index is an error. The `@` operator does not project tuple fields.
+Tuple fields are selected with `[field INDEX of TUPLE]`. Indices are one-based and must be within the tuple's bounds; an invalid index is an error. The `@` operator does not project tuple fields.
 
 Tuples support structural equality and inequality with tuples of the same type: two tuples are equal exactly when every pair of corresponding fields is equal. An _additive_ tuple, one whose fields are all `int`s, additionally supports arithmetic: `+`, `-`, and unary `-` operate componentwise, multiplication by an `int` is supported in either operand order, and division by an `int` operates componentwise. `int / tuple` is not defined. Everything else follows the default in [What element types support](#what-element-types-support).
 
@@ -156,7 +156,7 @@ A: d2
 B: d2
 JOINT: [tuple A B]
 \ JOINT has outcomes (1, 1), (1, 2), (2, 1), and (2, 2). \
-output [element 1 of JOINT]
+output [field 1 of JOINT]
 ```
 
 ### Pools
@@ -491,7 +491,7 @@ The `d` operator is the main way to create a pool.
 
 #### `@` operator
 
-The `@` operator selects the (LHS)-th element from its RHS. A tuple is not treated as a list by this operator; use `[element INDEX of TUPLE]` to project a tuple field.
+The `@` operator selects the (LHS)-th element from its RHS. A tuple is not treated as a list by this operator; use `[field INDEX of TUPLE]` to project a tuple field.
 
 The LHS supplies the indices, and must be an `int` or a list of `int`s; anything else is an error. An `int` LHS is converted to a singleton list.
 
@@ -918,7 +918,7 @@ Constructs a tuple from two, three, or four `Scalar` fields; nested tuples are a
 
 Pool-valued arguments are expanded using normal [pool-based evaluation](#pool-based-evaluation), producing a joint tuple distribution.
 
-### ⊕ `[element INDEX:n of TUPLE:n]`
+### ⊕ `[field INDEX:n of TUPLE:n]`
 
 Returns the field at the one-based `INDEX` in `TUPLE`. `INDEX` must be an `int`, `TUPLE` must be a tuple, and an out-of-bounds index is an error.
 

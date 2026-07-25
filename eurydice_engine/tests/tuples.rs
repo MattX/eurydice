@@ -48,7 +48,7 @@ fn constructs_and_projects_tuples() {
         output [tuple 1 2]
         output [tuple 1 2 3]
         output [tuple 1 2 3 4]
-        output [element 2 of [tuple 10 20]]
+        output [field 2 of [tuple 10 20]]
         output #[tuple 1 2 3]
         "#)
     .unwrap();
@@ -119,9 +119,11 @@ fn tuple_distribution_can_be_projected_through_element_parameter() {
     let outputs = run(&format!(
         r#"
         {RISK_PROGRAM}
-        function: field I:n of VALUE:n {{ result: [element I of VALUE] }}
-        output [field 1 of ROUND]
-        output [field 2 of ROUND]
+        \\\ A user function wrapping the built-in, so that the tuple pool is
+        \\\ projected through an element-shaped parameter rather than directly.
+        function: project I:n of VALUE:n {{ result: [field I of VALUE] }}
+        output [project 1 of ROUND]
+        output [project 2 of ROUND]
         "#
     ))
     .unwrap();
@@ -152,7 +154,7 @@ fn tuples_support_enum_fields() {
         enum: RESULT { MISS, HIT }
         T: [tuple 3 HIT]
         output T
-        output [element 2 of T]
+        output [field 2 of T]
         "#)
     .unwrap();
     let RuntimeValue::Element(ElementValue::Tuple(fields)) = &outputs[0].value else {
@@ -418,9 +420,9 @@ fn tuple_output_labels_require_tuple_outcomes_and_matching_arity() {
 fn rejects_invalid_tuple_operations() {
     for program in [
         "output [tuple 1 [tuple 2 3]]",
-        "output [element 0 of [tuple 1 2]]",
-        "output [element -2147483648 of [tuple 1 2]]",
-        "output [element 3 of [tuple 1 2]]",
+        "output [field 0 of [tuple 1 2]]",
+        "output [field -2147483648 of [tuple 1 2]]",
+        "output [field 3 of [tuple 1 2]]",
         "output [tuple 1 2] + 3",
         "output 3 / [tuple 1 2]",
         "output [tuple 1 2] + [tuple 1 2 3]",
