@@ -1,4 +1,8 @@
 @import 'tailwindcss';
+/* Header and Toc are shared with the app and reference these tokens.
+   Must stay with the other @import rules: a CSS @import after any other
+   at-rule (such as @plugin) is invalid and gets dropped silently. */
+@import '../src/theme.css';
 
 @plugin '@tailwindcss/typography';
 
@@ -21,8 +25,9 @@
 }
 
 @layer components {
+  /* Clear the sticky header so anchor links don't land under it. */
   .document-content :is(h2, h3) {
-    scroll-margin-top: 1rem;
+    scroll-margin-top: 4.5rem;
   }
 
   .document-content pre,

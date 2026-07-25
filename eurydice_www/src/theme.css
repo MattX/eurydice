@@ -1,0 +1,100 @@
+/* ------------------------------------------------------------------ *
+ *  Eurydice design tokens — cool blue-gray surfaces + a light-blue accent.
+ *  Light values live in :root; dark values swap via prefers-color-scheme
+ *  (matching Tailwind's default `dark:` variant and the JS DarkModeContext).
+ *
+ *  Shared by the app (src/index.css) and the pre-rendered help pages
+ *  (help/index.css), which render Header and Toc and so need the tokens.
+ *  Both importers pull in Tailwind first, so `@apply` below resolves.
+ * ------------------------------------------------------------------ */
+@layer base {
+  :root {
+    --bg: #f4f7fa;
+    --surface: #ffffff;
+    --surface-2: #eef2f7;
+    --surface-3: #e1e8f0;
+    --border: #dce3ec;
+    --border-strong: #c2ccda;
+    --text: #1a2431;
+    --text-muted: #64748b;
+    --accent: #0284c7;
+    --accent-hover: #0369a1;
+    --accent-fg: #ffffff;
+    --accent-soft: #e0f2fe;
+    --accent-border: #7dd3fc;
+    --ring: rgba(2, 132, 199, 0.35);
+    --danger: #c0392b;
+    --warning: #a16207;
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1720;
+      --surface: #182230;
+      --surface-2: #141d29;
+      --surface-3: #22303f;
+      --border: #293849;
+      --border-strong: #3a4c60;
+      --text: #e5edf6;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #7dd3fc;
+      --accent-fg: #0c1a26;
+      --accent-soft: #0c2a3d;
+      --accent-border: #1e4a63;
+      --ring: rgba(56, 189, 248, 0.45);
+      --danger: #e57373;
+      --warning: #facc15;
+      color-scheme: dark;
+    }
+  }
+}
+
+/* Buttons — shared so help pages can offer real controls, not prose links. */
+@layer components {
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors select-none;
+    line-height: 1.25rem;
+    border: 1px solid transparent;
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  .btn-compact {
+    @apply px-2 py-1 text-xs;
+    line-height: 1rem;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: var(--accent-hover);
+  }
+
+  .btn-secondary {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:not(:disabled):hover {
+    background: var(--surface-3);
+    border-color: var(--border-strong);
+  }
+
+  .btn-ghost {
+    color: var(--text-muted);
+    background: transparent;
+  }
+  .btn-ghost:not(:disabled):hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
