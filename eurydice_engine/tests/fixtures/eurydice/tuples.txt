@@ -1,0 +1,152 @@
+output [tuple 1 2] named "pair"
+output [tuple 1 2 3] named "triple"
+output [tuple 1 2 3 4] named "quadruple"
+output [field 2 of [tuple 10 20]] named "projection"
+output #[tuple 1 2 3] named "tuple length"
+
+A: d2
+B: d2
+output [tuple A B] named "lifted constructor"
+
+enum: RESULT { MISS, HIT }
+T: [tuple 3 HIT]
+output T named "tuple with enum"
+output [field 2 of T] named "projected enum"
+
+output [tuple 1 2] = [tuple 1 2] named "tuple equality"
+output [tuple 1 2] != [tuple 2 1] named "tuple inequality"
+output d{[tuple 1 2], [tuple 3 4]} named "tuple die faces"
+
+output [tuple 1 2] + [tuple 3 4] named "tuple addition"
+output [tuple 10 20 30] - [tuple 1 2 3] named "tuple subtraction"
+output -[tuple 1 (-2) 3 0] named "tuple negation"
+output [tuple 2 (-3)] * 4 named "right scalar multiplication"
+output -2 * [tuple 2 (-3)] named "left scalar multiplication"
+output [tuple 7 (-7)] / 3 named "tuple division"
+
+function: identity VALUE:n { result: VALUE }
+output {[tuple 1 2], [tuple 3 4]} + [tuple 10 20] named "sequence arithmetic"
+output [identity {[tuple 1 2], [tuple 3 4]}] named "element coercion"
+output {1, 2}@{[tuple 1 2], [tuple 3 4]} named "sequence index coercion"
+
+output [tuple 1 2] named "tuple element"
+output {[tuple 1 2], [tuple 3 4], [tuple 1 2]} named "tuple list"
+
+N: 2
+output [tuple 1 2] labeled "First [N]", "Second" named "labeled element"
+output {[tuple 1 2], [tuple 3 4]} named "labeled list" labeled "Left", "Right"
+output d{[tuple 1 2], [tuple 3 4]} labeled "X", "Y" named "labeled die"
+output [tuple 1 2] labeled "", "" named "empty labels"
+
+\\\ Result \\\
+
+"pair"
+#,#,%
+1,2,100
+
+"triple"
+#,#,#,%
+1,2,3,100
+
+"quadruple"
+#,#,#,#,%
+1,2,3,4,100
+
+"projection"
+#,%
+20,100
+
+"tuple length"
+#,%
+3,100
+
+"lifted constructor"
+#,#,%
+1,1,25
+1,2,25
+2,1,25
+2,2,25
+
+"tuple with enum"
+#,RESULT,%
+3,HIT,100
+
+"projected enum"
+RESULT,%
+HIT,100
+
+"tuple equality"
+#,%
+1,100
+
+"tuple inequality"
+#,%
+1,100
+
+"tuple die faces"
+#,#,%
+1,2,50
+3,4,50
+
+"tuple addition"
+#,#,%
+4,6,100
+
+"tuple subtraction"
+#,#,#,%
+9,18,27,100
+
+"tuple negation"
+#,#,#,#,%
+-1,2,-3,0,100
+
+"right scalar multiplication"
+#,#,%
+8,-12,100
+
+"left scalar multiplication"
+#,#,%
+-4,6,100
+
+"tuple division"
+#,#,%
+2,-2,100
+
+"sequence arithmetic"
+#,#,%
+14,26,100
+
+"element coercion"
+#,#,%
+4,6,100
+
+"sequence index coercion"
+#,#,%
+4,6,100
+
+"tuple element"
+#,#,%
+1,2,100
+
+"tuple list"
+#,#,%
+1,2,66.66666666666666
+3,4,33.33333333333333
+
+"labeled element"
+First 2,Second,%
+1,2,100
+
+"labeled list"
+Left,Right,%
+1,2,50
+3,4,50
+
+"labeled die"
+X,Y,%
+1,2,50
+3,4,50
+
+"empty labels"
+,,%
+1,2,100

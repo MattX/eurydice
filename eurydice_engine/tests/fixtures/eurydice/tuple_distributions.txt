@@ -1,0 +1,142 @@
+function: risk round ATTACK:s versus DEFENCE:s {
+  COMPARISONS: [lowest of #ATTACK and #DEFENCE]
+  ATTACKER_LOSSES: 0
+  DEFENDER_LOSSES: 0
+  loop I over {1..COMPARISONS} {
+    if I@ATTACK > I@DEFENCE {
+      DEFENDER_LOSSES: DEFENDER_LOSSES + 1
+    }
+    else {
+      ATTACKER_LOSSES: ATTACKER_LOSSES + 1
+    }
+  }
+  result: [tuple ATTACKER_LOSSES DEFENDER_LOSSES]
+}
+ROUND: [risk round 3d6 versus 2d6]
+output ROUND named "risk round"
+
+\\\ A user function projects the tuple pool through an element-shaped
+\\\ parameter.
+function: project I:n of VALUE:n { result: [field I of VALUE] }
+output [project 1 of ROUND] named "attacker losses"
+output [project 2 of ROUND] named "defender losses"
+
+output 2d{[tuple 1 0], [tuple 0 1]} named "multidimensional die"
+A: d{[tuple 1 0], [tuple 0 1]}
+B: d{[tuple 1 0], [tuple 0 1]}
+output A + B named "added tuple dice"
+output 0d{[tuple 1 2], [tuple 3 4]} named "zero tuple dice"
+output -2d{[tuple 1 0], [tuple 0 1]} named "negative tuple dice"
+
+output d{[tuple 5 6]:0} named "typed empty tuple"
+
+EMPTY: 2d{}
+function: identity VALUE:n { result: VALUE }
+output EMPTY + EMPTY + [tuple 1 2] named "left identities"
+output [tuple 1 2] + EMPTY + EMPTY named "right identities"
+output [identity EMPTY] + [tuple 1 2] named "function identity"
+output EMPTY + EMPTY named "defaulted identity"
+output 2d{} + 2d{[tuple (d2) (d2)]} named "identity plus tuple die"
+output 2d{[tuple (d2) (d2)]} named "tuple die"
+output 2d{[tuple 9 8]:0} + [tuple 1 2] named "typed empty plus tuple"
+
+function: maybe tuple CONDITION:n {
+  if CONDITION { result: [tuple 1 2] }
+  result: [identity 2d{}]
+}
+output [maybe tuple d{0, 1}] named "merged identity and tuple"
+
+\\\ Result \\\
+
+"risk round"
+#,#,%
+0,2,37.165637860082306
+1,1,33.577674897119344
+2,0,29.25668724279835
+
+"attacker losses"
+#,%
+0,37.165637860082306
+1,33.577674897119344
+2,29.25668724279835
+
+"defender losses"
+#,%
+0,29.25668724279835
+1,33.577674897119344
+2,37.165637860082306
+
+"multidimensional die"
+#,#,%
+0,2,25
+1,1,50
+2,0,25
+
+"added tuple dice"
+#,#,%
+0,2,25
+1,1,50
+2,0,25
+
+"zero tuple dice"
+#,#,%
+0,0,100
+
+"negative tuple dice"
+#,#,%
+-2,0,25
+-1,-1,50
+0,-2,25
+
+"typed empty tuple"
+#,#,%
+0,0,100
+
+"left identities"
+#,#,%
+1,2,100
+
+"right identities"
+#,#,%
+1,2,100
+
+"function identity"
+#,#,%
+1,2,100
+
+"defaulted identity"
+#,%
+0,100
+
+"identity plus tuple die"
+#,#,%
+2,2,6.25
+2,3,12.5
+2,4,6.25
+3,2,12.5
+3,3,25
+3,4,12.5
+4,2,6.25
+4,3,12.5
+4,4,6.25
+
+"tuple die"
+#,#,%
+2,2,6.25
+2,3,12.5
+2,4,6.25
+3,2,12.5
+3,3,25
+3,4,12.5
+4,2,6.25
+4,3,12.5
+4,4,6.25
+
+"typed empty plus tuple"
+#,#,%
+1,2,100
+
+"merged identity and tuple"
+#,#,%
+0,0,50
+1,2,50

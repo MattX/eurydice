@@ -20,6 +20,11 @@ output [encode ATTACK] named "damage and explosions"
 output [field 1 of ATTACK] named "damage"
 output [field 2 of ATTACK] named "explosions"
 
+\\\ Exercise the tuple distribution directly with a deliberately shallow
+\\\ depth limit.
+set "maximum function depth" to 2
+output [attack d6] named "shallow joint distribution"
+
 \\\ Result \\\
 
 "damage and explosions",42.19999581253492,33.061086951476064,10,549
@@ -132,3 +137,12 @@ output [field 2 of ATTACK] named "explosions"
 7,0.0002976870903825636
 8,0.00004961451506376061
 9,0.000009922903012752121
+
+"shallow joint distribution"
+#,#,%
+1,0,16.666666666666664
+2,0,16.666666666666664
+3,0,16.666666666666664
+4,0,16.666666666666664
+5,0,16.666666666666664
+6,1,16.666666666666664

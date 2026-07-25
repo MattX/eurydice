@@ -1,9 +1,20 @@
+//! Full-program golden tests.
+//!
+//! AnyDice compatibility fixtures retain AnyDice's numeric summary line:
+//! `"name",mean,stddev,min,max`. Eurydice-native fixtures use just `"name"`,
+//! followed by one header per output field and a final `%` column. `#` is an
+//! integer field, enum fields use their enum name, and labeled tuple fields use
+//! their labels. Outcome rows contain rendered field values and a percentage.
+
 use approx::relative_ne;
-use csv::ReaderBuilder;
+use csv::{ReaderBuilder, WriterBuilder};
 use eurydice_engine::{
     dice::Pool,
     eval, grammar,
-    output::{export_anydice_format, mean, min_and_max, stddev, to_probabilities},
+    output::{
+        export_anydice_format, mean, min_and_max, stddev, to_probabilities, Distribution,
+        FieldSchema,
+    },
 };
 use pretty_assertions::StrComparison;
 use std::{collections::HashSet, fs, path::Path};
@@ -113,22 +124,37 @@ fn run_fixture_directory(directory: &str) {
                 .zip(expected_results.iter())
                 .zip(expected_results_strings.iter())
             {
-                let d = match numeric_fixture_pool(output.value) {
-                    Ok(d) => d,
-                    Err(error) => {
-                        paths_with_errors.insert(path_string.clone());
-                        println!("Unsupported output in file {}: {}", path.display(), error);
-                        continue;
+                let mismatch = match expected {
+                    ExpectedResult::AnyDice(expected) => {
+                        let pool = match numeric_fixture_pool(output.value) {
+                            Ok(pool) => pool,
+                            Err(error) => {
+                                paths_with_errors.insert(path_string.clone());
+                                println!(
+                                    "Unsupported AnyDice output in file {}: {}",
+                                    path.display(),
+                                    error
+                                );
+                                continue;
+                            }
+                        };
+                        let actual = create_anydice_result(&output.name, &pool);
+                        (!compare_anydice_results(&actual, expected))
+                            .then(|| export_anydice_format(&output.name, &pool))
+                    }
+                    ExpectedResult::Distribution(expected) => {
+                        let distribution =
+                            Distribution::from_runtime(output.value, output.field_names);
+                        let actual = create_distribution_result(&output.name, distribution);
+                        (!compare_distribution_results(&actual, expected))
+                            .then(|| export_distribution_result(&actual))
                     }
                 };
-                let actual_result = create_expected_result(&output.name, &d);
-                if !compare_expected_results(&actual_result, expected) {
+
+                if let Some(actual_string) = mismatch {
                     paths_with_errors.insert(path_string.clone());
                     println!("Mismatch in file {}:", path.display());
-                    println!(
-                        "{}",
-                        StrComparison::new(&export_anydice_format(&output.name, &d), expected_str,)
-                    );
+                    println!("{}", StrComparison::new(&actual_string, expected_str));
                 }
             }
         }
@@ -172,7 +198,13 @@ fn numeric_fixture_pool(value: eval::RuntimeValue) -> Result<Pool, &'static str>
 }
 
 #[derive(Debug)]
-struct ExpectedResult {
+enum ExpectedResult {
+    AnyDice(AnyDiceResult),
+    Distribution(DistributionResult),
+}
+
+#[derive(Debug)]
+struct AnyDiceResult {
     name: String,
     mean: f64,
     stddev: f64,
@@ -181,10 +213,16 @@ struct ExpectedResult {
     outcomes: Vec<(i32, f64)>,
 }
 
+#[derive(Debug)]
+struct DistributionResult {
+    name: String,
+    fields: Vec<String>,
+    outcomes: Vec<(Vec<String>, f64)>,
+}
+
 fn parse_results(contents: &str) -> Result<ExpectedResult, Box<dyn std::error::Error>> {
     let mut lines = contents.lines();
 
-    // Parse the first line
     let first_line = lines.next().ok_or("Empty file")?;
     let mut first_reader = ReaderBuilder::new()
         .has_headers(false)
@@ -196,12 +234,28 @@ fn parse_results(contents: &str) -> Result<ExpectedResult, Box<dyn std::error::E
         .ok_or("Missing name")?
         .trim_matches('"')
         .to_string();
+
+    match first_record.len() {
+        5 => parse_anydice_result(name, &first_record, lines),
+        1 => parse_distribution_result(name, lines),
+        count => Err(Box::new(CsvError {
+            desc: format!(
+                "result heading must contain either a name or a name plus four statistics; found {count} fields"
+            ),
+        })),
+    }
+}
+
+fn parse_anydice_result<'a>(
+    name: String,
+    first_record: &csv::StringRecord,
+    mut lines: impl Iterator<Item = &'a str>,
+) -> Result<ExpectedResult, Box<dyn std::error::Error>> {
     let mean = first_record.get(1).ok_or("Missing mean")?.parse()?;
     let stddev = first_record.get(2).ok_or("Missing stddev")?.parse()?;
     let min = first_record.get(3).ok_or("Missing min")?.parse()?;
     let max = first_record.get(4).ok_or("Missing max")?.parse()?;
 
-    // Skip the "#,%" line
     let separator_line = lines.next().ok_or("Missing #,% line")?;
     if separator_line.trim() != "#,%" {
         return Err(Box::new(CsvError {
@@ -209,13 +263,11 @@ fn parse_results(contents: &str) -> Result<ExpectedResult, Box<dyn std::error::E
         }));
     };
 
-    // Parse the outcomes
     let mut outcomes = Vec::new();
     let rest = lines.collect::<Vec<&str>>().join("\n");
     let mut outcome_reader = ReaderBuilder::new()
         .has_headers(false)
         .from_reader(rest.as_bytes());
-
     for result in outcome_reader.records() {
         let record = result?;
         let value = record.get(0).ok_or("Missing outcome value")?.parse()?;
@@ -226,20 +278,72 @@ fn parse_results(contents: &str) -> Result<ExpectedResult, Box<dyn std::error::E
         outcomes.push((value, probability));
     }
 
-    Ok(ExpectedResult {
+    Ok(ExpectedResult::AnyDice(AnyDiceResult {
         name,
         mean,
         stddev,
         min,
         max,
         outcomes,
-    })
+    }))
 }
 
-fn create_expected_result(name: &str, pool: &Pool) -> ExpectedResult {
+fn parse_distribution_result<'a>(
+    name: String,
+    lines: impl Iterator<Item = &'a str>,
+) -> Result<ExpectedResult, Box<dyn std::error::Error>> {
+    let rest = lines.collect::<Vec<&str>>().join("\n");
+    let mut reader = ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(rest.as_bytes());
+    let mut records = reader.records();
+    let header = records.next().ok_or("Missing distribution header")??;
+    if header.len() < 2 || header.get(header.len() - 1) != Some("%") {
+        return Err(Box::new(CsvError {
+            desc: "distribution header must end with '%'".to_owned(),
+        }));
+    }
+    let fields = header
+        .iter()
+        .take(header.len() - 1)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    let mut outcomes = Vec::new();
+    for result in records {
+        let record = result?;
+        if record.len() != fields.len() + 1 {
+            return Err(Box::new(CsvError {
+                desc: format!(
+                    "expected {} outcome fields plus a probability, found {} columns",
+                    fields.len(),
+                    record.len()
+                ),
+            }));
+        }
+        let values = record
+            .iter()
+            .take(fields.len())
+            .map(str::to_owned)
+            .collect();
+        let probability = record
+            .get(fields.len())
+            .ok_or("Missing outcome probability")?
+            .parse()?;
+        outcomes.push((values, probability));
+    }
+
+    Ok(ExpectedResult::Distribution(DistributionResult {
+        name,
+        fields,
+        outcomes,
+    }))
+}
+
+fn create_anydice_result(name: &str, pool: &Pool) -> AnyDiceResult {
     // Unfortunately we have to special case this I think
     if pool.is_empty() {
-        return ExpectedResult {
+        return AnyDiceResult {
             name: name.to_string(),
             mean: 0.0,
             stddev: 0.0,
@@ -258,7 +362,7 @@ fn create_expected_result(name: &str, pool: &Pool) -> ExpectedResult {
     for (outcome, prob) in probabilities {
         outcomes.push((outcome, prob * 100.0));
     }
-    ExpectedResult {
+    AnyDiceResult {
         name: name.to_string(),
         mean,
         stddev,
@@ -268,20 +372,54 @@ fn create_expected_result(name: &str, pool: &Pool) -> ExpectedResult {
     }
 }
 
-fn compare_expected_results(a: &ExpectedResult, b: &ExpectedResult) -> bool {
+fn create_distribution_result(name: &str, distribution: Distribution) -> DistributionResult {
+    let fields = distribution.field_names.unwrap_or_else(|| {
+        distribution
+            .fields
+            .iter()
+            .map(|field| match field {
+                FieldSchema::Int => "#".to_owned(),
+                FieldSchema::Enum { enum_name, .. } => enum_name.clone(),
+            })
+            .collect()
+    });
+    let outcomes = distribution
+        .probabilities
+        .into_iter()
+        .map(|(values, probability)| {
+            let values = values
+                .into_iter()
+                .zip(&distribution.fields)
+                .map(|(value, field)| match field {
+                    FieldSchema::Int => value.to_string(),
+                    FieldSchema::Enum { labels, .. } => usize::try_from(value)
+                        .ok()
+                        .and_then(|index| labels.get(index))
+                        .cloned()
+                        .unwrap_or_else(|| value.to_string()),
+                })
+                .collect();
+            (values, probability * 100.0)
+        })
+        .collect();
+    DistributionResult {
+        name: name.to_owned(),
+        fields,
+        outcomes,
+    }
+}
+
+fn compare_anydice_results(a: &AnyDiceResult, b: &AnyDiceResult) -> bool {
     const EPSILON: f64 = 1e-6;
 
-    // Compare name
     if a.name != b.name {
         return false;
     }
 
-    // Compare mean
     if relative_ne!(a.mean, b.mean, epsilon = EPSILON, max_relative = EPSILON) {
         return false;
     }
 
-    // Compare stddev
     if relative_ne!(
         a.stddev,
         b.stddev,
@@ -291,7 +429,6 @@ fn compare_expected_results(a: &ExpectedResult, b: &ExpectedResult) -> bool {
         return false;
     }
 
-    // Compare min and max
     if a.min != b.min {
         return false;
     }
@@ -299,7 +436,6 @@ fn compare_expected_results(a: &ExpectedResult, b: &ExpectedResult) -> bool {
         return false;
     }
 
-    // Compare outcomes
     if a.outcomes.len() != b.outcomes.len() {
         return false;
     }
@@ -314,6 +450,41 @@ fn compare_expected_results(a: &ExpectedResult, b: &ExpectedResult) -> bool {
     }
 
     true
+}
+
+fn compare_distribution_results(a: &DistributionResult, b: &DistributionResult) -> bool {
+    const EPSILON: f64 = 1e-6;
+
+    a.name == b.name
+        && a.fields == b.fields
+        && a.outcomes.len() == b.outcomes.len()
+        && a.outcomes.iter().zip(&b.outcomes).all(
+            |((a_values, a_probability), (b_values, b_probability))| {
+                a_values == b_values
+                    && !relative_ne!(
+                        a_probability,
+                        b_probability,
+                        epsilon = EPSILON,
+                        max_relative = EPSILON
+                    )
+            },
+        )
+}
+
+fn export_distribution_result(result: &DistributionResult) -> String {
+    let mut writer = WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(Vec::new());
+    writer.write_record([&result.name]).unwrap();
+    let mut header = result.fields.clone();
+    header.push("%".to_owned());
+    writer.write_record(header).unwrap();
+    for (values, probability) in &result.outcomes {
+        let mut record = values.clone();
+        record.push(probability.to_string());
+        writer.write_record(record).unwrap();
+    }
+    String::from_utf8(writer.into_inner().unwrap()).unwrap()
 }
 
 #[derive(Error, Debug)]

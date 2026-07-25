@@ -11,6 +11,7 @@ function: recur N:n {
 }
 
 TRUNCATED: [recur 10]
+output TRUNCATED named "truncated tuple"
 output [field 1 of TRUNCATED] named "first field"
 output [field 2 of TRUNCATED] named "second field"
 
@@ -18,10 +19,15 @@ output [field 2 of TRUNCATED] named "second field"
 \\\ which contributes no outcomes at all rather than summing to zero.
 function: maybe X:n { if X > 1 { result: [tuple 7 8] } }
 MAYBE: [maybe d2]
+output MAYBE named "no-result tuple"
 output [field 1 of MAYBE] named "no-result first field"
 output [field 2 of MAYBE] named "no-result second field"
 
 \\\ Result \\\
+
+"truncated tuple"
+#,#,%
+2,2,100
 
 "first field",2,0,2,2
 #,%
@@ -30,6 +36,10 @@ output [field 2 of MAYBE] named "no-result second field"
 "second field",2,0,2,2
 #,%
 2,100
+
+"no-result tuple"
+#,#,%
+7,8,100
 
 "no-result first field",7,0,7,7
 #,%

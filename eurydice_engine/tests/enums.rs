@@ -1,5 +1,5 @@
 use eurydice_engine::{
-    eval::{ElementValue, EvaluatedOutput, Evaluator, RuntimeValue},
+    eval::{EvaluatedOutput, Evaluator},
     grammar,
     output::{Distribution, FieldSchema},
 };
@@ -18,35 +18,6 @@ fn run(program: &str) -> Result<Vec<EvaluatedOutput>, String> {
 }
 
 #[test]
-fn attack_function_returns_enum_distribution() {
-    let outputs = run(r#"
-        enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
-        ATTACK: 5
-        function: attack ROLL:n vs DEFENSE:n {
-          if ROLL = 1 { result: MISS }
-          if ROLL = 20 {
-            if ROLL + ATTACK >= DEFENSE { result: CRITICALHIT }
-            result: HIT
-          }
-          if ROLL + ATTACK >= DEFENSE { result: HIT }
-          result: MISS
-        }
-        output [attack d20 vs 15]
-        "#)
-    .unwrap();
-
-    let RuntimeValue::Pool(pool, _) = &outputs[0].value else {
-        panic!("expected enum pool, got {:?}", outputs[0].value);
-    };
-    let ElementValue::Enum { ty: enum_type, .. } = &pool.ordered_outcomes()[0].0 else {
-        panic!("expected enum outcome");
-    };
-    assert_eq!(enum_type.name, "ATTACK_RESULT");
-    assert_eq!(enum_type.members, ["MISS", "HIT", "CRITICALHIT"]);
-    assert_eq!(pool.ordered_outcomes().len(), 3);
-}
-
-#[test]
 fn rejects_mixed_enum_list() {
     let error = run(r#"
         enum: RESULT { MISS, HIT }
@@ -54,22 +25,6 @@ fn rejects_mixed_enum_list() {
         "#)
     .unwrap_err();
     assert!(error.contains("mixed outcome types"), "{error}");
-}
-
-#[test]
-fn untyped_empty_list_adopts_an_enum_outcome_type() {
-    let outputs = run(r#"
-        enum: RESULT { MISS, HIT }
-        output {{}, MISS}
-        "#)
-    .unwrap();
-    let RuntimeValue::List(values, _) = &outputs[0].value else {
-        panic!("expected enum list");
-    };
-    assert!(matches!(
-        values.as_slice(),
-        [ElementValue::Enum { value: 0, .. }]
-    ));
 }
 
 #[test]
@@ -94,32 +49,6 @@ fn enum_names_do_not_replace_or_get_reused_by_other_bindings() {
     ] {
         assert!(run(program).is_err(), "{program}");
     }
-}
-
-#[test]
-fn supports_enum_shape_constraints_and_safe_operations() {
-    let outputs = run(r#"
-        enum: RESULT { MISS, HIT }
-        function: pool D:d { result: D }
-        function: sequence S:s { result: [reverse S] }
-        function: generic element X:n { result: X }
-        output [pool d{MISS, HIT}]
-        output [generic element d{MISS, HIT}]
-        output [[sequence {MISS, HIT}] contains MISS]
-        output [count {HIT} in [sequence {MISS, HIT, HIT}]]
-        output 1@{MISS, HIT}
-        output #{MISS, HIT}
-        "#)
-    .unwrap();
-    assert!(matches!(outputs[0].value, RuntimeValue::Pool(_, _)));
-    assert!(matches!(outputs[1].value, RuntimeValue::Pool(_, _)));
-    assert_eq!(outputs[2].value, 1.into());
-    assert_eq!(outputs[3].value, 2.into());
-    assert!(matches!(
-        outputs[4].value,
-        RuntimeValue::Element(ElementValue::Enum { value: 0, .. })
-    ));
-    assert_eq!(outputs[5].value, 2.into());
 }
 
 #[test]
@@ -156,45 +85,11 @@ fn equality_aware_operations_require_the_same_enum_type() {
 }
 
 #[test]
-fn shape_constraints_accept_typed_empty_enum_values() {
-    let outputs =
-        run("enum: RESULT { A } function: typed X:s { result: X } output [typed {A:0}]").unwrap();
-    assert!(matches!(outputs[0].value, RuntimeValue::List(_, _)));
-}
-
-#[test]
 fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
     let mut outputs = run("enum: RESULT { MISS, HIT } output d{MISS, HIT}").unwrap();
     let output = Distribution::from(outputs.remove(0).value);
     assert_eq!(output.probabilities.len(), 2);
     let FieldSchema::Enum { enum_name, labels } = &output.fields[0] else {
-        panic!("expected enum field");
-    };
-    assert_eq!(enum_name, "RESULT");
-    assert_eq!(labels, &["MISS", "HIT"]);
-}
-
-#[test]
-fn enum_elements_and_lists_are_converted_to_distributions_in_the_engine() {
-    let mut outputs = run(
-        "enum: RESULT { MISS, HIT } output HIT named \"element\" output {MISS, HIT, HIT} named \"list\"",
-    )
-    .unwrap();
-
-    let element = Distribution::from(outputs.remove(0).value);
-    assert_eq!(element.probabilities, [(vec![1], 1.0)]);
-    let FieldSchema::Enum { enum_name, labels } = &element.fields[0] else {
-        panic!("expected enum field");
-    };
-    assert_eq!(enum_name, "RESULT");
-    assert_eq!(labels, &["MISS", "HIT"]);
-
-    let list = Distribution::from(outputs.remove(0).value);
-    assert_eq!(
-        list.probabilities,
-        [(vec![0], 1.0 / 3.0), (vec![1], 2.0 / 3.0)]
-    );
-    let FieldSchema::Enum { enum_name, labels } = &list.fields[0] else {
         panic!("expected enum field");
     };
     assert_eq!(enum_name, "RESULT");

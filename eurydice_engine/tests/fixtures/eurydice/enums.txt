@@ -1,0 +1,84 @@
+enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
+
+ATTACK: 5
+function: attack ROLL:n vs DEFENSE:n {
+  if ROLL = 1 { result: MISS }
+  if ROLL = 20 {
+    if ROLL + ATTACK >= DEFENSE { result: CRITICALHIT }
+    result: HIT
+  }
+  if ROLL + ATTACK >= DEFENSE { result: HIT }
+  result: MISS
+}
+output [attack d20 vs 15] named "attack"
+
+\\\ An untyped empty list adopts the enum type when it is combined with an
+\\\ enum member.
+output {{}, MISS} named "adopted enum type"
+
+function: pool D:d { result: D }
+function: sequence S:s { result: [reverse S] }
+function: generic element X:n { result: X }
+output [pool d{MISS, HIT}] named "pool constraint"
+output [generic element d{MISS, HIT}] named "element constraint"
+output [[sequence {MISS, HIT}] contains MISS] named "contains"
+output [count {HIT} in [sequence {MISS, HIT, HIT}]] named "count"
+output 1@{MISS, HIT} named "first member"
+output #{MISS, HIT} named "enum list length"
+
+\\\ Even without outcomes, the distribution retains its enum field schema.
+function: typed X:s { result: X }
+output [typed {MISS:0}] named "typed empty"
+
+output HIT named "element"
+output {MISS, HIT, HIT} named "list"
+
+\\\ Result \\\
+
+"attack"
+ATTACK_RESULT,%
+MISS,45
+HIT,50
+CRITICALHIT,5
+
+"adopted enum type"
+ATTACK_RESULT,%
+MISS,100
+
+"pool constraint"
+ATTACK_RESULT,%
+MISS,50
+HIT,50
+
+"element constraint"
+ATTACK_RESULT,%
+MISS,50
+HIT,50
+
+"contains"
+#,%
+1,100
+
+"count"
+#,%
+2,100
+
+"first member"
+ATTACK_RESULT,%
+MISS,100
+
+"enum list length"
+#,%
+2,100
+
+"typed empty"
+ATTACK_RESULT,%
+
+"element"
+ATTACK_RESULT,%
+HIT,100
+
+"list"
+ATTACK_RESULT,%
+MISS,33.33333333333333
+HIT,66.66666666666666

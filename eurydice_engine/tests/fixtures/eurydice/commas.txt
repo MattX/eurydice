@@ -1,0 +1,56 @@
+\\\ Without a comma, an argument beginning with `d` can merge with the
+\\\ preceding argument. The comma makes both dice separate tuple arguments.
+output #[tuple d2, d2] named "tuple dimension"
+output [tuple d2, d2] named "comma-separated dice"
+output [tuple (d2) (d2)] named "parenthesized dice"
+
+output [tuple 1, -2] = [tuple 1 (-2)] named "leading minus"
+
+\\\ Commas in declarations and calls do not change function identity.
+function: add A:n B:n { result: A + B }
+function: subtract A:n, B:n { result: A - B }
+function: mix A:n and B:n, C:n { result: A + B + C }
+output [add 1 2] named "plain call"
+output [add 1, 2] named "comma call"
+output [subtract 3 1] named "comma declaration"
+output [mix 1 and 2, 3] named "commas interleaved with words"
+
+\\\ Result \\\
+
+"tuple dimension"
+#,%
+1,100
+
+"comma-separated dice"
+#,#,%
+1,1,25
+1,2,25
+2,1,25
+2,2,25
+
+"parenthesized dice"
+#,#,%
+1,1,25
+1,2,25
+2,1,25
+2,2,25
+
+"leading minus"
+#,%
+1,100
+
+"plain call"
+#,%
+3,100
+
+"comma call"
+#,%
+3,100
+
+"comma declaration"
+#,%
+2,100
+
+"commas interleaved with words"
+#,%
+6,100
