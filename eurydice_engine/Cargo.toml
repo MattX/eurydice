@@ -40,5 +40,8 @@ cc="*"
 lalrpop = "0.22.2"
 
 [dev-dependencies]
+approx = "0.5.1"
 criterion = { version = "0.6.0", features = ["html_reports"] }
+csv = "1.3.0"
+pretty_assertions = "1.4.0"
 serde-lexpr = "0.1.3"

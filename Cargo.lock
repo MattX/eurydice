@@ -450,28 +450,27 @@ checksum = "a0474425d51df81997e2f90a21591180b38eccf27292d755f3e30750225c175b"
 name = "eurydice_cli"
 version = "0.1.0"
 dependencies = [
- "approx",
  "crossterm",
- "csv",
  "eurydice_engine",
  "lalrpop-util",
  "miette",
- "pretty_assertions",
  "rustyline",
- "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "eurydice_engine"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "cc",
  "criterion",
+ "csv",
  "lalrpop",
  "lalrpop-util",
  "lazy_static",
  "malachite",
  "miette",
+ "pretty_assertions",
  "serde",
  "serde-lexpr",
  "thiserror 2.0.12",

@@ -1,12 +1,10 @@
 use approx::relative_ne;
 use csv::ReaderBuilder;
-use eurydice_cli::print_diagnostic;
 use eurydice_engine::{
     dice::Pool,
     eval, grammar,
     output::{export_anydice_format, mean, min_and_max, stddev, to_probabilities},
 };
-use miette::{Diagnostic, SourceSpan};
 use pretty_assertions::StrComparison;
 use std::{collections::HashSet, fs, path::Path};
 use thiserror::Error;
@@ -29,7 +27,8 @@ fn test_eurydice_programs() {
 
 fn run_fixture_directory(directory: &str) {
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata")
+        .join("tests")
+        .join("fixtures")
         .join(directory);
     let mut paths_with_errors = HashSet::new();
     let mut paths = HashSet::new();
@@ -83,7 +82,6 @@ fn run_fixture_directory(directory: &str) {
                 Err(err) => {
                     paths_with_errors.insert(path_string);
                     println!("Parsing error in file {}: {}", path.display(), err);
-                    print_diagnostic(convert_lalrpop_error(&err), program);
                     continue;
                 }
             };
@@ -94,7 +92,6 @@ fn run_fixture_directory(directory: &str) {
                     Err(e) => {
                         paths_with_errors.insert(path_string.clone());
                         println!("Evaluation error in file {}: {}", path.display(), e);
-                        print_diagnostic(e, program);
                         continue;
                     }
                 }
@@ -319,46 +316,8 @@ fn compare_expected_results(a: &ExpectedResult, b: &ExpectedResult) -> bool {
     true
 }
 
-#[derive(Error, Diagnostic, Debug)]
-#[error("csv error")]
+#[derive(Error, Debug)]
+#[error("csv error: {desc}")]
 struct CsvError {
     desc: String,
-}
-
-#[derive(Error, Diagnostic, Debug)]
-#[error("parse error")]
-struct ParseError {
-    #[label("parse error: {desc}")]
-    span: SourceSpan,
-    desc: String,
-}
-
-impl ParseError {
-    fn new(span: SourceSpan, desc: String) -> Self {
-        Self { span, desc }
-    }
-}
-
-fn convert_lalrpop_error<T: std::fmt::Display, E: std::fmt::Display>(
-    err: &lalrpop_util::ParseError<usize, T, E>,
-) -> ParseError {
-    match err {
-        lalrpop_util::ParseError::InvalidToken { location } => {
-            ParseError::new(SourceSpan::new((*location).into(), 0), format!("{}", err))
-        }
-        lalrpop_util::ParseError::UnrecognizedEof { location, .. } => {
-            ParseError::new(SourceSpan::new((*location).into(), 0), format!("{}", err))
-        }
-        lalrpop_util::ParseError::UnrecognizedToken { token, .. } => ParseError::new(
-            SourceSpan::new(token.0.into(), token.2 - token.0),
-            format!("{}", err),
-        ),
-        lalrpop_util::ParseError::ExtraToken { token } => ParseError::new(
-            SourceSpan::new(token.0.into(), token.2 - token.0),
-            format!("{}", err),
-        ),
-        lalrpop_util::ParseError::User { error } => {
-            ParseError::new(SourceSpan::new(0.into(), 0), format!("{}", error))
-        }
-    }
 }
