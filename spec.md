@@ -1,8 +1,8 @@
 # Eurydice language specification
 
-This specification aims to provide a description of how Eurydice should behave. There may be divergences between Eurydice and this description - those are bugs, please report them!
+This specification defines how Eurydice should behave. Any divergence between Eurydice and this description is a bug; please report it.
 
-This document is intended mostly as a specification for other AnyDice implementers, or for power users. If you're looking for an introduction to the AnyDice DSL, this document is likely too technical. Consider looking at [AnyDice docs](https://anydice.com/docs/) for a smoother introduction.
+This document is intended primarily for other AnyDice implementers and power users. If you're looking for an introduction to the AnyDice DSL, this document is likely too technical. See the [AnyDice docs](https://anydice.com/docs/) for a gentler introduction.
 
 **This project is not affiliated with AnyDice or Jasper Flick.**
 
@@ -11,16 +11,14 @@ This document is intended mostly as a specification for other AnyDice implemente
 Eurydice is a dialect of the [AnyDice](https://anydice.com/) language. It is almost completely compatible with AnyDice, with some extensions, and a few restrictions.
 
 > [!IMPORTANT]
-> Intentional divergences from AnyDice are marked with information boxes like this one.
-
-There may also be unintentional divergences between this document and AnyDice's, or Eurydice's, behavior. Please report those on GitHub.
+> Intentional divergences from AnyDice are marked with information boxes like this one. Sections marked ⊕ describe Eurydice-only features.
 
 Eurydice is reproducible and hermetic: programs can't interact with the environment, and two runs will have exactly the same results.
 
-This report frequently uses the following notations to describe pools:
+This document frequently uses the following notations to describe pools:
 
-* `<n>d<k>`: represents a pool of `n` die with `k` faces labeled 1..k
-* `<n>d{<k1>:<count1>,...,<kn>:<countn>}`: represents a pool of `n` die with `count1` faces showing `k1`, `count2` faces showing `k2`, etc., and `countn` faces showing `kn`. If `:<count>` is omitted for any `k`, the count is assumed to be 1.
+* `<n>d<k>` represents a pool of `n` dice with `k` faces labeled 1 through `k`.
+* `<n>d{<k1>:<count1>,...,<kn>:<countn>}` represents a pool of `n` dice with `count1` faces showing `k1`, `count2` faces showing `k2`, and so on. If `:<count>` is omitted for any `k`, the count defaults to 1.
 
 This is exactly compatible with Eurydice expressions using the `d` operator.
 
@@ -30,16 +28,16 @@ A Eurydice program is composed of a sequence of statements. Eurydice is whitespa
 
 _Block comments_ start and end with backslashes: `\ this is a comment \`.
 
-_Line comments_ start with a triple backslashes: `\\\ this is a line comment`.
+_Line comments_ start with three backslashes: `\\\ this is a line comment`.
 
-> [!Important]
+> [!IMPORTANT]
 > AnyDice does not support line comments.
 
 Comments are treated as whitespace, and can be used to separate tokens, e.g. `[hello\a comment\world]` is equivalent to `[hello world]`.
 
-_Variable identifiers_ are composed of uppercase letters and underscores, for instance `X`, `MY_VARIABLE`, or `_MY_VARIABLE`. `MyVariable`, or `x` are not variable identifiers.
+_Variable identifiers_ are composed of uppercase letters and underscores, for instance `X`, `MY_VARIABLE`, or `_MY_VARIABLE`. `MyVariable` and `x` are not variable identifiers.
 
-_Words_ are composed of lowercase letters and underscores (after the first position only), except the single lowercase letter `d`, which is punctuation and not a word. `word`, `if`, `output`, `my_word` are all words. `WORD`, `wOrd`, and `_word` are not.
+_Words_ are composed of lowercase letters and underscores (after the first position only), except the single lowercase letter `d`, which is punctuation rather than a word. `word`, `if`, `output`, and `my_word` are all words. `WORD`, `wOrd`, and `_word` are not.
 
 > [!IMPORTANT]
 > AnyDice words (function names) can't contain underscores.
@@ -48,20 +46,20 @@ _Punctuation_: the following characters or sequences of characters are tokens:
 
 ```
 +   =   &   @   :   (   ..
--   !=  |   d   [   )
+-   !=  |   d   [   )   ,
 *   <   !   #   ]   {
 /   <=              }
 ^   >
     >=
 ```
 
-_Integer literals_: Integer literals are base-10 representations of an unsigned 31-bit integer. It is an error if an integer literal represents a number greater than 2^31-1 (2147483647). This is a subset of the values of the underlying `int` type, which can represent 32-bit signed integers (negative values can be obtained by using the unary minus operator). Examples include `0`, `123`.
+_Integer literals_: Integer literals are base-10 representations of unsigned 31-bit integers. It is an error if an integer literal represents a number greater than 2^31-1 (2147483647). These literals represent a subset of the underlying `int` type, which holds 32-bit signed integers; negative values can be obtained with the unary minus operator. Examples include `0` and `123`.
 
-_String literals_: String literal can only occur in a few places. They are enclosed by double quotes (`"`). A string literal can contain escaped double quotes: `"message: \"hello\""`. No other escape sequences are supported.
+_String literals_: String literals can occur only in a few places. They are enclosed in double quotes (`"`). A string literal can contain escaped double quotes: `"message: \"hello\""`. No other escape sequences are supported.
 
 ## Program execution
 
-A Eurydice program is composed of a sequence of statements. Statements are executed sequentially as specified. Once the program has finished executing, all outputs are displayed to the users.
+A Eurydice program is composed of a sequence of statements, which are executed in order. Once the program has finished executing, all outputs are displayed to the user.
 
 Errors are fatal and terminate program execution.
 
@@ -85,18 +83,18 @@ There are three kinds of element values:
 Two kinds of collections are built on these:
 
 * _lists_: values of this type hold a list of one particular element type.
-* _pools_: values of this type hold a pool of one element type `e`, which is composed of a mapping of outcomes (each of which is of type `e`) to probabilities (whose representation is unspecified), together with an unsigned count of dice, which is called the _dimension_.
+* _pools_: values of this type hold a pool of one element type `e`. A pool consists of a mapping from outcomes of type `e` to probabilities (whose representation is unspecified), together with an unsigned count of dice called the _dimension_.
 
 Lists and pools are homogeneous and cannot mix values with different outcome types. For example, all tuples in one list must have the same arity and corresponding field types.
 
-The outcome type of a collection is bracketed in the grammar because it may be _absent_: an empty collection that carries no information about what it could contain has no outcome type, and adopts one from its context. Only collections can lack an outcome type; there is no element value whose type is absent. [Empty collections](#-empty-collections) covers this, and is the only place it matters.
+The outcome type of a collection is bracketed in the grammar because it may be _absent_: an empty collection that carries no information about what it could contain has no outcome type, and adopts one from its context. Only collections can lack an outcome type; there is no element value whose type is absent. See [empty collections](#-empty-collections) for discussion.
 
 The maximum number of elements in a list, or of outcomes in a pool, is 2^31-1.
 
 There are no first-class functions.
 
 > [!IMPORTANT]
-> Sections marked ⊕ describe Eurydice-only features. A reader concerned only with AnyDice compatibility may read `Element` as `int` throughout, treat every ✗ in the table below as "does not arise", and skip those sections entirely.
+> A reader concerned only with AnyDice compatibility may read `Element` as `int` throughout, treat every ✗ in the table below as "does not arise", and skip those sections entirely.
 >
 > AnyDice does not restrict integers to 32-bit values. Experimentation suggests that AnyDice integers are represented as double-precision floats (`output 9007199254740993` returns 9007199254740992).
 
@@ -130,7 +128,7 @@ Enums must be declared at the top level:
 enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
 ```
 
-The enum type and its members use variable-identifier syntax. An enum must contain at least one member. Variables, enum type names, and enum member names all share a namespace. It is an error to declare an enum whose name or any member name equal that of a declared variable. Conversely, it is an error to declare a variable whose name collides with an enum name or member.
+The enum type and its members use variable-identifier syntax. An enum must contain at least one member. Variables, enum type names, and enum member names all share a namespace. It is an error to declare an enum whose name or any of whose member names equals that of a declared variable. Conversely, it is an error to declare a variable whose name collides with an enum name or member name.
 
 Enum members support equality and inequality with members of the same enum, as set out in [What element types support](#what-element-types-support).
 
@@ -142,12 +140,12 @@ Tuples are constructed by the built-in functions `[tuple A B]`, `[tuple A B C]`,
 PAIR: [tuple 3 5]
 output [field 1 of PAIR]  \ Outputs 3
 output [field 2 of PAIR]  \ Outputs 5
-output #PAIR                \ Outputs 2
+output #PAIR              \ Outputs 2
 ```
 
 Tuple fields are selected with `[field INDEX of TUPLE]`. Indices are one-based and must be within the tuple's bounds; an invalid index is an error. The `@` operator does not project tuple fields.
 
-Tuples support structural equality and inequality with tuples of the same type: two tuples are equal exactly when every pair of corresponding fields is equal. An _additive_ tuple, one whose fields are all `int`s, additionally supports arithmetic: `+`, `-`, and unary `-` operate componentwise, multiplication by an `int` is supported in either operand order, and division by an `int` operates componentwise. `int / tuple` is not defined. Everything else follows the default in [What element types support](#what-element-types-support).
+Tuples support structural equality and inequality with tuples of the same type: two tuples are equal exactly when every pair of corresponding fields is equal. An _additive_ tuple, one whose fields are all of type `int`, additionally supports arithmetic: `+`, `-`, and unary `-` operate componentwise, multiplication by an `int` is supported in either operand order, and division by an `int` operates componentwise. `int / tuple` is not defined. Everything else follows the default in [What element types support](#what-element-types-support).
 
 Tuple constructors and field projection participate in normal [pool-based function evaluation](#pool-based-evaluation). Consequently, constructing a tuple from pool-valued arguments produces their joint distribution, and passing a tuple-valued pool to an `n` parameter evaluates the function once per tuple outcome.
 
@@ -183,30 +181,31 @@ _Iterating over the multisets_ in a pool refers to processing each possible _sor
 
 ```
 multiset              probability
-{1, 1, 1}:   (1/6)^3                     * 6
-{1, 1, 2}:   (1/6)^2 *  1/3              * 2
-{1, 1, 3}:   (1/6)^2           *  1/2    * 2
-{1, 2, 2}:    1/6    * (1/3)^2           * 2
-{1, 2, 3}:    1/6    *  1/3    *  1/2    * 1
-{2, 2, 2}:             (1/3)^3           * 6
-{2, 2, 3}:             (1/3)^2 *  1/2    * 2
-{2, 3, 3}:              1/3    * (1/2)^2 * 2
-{3, 3, 3}:                       (1/2)^3 * 6
+{1, 1, 1}:   (1/6)^3                     * 1
+{1, 1, 2}:   (1/6)^2 *  1/3              * 3
+{1, 1, 3}:   (1/6)^2           *  1/2    * 3
+{1, 2, 2}:    1/6    * (1/3)^2           * 3
+{1, 2, 3}:    1/6    *  1/3    *  1/2    * 6
+{1, 3, 3}:    1/6              * (1/2)^2 * 3
+{2, 2, 2}:             (1/3)^3           * 1
+{2, 2, 3}:             (1/3)^2 *  1/2    * 3
+{2, 3, 3}:              1/3    * (1/2)^2 * 3
+{3, 3, 3}:                       (1/2)^3 * 1
 ```
 
-The probability associated with each multiset element is equal to the product of each element's probability, multiplied by the multiplicity factor for the outcome (which is $\frac{(\mathrm{size\ of\ set})!}{\mathrm{multinomial\ coefficient}}$).
+The probability associated with each multiset is the product of its values' probabilities, multiplied by the number of orderings that produce it. That count is the multinomial coefficient $\frac{n!}{m_1!\,m_2!\cdots m_k!}$, where $n$ is the number of dice in the pool and $m_i$ is the number of times the $i$-th distinct value occurs in the multiset. These ten probabilities sum to 1.
 
 If there is a single die in the pool, this is the same as iterating over the die's outcomes.
 
 #### Outcome mapping
 
-_Outcome mapping_ a pool transforms each multiset of a pool with a specified operation. If two outcomes are transformed into the same value, their probabilities are summed.
+_Outcome mapping_ a pool transforms each of its outcomes with a specified operation. If two outcomes are transformed into the same value, their probabilities are summed. The operation applies to individual outcomes, not to multisets, so a pool of dimension greater than one is [summed](#summing) first by whichever operation calls for the mapping.
 
 For instance, outcome mapping `2d{-1..1}` with the operation `x→2*abs(x)` results in a pool equivalent to `d{0:3, 2:4, 4:2}`.
 
 #### Flat mapping
 
-_Flat mapping_ a pool uses a function that turns an outcome into a pool. The function is called for each multiset of the original pool. The resulting pools are combined together, respecting the probability of the original outcome that produced them.
+_Flat mapping_ a pool uses a function that turns a multiset into a pool. The function is called for each multiset of the original pool. The resulting pools are combined according to the probability of each original multiset.
 
 Each produced pool is summed if its dimension is not 1. The resulting pool always has a dimension of 1.
 
@@ -231,9 +230,9 @@ In the final result, 1 gets probability 1/3 \* 1 + 1/3 \* 1/2 + 1/3 \* 1/3 = 11/
 
 #### Multiset cross product
 
-Starting with pools $p_1, p_2, \ldots, p_n$, the _multiset cross-product_ is an iterator over pairs of (list of multiset, probability), where:
+Starting with pools $p_1, p_2, \ldots, p_n$, the _multiset cross product_ is an iterator over pairs of (list of multisets, probability), where:
 
-* The lists of multisets range over all possible combinations of multisets from each of the pool's multiset iterators
+* The lists range over all possible combinations containing one multiset from each pool's multiset iterator.
 * The probability associated with each list is the product of the multisets' probabilities.
 
 In pseudocode:
@@ -289,7 +288,7 @@ This yields the joint distribution of total damage and number of explosions. The
 
 All Eurydice _values_ are immutable: it is not possible to modify a list or a pool in place.
 
-Eurydice uses [dynamic scoping](<https://en.wikipedia.org/wiki/Scope_(computer_science)#Lexical_scope_vs._dynamic_scope>). At every point during execution, an _environment_ maps variable names to values, and function names to functions. Outside a function, the environment is known as the _global environment_. When execution is about to enter a function's body, a new _environment frame_ is pushed to the stack of environments. This environment frame is popped and deleted when execution leaves the function.
+Eurydice uses [dynamic scoping](<https://en.wikipedia.org/wiki/Scope_(computer_science)#Lexical_scope_vs._dynamic_scope>). At every point during execution, an _environment_ maps variable names to values and function names to functions. Outside a function, the environment is known as the _global environment_. Before execution enters a function's body, a new _environment frame_ is pushed onto the stack of environments. This frame is popped and deleted when execution leaves the function.
 
 ```
 function: dynamic one {
@@ -317,11 +316,11 @@ Functions can be bound to function names in just one way: with a `function` stat
 Variable and function bindings are mutable: new values can be assigned to variables, and new functions can be assigned to function names. Only bindings in the innermost environment frame can be mutated. Reusing a name from an outer frame in an assignment will _shadow_ the outer binding while the inner frame is live.
 
 ```
-function x {
+function: x {
     result: X
 }
 
-function reassign x {
+function: reassign x {
     X: 2
     result: X
 }
@@ -339,9 +338,9 @@ output [x]           \\\ Outputs 1 - the global environment
 
 There are three named global settings:
 
-* `explode depth`: set to a non-negative number, default 2.
-* `maximum function depth`: set to a non-negative number, default 10. An attempt to call a function when the current recursion depth is already equal to the maximum function depth will result in the function call not actually executing, and returning an empty list with [no outcome type](#-empty-collections). Summing that list therefore yields the [empty sum](#the-empty-sum), which lets a truncated recursion keep accumulating values of any additive type.
-* `position order`: set to `"lowest first"` or `"highest first"` (default `"highest first"`). This setting affects three things:
+* `explode depth`: a non-negative integer with a default of 2.
+* `maximum function depth`: a non-negative integer with a default of 10. If the current recursion depth already equals this setting, an attempted function call does not execute and instead returns an empty list with [no outcome type](#-empty-collections). Summing that list yields the [empty sum](#the-empty-sum), allowing truncated recursion to keep accumulating values of any additive type.
+* `position order`: either `"lowest first"` or `"highest first"` (the default). This setting affects three things:
   * the behavior of the [`@` operator](#-operator),
   * the behavior of the [sort function](#sort-sequences),
   * the behavior of [calling a function over pools](#pool-based-evaluation)
@@ -366,7 +365,7 @@ output X  \\\ Outputs d4
 ```
 
 ```
-Y  \\\ Error
+output Y  \\\ Error
 ```
 
 Note that assigning a pool to a variable _does not_ attach the variable to a particular outcome. For instance,
@@ -407,10 +406,10 @@ Once all list elements are evaluated, they are each [flattened into a list](#lis
 Each list element is one of an expression or a range, optionally followed by a repeat count:
 
 ```
-ListElem = (Expression|Expression '..' Expression) [':' Expression].
+ListElem = (Expr | Expr '..' Expr) [':' Expr].
 ```
 
-Expressions composing a list elements are evaluated in an unspecified order. If the list element is a range, both expressions must evaluate to `int` values, and the range is replaced by a list containing all integers between the start and end of the range, inclusive. If the start of the range is greater than the end, an empty list is produced.
+Expressions composing a list element are evaluated in an unspecified order. If the list element is a range, both expressions must evaluate to `int` values, and the range is replaced by a list containing all integers between the start and end of the range, inclusive. If the start of the range is greater than the end, an empty list is produced. Because a range can only produce integers, that list has outcome type `int`, unlike the bare literal `{}`, which has [no outcome type](#-empty-collections).
 
 If a repeat expression is present, it must evaluate to an `int`. If this value is negative, it is replaced with `0`. The primary expression is then [flattened into a list](#list-flattening), and is concatenated to itself the indicated number of times. If the repeat count is 0, the empty list is produced.
 
@@ -427,28 +426,28 @@ Flattening preserves `pool` outcome types. Non-additive `pool`s always have dime
 #### Examples
 
 ```
-output {}                \\ Outputs {}
-output {1, 2, 3}         \\ Outputs {1, 2, 3}
-output {d4}              \\ Outputs {1, 2, 3, 4}
-output {d2:2}            \\ Outputs {1, 2, 1, 2}
-output {{1, 2}, {3, 4}}  \\ Outputs {1, 2, 3, 4}
+output {}                \\\ Outputs {}
+output {1, 2, 3}         \\\ Outputs {1, 2, 3}
+output {d4}              \\\ Outputs {1, 2, 3, 4}
+output {d2:2}            \\\ Outputs {1, 2, 1, 2}
+output {{1, 2}, {3, 4}}  \\\ Outputs {1, 2, 3, 4}
 ```
 
 ### Parenthesized expressions
 
 ```
-'(' Expr ')'.
+'(' Expr ')'
 ```
 
 A single expression enclosed in parentheses yields the result of that expression. Explicit parentheses may be used for clarity, or to override the default association of subexpressions.
 
 ### Unary operators
 
-There are 4 unary operators, which all bind tighter than any binary operator. There are `!`, `-`, `#`, and `d`.
+There are four unary operators, all of which bind more tightly than any binary operator: `!`, `-`, `#`, and `d`.
 
 `!` and `-` compute logical and arithmetic negation respectively. `!` requires an `int`. `-` accepts all additive values; it negates tuple fields componentwise.
 
-* If the argument is an `int`, `-` negates the value, while `!` evaluates 0 if the argument is nonzero, and 1 otherwise.
+* If the argument is an `int`, `-` negates the value, while `!` evaluates to 0 if the argument is nonzero and 1 otherwise.
 * If the argument is a `list`, its values are summed to an element, to which the operator is applied.
 * If the argument is a `pool`, the pool is summed, then the [outcomes of the pool are all mapped](#outcome-mapping) with the operator.
 
@@ -484,14 +483,17 @@ The `d` operator is the main way to create a pool.
    1. If it is an `int` `i`, it is converted to a pool with values 1 to `abs(i)` inclusive (if `i` is 0, the pool contains the single outcome 0). If `i` is negative, the pool outcomes then are mapped to their opposite. For instance, `d(-3)` evaluates to `d{-1, -2, -3}`.
    2. If it is a `list`, it is converted to a pool whose outcomes are the distinct values in the list, and whose probability for each outcome is proportional to the number of occurrences of each value in the list. An empty list produces a pool of dimension 0.
    3. Pools provided as an RHS operand are not transformed.
-2. The LHS operand is first summed if it is `list` (which must be an additive list), then:
+2. The LHS operand is first summed if it is a `list` (which must be an additive list), then:
    1. If it is an `int` `i`, the dimension of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
-   2. If it is a pool with `int` outcomes, then the RHS is [flat mapped](#flat-mapping) with the operation described in (a). (Recall that flat-mapping takes a pool and an `int -> pool` function; the operation described in (a) is such a function).
+   2. If it is a pool with `int` outcomes, then the LHS is [flat mapped](#flat-mapping) with the operation described in step 1.1. (Recall that flat mapping takes a pool and an `int -> pool` function; the operation described in step 1.1 is such a function.)
    3. It is an error if a value of another type is used as LHS to `d`.
 
 #### `@` operator
 
-The `@` operator selects the (LHS)-th element from its RHS. A tuple is not treated as a list by this operator; use `[field INDEX of TUPLE]` to project a tuple field.
+The `@` operator selects the (LHS)-th element from its RHS. A tuple is not treated as a list by this operator; use [`[field INDEX of TUPLE]`](#-field-indexn-of-tuplen) to project a tuple field.
+
+> [!NOTE]
+> `@` deliberately does not project tuple fields, because on a pool of tuples the two meanings would collide silently. `1@POOL` already means "select the first die of each multiset", which for a pool of tuples yields a whole tuple; projection would instead yield one field of every outcome. Both readings are well-typed and return plausible values, so overloading `@` would turn a wrong choice into a wrong number rather than an error. Field projection is therefore always spelled with the `[field ... of ...]` built-in, whose behavior on a pool is fixed by [pool-based evaluation](#pool-based-evaluation).
 
 The LHS supplies the indices, and must be an `int` or a list of `int`s; anything else is an error. An `int` LHS is converted to a singleton list.
 
@@ -500,7 +502,7 @@ The LHS supplies the indices, and must be an `int` or a list of `int`s; anything
   * If the RHS is a `list`, its element at position `i` is selected. The first element of the list has index 1. This is not affected by the `"position order"` setting.
   * In both the int and list RHS cases, if `i` is invalid (zero or negative, or greater than list length or digit count), the expression evaluates to 0.
   * Finally, all selected elements are summed. Selecting a single element works for any RHS outcome type; it is an error to select a number of elements other than one from a RHS whose outcome type is not additive, since they could not be summed.
-* If the RHS argument is a `pool`, then, each outcome multiset is flat mapped with the following function:
+* If the RHS argument is a `pool`, each outcome multiset is flat mapped with the following function:
   * The multiset is sorted according to the `"position order"` [global setting](#global-settings).
   * Elements are selected from the multiset and summed as if using the `@` operator from a list.
 
@@ -515,8 +517,9 @@ Division by 0 causes an error to be raised. `0^0` evaluates to 1.
 Operators have the following signatures on element values:
 
 ```
-^ * / + - & | : int, int                 -> int
+^ * / + - & | : int, int                       -> int
 + -           : additive tuple, additive tuple -> additive tuple
+*             : int, additive tuple            -> additive tuple
 * /           : additive tuple, int            -> additive tuple
 ```
 
@@ -531,7 +534,7 @@ If the arguments are not both elements, the coercion rules are the following:
 
 #### Comparison operators
 
-The operators `=`, `!=`, `<`, `<=`, `>`, and `>=` are comparison operators, performing equality, inequality, smaller-than, smaller-than-or-equal, larger-than, and larger-than-or-equal checks respectively.
+The operators `=`, `!=`, `<`, `<=`, `>`, and `>=` are comparison operators, performing equality, inequality, less-than, less-than-or-equal, greater-than, and greater-than-or-equal checks, respectively.
 
 In all cases, these operators evaluate to `1` if their condition is true, or `0` otherwise.
 
@@ -547,26 +550,40 @@ Equality and inequality are also defined nominally for enum members and structur
 Functions can be called by enclosing the words that make up their names, interleaved with expressions, between square brackets:
 
 ```
-FunctionCallItem = Word | Expr SafeExpr {SafeExpr} Word.
-FinalFunctionCallItem = Expr SafeExpr {SafeExpr}.
+ArgumentTail = SafeExpr | ',' Expr.
+FunctionCallItem = Word | Expr {ArgumentTail} Word.
+FinalFunctionCallItem = Expr {ArgumentTail}.
 FunctionCall = '[' {FunctionCallItem} [FinalFunctionCallItem] ']'.
 ```
 
-A technical trick is needed in the grammar because arguments are allowed to follow each other with no word in between: `SafeExpr` is any expression that does not start with the tokens `-` or `d`. Because expressions can immediately follow each other, it would otherwise not be possible to know if a call like `[f 1 -2]` should be parsed as `[f (1) (-2)]` or as `[f (1-2)]`. An `Expr` in the function call must be followed by either a `Word`, which clearly separates the two arguments, or a `SafeExpr`, which cannot be a suffix of an `Expr`, and is thus necessarily a new argument.
+A technical trick is needed in the grammar because arguments are allowed to follow each other with no word in between: `SafeExpr` is any expression that does not start with the tokens `-` or `d`. Because expressions can immediately follow each other, it would otherwise not be possible to know if a call like `[f 1 -2]` should be parsed as `[f (1) (-2)]` or as `[f (1-2)]`. An `Expr` in the function call must therefore be followed by a `Word`, which clearly separates the two arguments, or by a `SafeExpr`, which cannot be a suffix of an `Expr` and is thus necessarily a new argument.
+
+A comma may also be used to separate two adjacent arguments. Because the comma has already done the separating, any `Expr` may follow one, including expressions starting with `-` or `d`:
+
+```
+output [tuple d6, d8]   \\\ Two arguments
+output [tuple d6 d8]    \\\ Error: one argument, the expression d(6d8)
+```
+
+Commas are pure separators: they are not part of the function's identifier. `[add 1, 2]` and `[add 1 2]` resolve to the same function. A comma is only valid between two arguments, so a leading, trailing, or doubled comma is an error, as is a comma before a word.
+
+> [!IMPORTANT]
+> AnyDice does not accept commas between arguments. Code using them is not portable.
 
 To evaluate a function call, the function identifier is resolved first. A function is identified by the sequence of words and argument locations in its name, and it is an error if the function's identifier is not in scope in the current environment. Here are some examples:
 
 ```
-function: add A:n B:n { A + B }
-output [add 1 2]  \\\ outputs 3
-output [add 1 - 2]  \\\ error
+function: add A:n B:n { result: A + B }
+output [add 1 2]    \\\ outputs 3
+output [add 1, 2]   \\\ outputs 3 - same function
+output [add 1 - 2]  \\\ error: one argument, the expression 1-2
 
-function: add A:n and B:n { A + B }
-output [add 1 and 2]  \\\ outputs 3
-output [add 1 and -2]   \\\ outputs -1
+function: add A:n and B:n { result: A + B }
+output [add 1 and 2]   \\\ outputs 3
+output [add 1 and -2]  \\\ outputs -1
 ```
 
-From then, function calls proceed in several steps.
+After the identifier has been resolved, function calls proceed in several steps.
 
 #### Argument coercion
 
@@ -579,7 +596,7 @@ The actual types of the arguments are compared to the expected argument types, a
 * If the actual argument is an element:
   * If a `list` is requested, a singleton list is created.
   * If a `pool` is requested, a single-outcome `pool` is created.
-* If the actual argument type is a `pool`, and an element is requested, the pool is summed, creating a new `pool` (see note below: `pool`-typed values can be passed to element-typed arguments).
+* If the actual argument is a `pool` and an element is requested, the pool is summed, creating a new `pool` (see the note below: `pool`-typed values can be passed to element-typed arguments).
 
 After this process, some values of type `pool` may still correspond to arguments where element or `list` shapes are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#function-evaluation). If it is the case, evaluation proceeds as described in the next section.
 
@@ -589,7 +606,7 @@ This section applies if any `pool` values are passed to element- or `list`-typed
 
 The function is then evaluated once for each value in the multiset cross product (this may be 0 times if the cross product is empty). In each invocation, the argument values are:
 
-* For any argument whose actual type corresponds to its declared type, the value is passed untransformed.
+* For any argument whose actual shape matches its declared shape, the value is passed untransformed.
 * For arguments where a `pool` was provided but a `list` or element was requested, that pool's multiset value in the current item of the multiset cross product iterator. An element argument receives the multiset's sole value, which may be of any element type.
 
 Each invocation's result is converted to a `pool` through the standard conversions. The final result of the function call is a `pool` created by iterating through every possible outcome of the intermediate pools, and summing the probability of that outcome in each of the intermediate pools, multiplied by the probability of the value that generated this intermediate pool.
@@ -603,24 +620,24 @@ function: one or N:n th die from FACES:s {
 output [one or d3 th die from 3d2]
 ```
 
-The cross-product multisets and their corresponding intermediate pools are:
+The cross-product multisets and their corresponding intermediate pools are shown below. `"position order"` has its default value of `"highest first"`, so each `FACES` multiset is ordered from its highest value down, and `N@FACES` indexes into it in that order.
 
 | Multiset for `N` | Multiset for `FACES` | Weight | Outcome | Weight for `1` | Weight for `2` |
 |------------------|----------------------|--------|---------|----------------|----------------|
 | [1]              | [1, 1, 1]            | 1      | d{1}    | 1              |                |
 | [2]              | [1, 1, 1]            | 1      | d{1}    | 1              |                |
 | [3]              | [1, 1, 1]            | 1      | d{1}    | 1              |                |
-| [1]              | [1, 1, 2]            | 3      | d{1}    | 3              |                |
-| [2]              | [1, 1, 2]            | 3      | d{1}    | 3              |                |
-| [3]              | [1, 1, 2]            | 3      | d{1, 2} | 3/2            | 3/2            |
-| [1]              | [1, 2, 2]            | 3      | d{1}    | 3              |                |
-| [2]              | [1, 2, 2]            | 3      | d{1, 2} | 3/2            | 3/2            |
-| [3]              | [1, 2, 2]            | 3      | d{1, 2} | 3/2            | 3/2            |
+| [1]              | [2, 1, 1]            | 3      | d{1, 2} | 3/2            | 3/2            |
+| [2]              | [2, 1, 1]            | 3      | d{1}    | 3              |                |
+| [3]              | [2, 1, 1]            | 3      | d{1}    | 3              |                |
+| [1]              | [2, 2, 1]            | 3      | d{1, 2} | 3/2            | 3/2            |
+| [2]              | [2, 2, 1]            | 3      | d{1, 2} | 3/2            | 3/2            |
+| [3]              | [2, 2, 1]            | 3      | d{1}    | 3              |                |
 | [1]              | [2, 2, 2]            | 1      | d{1, 2} | 1/2            | 1/2            |
 | [2]              | [2, 2, 2]            | 1      | d{1, 2} | 1/2            | 1/2            |
 | [3]              | [2, 2, 2]            | 1      | d{1, 2} | 1/2            | 1/2            |
 
-The final result has outcome 1 with weight 18, and outcome 2 with weight 6.
+The final result has outcome 1 with weight 18, and outcome 2 with weight 6. (Setting `"position order"` to `"lowest first"` reverses which value of `N` selects which face, but produces the same totals here, because `N` is uniform.)
 
 #### Function evaluation
 
@@ -647,7 +664,7 @@ output [sometimes empty d10]    \\\ Outcome 0 with probability 40%, then 5 throu
 Statement = IfStatement | LoopStatement | PrintStatement | OutputStatement
           | FunctionDefinitionStatement | ResultStatement | AssignmentStatement
           | EnumDefinitionStatement | SetStatement.
-Block = '{' Statement* '}'.
+Block = '{' {Statement} '}'.
 ```
 
 ### Conditionals
@@ -667,12 +684,12 @@ There is optional special syntax if the `else` block is itself an `if` statement
 A loop executes a body repeatedly while changing the value of a binding:
 
 ```
-LoopStatement = `loop` VariableName `over` Expr Block.
+LoopStatement = 'loop' VariableName 'over' Expr Block.
 ```
 
 The loop expression is evaluated. It is an error if it does not evaluate to a list (in particular, pools cannot be iterated over). A binding for `VariableName` is created in the current environment. For each value in the list, the loop variable is bound to that value, then all statements in the body are executed in succession.
 
-If there are no values in the list, the loop does not execute. If the loop executes at least one, the loop variable remains bound to the last value after the end of the loop.
+If there are no values in the list, the loop does not execute. If the loop executes at least once, the loop variable remains bound to the last value after the end of the loop.
 
 ### Print and output
 
@@ -697,13 +714,13 @@ In both cases, the expression is evaluated. Any strings present as part of a `na
 
 For an `output` statement, the value of the expression is converted to a `pool`, and added to an output list.
 
-The optional `named` clause attaches a name to the distribution for display purposes. If a name is not provided, it is associated with the default name `output n`, where `n` is the 1-indexed output index in program execution order.
+The optional `named` clause attaches a name to the distribution for display purposes. If no name is provided, the distribution is assigned the default name `output n`, where `n` is its one-based index in program execution order.
 
 The optional `labeled` clause assigns display names to the fields of a tuple-valued output. It is an error to use it with a non-tuple output or to provide a number of labels different from the tuple's arity. The labels do not change the tuple's type or values. `named` and `labeled` may occur in either order.
 
 ```
-output [tuple d6 d8] labeled "First die", "Second die"
-output [tuple d6 d8] named "Joint roll" labeled "d6 result", "d8 result"
+output [tuple d6, d8] labeled "First die", "Second die"
+output [tuple d6, d8] named "Joint roll" labeled "d6 result", "d8 result"
 ```
 
 Enum outputs display member names rather than numeric values. Tuple outputs display every field of each outcome. Numeric statistics and cumulative/order-based presentation do not apply to enum or tuple distributions.
@@ -715,14 +732,13 @@ For a `print` statement, the value of the expression is shown to the user as soo
 The `set` statement allows changing [global settings](#global-settings). It is an error for a `set` statement to occur inside a function.
 
 ```
-SetStatement = 'set' '"position order"' 'to' '"highest first"'.
-SetStatement = 'set' '"position order"' 'to' '"lowest first"'.
-SetStatement = 'set' '"explode depth"' 'to' Int.
-SetStatement = 'set' '"maximum function depth"' 'to' Int.
+SetStatement = 'set' '"position order"' 'to' ('"highest first"' | '"lowest first"')
+             | 'set' '"explode depth"' 'to' Int
+             | 'set' '"maximum function depth"' 'to' Int.
 ```
 
 > [!IMPORTANT]
-> Eurydice does not allow arbitrary expressions in set statements. Arguments must be int literals.
+> Eurydice does not allow arbitrary expressions in `set` statements. Arguments must be integer literals.
 
 ### Assignment
 
@@ -749,17 +765,20 @@ Function definitions create a new function binding in the [innermost environment
 Function definitions are executed sequentially, like other statements. A function call can therefore only resolve a function definition that has already been executed. A later definition with the same identifier replaces the earlier binding from that point onward.
 
 ```
-FunctionDefinitionStatement = 'function' ':' (Word | Parameter)+ Block.
-Parameter = VariableName [':' Type].
-Type = 'n' | 's' | 'd'.
+FunctionDefinitionStatement = 'function' ':' (Word | ParameterGroup)+ Block.
+ParameterGroup = Parameter {',' Parameter}.
+Parameter = VariableName [':' Shape].
+Shape = 'n' | 's' | 'd'.
 ```
 
 > [!IMPORTANT]
-> AnyDice function definitions can only occur at the top level.
+> AnyDice function definitions can only occur at the top level, and do not accept commas between parameters.
 
 The function's identifier is the sequence of words and argument positions in the name. It is valid for a function identifier to contain no words, or to contain no argument positions.
 
-Each argument name can optionally be annotated with a shape: `n` for an element type, `s` for a list, or `d` for a pool (dice). The value's outcomes may be integers, members of any one enum, or tuples; function declarations cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
+As in [function calls](#function-calls), adjacent parameters may be separated by commas, and the commas are not part of the identifier. `function: add A:n, B:n` and `function: add A:n B:n` define the same function, and either can be called with or without commas.
+
+Each parameter name can optionally be annotated with a _shape_: `n` for an element, `s` for a list, or `d` for a pool (dice). Note that this constrains the shape only: the value's outcomes may be integers, members of any one enum, or tuples, and a definition cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
 
 ### Return from function
 
@@ -779,11 +798,11 @@ The following functions are available in the top-level environment frame at the 
 
 Returns the absolute value of `N`.
 
-### `[choose FIRST:d if CONDITION:n else SECOND:d]`
+### ⊕ `[choose FIRST:d if CONDITION:n else SECOND:d]`
 
 Returns `FIRST` when `CONDITION` is nonzero, and `SECOND` when it is zero.
 
-As with other number-typed function parameters, a pool passed as `CONDITION` causes the function to be evaluated for every possible value of the summed pool. The resulting distributions are combined according to the probabilities of those values.
+As with other `n`-shaped function parameters, a pool passed as `CONDITION` causes the function to be evaluated for every possible value of the summed pool. The resulting distributions are combined according to the probabilities of those values.
 
 For example, this selects `d6` three quarters of the time and `2d6` one quarter of the time:
 
@@ -824,7 +843,7 @@ output [count {1, 1, 2} in {1, 2, 2, 3}]  \ Outputs 4 \
 
 ### `[explode POOL:d]`
 
-This transforms a die to match an [explosion rule](https://nethackwiki.com/wiki/Exploding_die): if the die rolls its highest face value, that value is kept and the die is re-rolled.
+This transforms a die to match an [explosion rule](https://nethackwiki.com/wiki/Exploding_die): if the die rolls its highest face value, that value is kept and the die is rerolled.
 
 The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#global-settings).
 
@@ -837,7 +856,7 @@ output [explode d{}]  \ Outputs d{} \
 output [explode d{1, 2, 3}]
 ```
 
-Here's a worked out example for `[explode 2d2]` with `explode depth` set to 1:
+Here is a worked example for `[explode 2d2]` with `explode depth` set to 1:
 
 1. The pool is summed to `d{2, 3:2, 4}`
 2. The outcome `4` is mapped to `d{2+4, (3+4):2, 4+4}`, which is the same as the summed die with each value incremented by its largest value. This is equivalent to keeping the 4 and adding the original die again. Other outcomes are left as-is.
@@ -848,7 +867,7 @@ Here's a worked out example for `[explode 2d2]` with `explode depth` set to 1:
    * 6: 1/4 (probability of rolling an initial 4) * 1/4 (probability of rolling a 2) = 1/16
    * 7: 1/4 (initial) * 1/2 (reroll) = 1/8
    * 8: 1/16 (same as 6)
-4. This is equivalent to `d{2: 4, 3: 8, 6, 7: 2, 8: 4}`
+4. This is equivalent to `d{2: 4, 3: 8, 6, 7: 2, 8}`
 
 ### `[explode POOL:d on COND:s]`
 
@@ -861,9 +880,9 @@ output [explode d6 on {1, 6}]  \ Explodes on both 1s and 6s \
 output [explode d{1, 2, 3} on {2, 3}]  \ Explodes on 2s and 3s \
 ```
 
-### `[reroll POOL:d]`
+### ⊕ `[reroll POOL:d]`
 
-This transforms a die to match a reroll rule: if the die rolls its highest face value, the die is re-rolled and only the new value is kept (unlike explode, which keeps both the original and new values).
+This transforms a die to match a reroll rule: if the die rolls its highest face value, the die is rerolled and only the new value is kept (unlike explode, which keeps both the original and new values).
 
 The maximum number of rerolls is controlled by the `"explode depth"` [global setting](#global-settings).
 
@@ -871,10 +890,7 @@ The maximum number of rerolls is controlled by the `"explode depth"` [global set
 output [reroll d6]  \ Rerolls on 6s, keeping only the reroll result \
 ```
 
-> [!IMPORTANT]
-> The `[reroll POOL:d]` function is not available in AnyDice.
-
-### `[reroll POOL:d on COND:s]`
+### ⊕ `[reroll POOL:d on COND:s]`
 
 This is similar to `[reroll POOL:d]`, but instead of rerolling on the highest face value, it rerolls on any value contained in the `COND` list.
 
@@ -885,14 +901,11 @@ output [reroll d6 on {1, 6}]  \ Rerolls on both 1s and 6s \
 output [reroll d{1, 2, 3, 4} on {1, 4}]  \ Rerolls on 1s and 4s \
 ```
 
-> [!IMPORTANT]
-> The `[reroll POOL:d on COND:n]` function is not available in AnyDice.
-
 ### `[highest COUNT:n of POOL:d]`, `[lowest COUNT:n of POOL:d]`, `[middle COUNT:n of POOL:d]`
 
 These functions return pools of dimension 1 whose distribution is the sum of the highest `COUNT`, lowest `COUNT`, or middle `COUNT` values in the possible outcomes of `POOL`.
 
-`[middle COUNT:n of POOL:d]` returns indices between ((length-COUNT) / 2) inclusive and ((length-COUNT) / 2 + COUNT) exclusive, rounding the division down, and indexing from 0. For instance, `[middle 2 of 5d2]` will return a pool corresponding to the 2nd and 3rd lowest dice, excluding the 1st, 4th and 5th.
+`[middle COUNT:n of POOL:d]` uses zero-based indices from `floor((length - COUNT) / 2)`, inclusive, through `floor((length - COUNT) / 2) + COUNT`, exclusive. For example, `[middle 2 of 5d2]` returns a pool corresponding to the second- and third-lowest dice, excluding the first, fourth, and fifth.
 
 ### `[highest of FIRST:n and SECOND:n]`, `[lowest of FIRST:n and SECOND:n]`
 
@@ -926,6 +939,6 @@ If `TUPLE` is a pool, normal [pool-based evaluation](#pool-based-evaluation) pro
 
 ## Acknowledgements
 
-The Eurydice language is almost entirely identical to [AnyDice by Jasper Flick](https://anydice.com/). Thanks!
+The Eurydice language is largely compatible with [AnyDice by Jasper Flick](https://anydice.com/). Thanks!
 
 This spec is inspired by the [Starlark spec](https://github.com/bazelbuild/starlark/blob/master/spec.md).

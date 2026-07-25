@@ -65,7 +65,7 @@ pub enum RuntimeError {
         found: StaticType,
     },
 
-    #[error("Reference to undefined to variable [{name}]")]
+    #[error("Reference to undefined variable [{name}]")]
     UndefinedReference {
         #[label = "Variable not defined"]
         range: SourceSpan,
