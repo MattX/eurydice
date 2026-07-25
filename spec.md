@@ -70,54 +70,67 @@ Errors are fatal and terminate program execution.
 The type grammar for Eurydice is
 
 ```
-Scalar  = int | uninhabited | E
+Scalar  = int | E | uninhabited | additive_identity
           where E ranges over declared enums
-Element = Scalar | (Scalar, Scalar[, Scalar[, Scalar]])
-Type    = Element | list Element | pool Element | additive_identity
+Element = Scalar | tuple (Scalar, Scalar[, Scalar[, Scalar]])
+Type    = Element | list Element | pool Element
 ```
 
-There are three primary kinds of values, called _element types_:
+There are three basic kinds of values:
 
 * `int`: values of this type hold a 32-bit signed integer
 * _enums_: user-declared types which each contain a set of nominal, non-numeric values, which can be used to represent discrete outcomes, booleans, etc.
 * _tuples_ are fixed-size, ordered products of two to four `int` or enum values. Tuple types are structural: the type of a tuple is determined by the number and types of its fields.
 
 > [!IMPORTANT]
-> AnyDice does not support enums or tuples; `Scalar` and `Element` both collapse to `int`. AnyDice also does not require an `additive_identity` type, since all sums are `int`-valued.
+> AnyDice does not support enums or tuples; `Scalar` and `Element` both collapse to `int`. AnyDice also does not require an `uninhabited` or `additive_identity` type.
 >
-> AnyDice does not restrict integers, or pool outcomes, to 32-bit values. Experimentation suggests that AnyDice outcomes are represented as double-precision floats (`output 9007199254740993` returns 9007199254740992).
+> AnyDice does not restrict integers to 32-bit values. Experimentation suggests that AnyDice integers are represented as double-precision floats (`output 9007199254740993` returns 9007199254740992).
 
-Two kinds of containers are built on these:
+Two kinds of collections are built on these:
 
 * _lists_: values of this type hold a list of one particular element type.
 * _pools_: values of this type hold a pool of one element type `e`, which is composed of a mapping of outcomes (each of which is of type `e`) to probabilities (whose representation is unspecified), together with an unsigned count of dice, which is called the _dimension_.
 
 Lists and pools are homogeneous and cannot mix values with different outcome types. For example, all tuples in one list must have the same arity and corresponding field types.
 
-Finally, two additional types arise out of technical necessity during type inference:
-
-* `uninhabited`: A bare empty list literal has an initially uninhabited outcome type: because it contains no values, it is compatible with any outcome type supplied by its context. This differs from an explicitly typed empty literal such as `{MISS:0}`, `{[tuple 1 2]:0}`, or `{1:0}`, which retains the type of its repeated expression.
-* `additive_identity`: Summing an untyped empty sequence or pool produces a universal additive identity. That identity remains polymorphic through additive arithmetic until a concrete additive type is supplied; if it is still unconstrained when used in an output or by an operation requiring integers, it becomes the integer `0`. The `print` statement instead displays it as italic `𝑒`.
-
 The maximum number of elements in a list, or of outcomes in a pool, is 2^31-1.
+
+Finally, two additional element types exist mostly out of technical necessity during type inference:
+
+* `uninhabited`: A bare empty list literal has an initially uninhabited outcome type: because it contains no values, it is compatible with any outcome type supplied by its context, so `{{}, {MISS}}` is valid An explicitly typed empty literal such as `{1:0}` retains the type of its repeated expression, so `{{1:0},{MISS}}` is invalid. There are no values of this type.
+* `additive_identity`: Summing a list of type `list uninhabited` or a pool of type `pool uninhabited` produces a universal additive identity, which is the only value of this type. That identity remains polymorphic through additive arithmetic until a concrete additive type is supplied; if it is still unconstrained when used in an output or by an operation requiring integers, it becomes the integer `0`. The `print` statement instead displays it as italic `𝑒`.
 
 There are no first-class functions.
 
+### Terminology
+
+This specification uses the following terms to refer to groups of types:
+
+* _element types_: `int`, `additive_identity`, `uninhabited`, all enum types, and all tuple types.
+* _additive type_: `int`, `additive_identity`, and tuple types whose fields are all additive types. These types support addition; additive tupple addition is field-by-field, and `additive_identity` can be added to an `int` or an additive tuple and behaves as a `0`.
+* _numeric type_: `int` and `additive identity`.
+* _collection types_: all list types and all pool types.
+* Sequences or pools whose outcome type is additive (and hence can be summed) are called _additive sequences_ or _additive pools_. Uninhabited lists or pools are also additive.
+
+> [!IMPORTANT]
+> In AnyDice, element types, additive types, and numeric types all refer to only the type `int`. All pools and sequences are additive.
+
 ### Enums
 
-Enums are declared at the top level:
+Enums must be declared at the top level:
 
 ```
 enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
 ```
 
-The enum type and its members use variable-identifier syntax. An enum must contain at least one member. Enum type and member names share a namespace and cannot collide. Both are immutable; members are global constants. Enum declarations cannot occur in functions or nested blocks and cannot replace an existing enum, member, or variable binding.
+The enum type and its members use variable-identifier syntax. An enum must contain at least one member. Variables, enum type names, and enum member names all share a namespace. It is an error to declare an enum whose name or any member name equal that of a declared variable. Conversely, it is an error to declare a variable whose name collides with an enum name or member.
 
-Enum members support equality and inequality with members of the same enum. Arithmetic, ordering, boolean negation, ranges, numeric dice-side or dice-count use, sorting, and other numeric operations are errors. Homogeneous enum values can be placed in lists and dimension-one pools, passed to functions, returned, repeated, reversed, counted, tested for containment, and displayed. Enum pools are categorical distributions, not collections of multiple sampled enum values: `d{MISS, HIT}` is valid, while `2d{MISS, HIT}` is an error. Use an enum sequence to represent multiple enum values.
+Enum members support equality and inequality with members of the same enum. Arithmetic, ordering, boolean negation, ranges, or dice-count use, are all errors.
 
 ### Tuples
 
-Tuples are constructed by the built-in functions `[tuple A B]`, `[tuple A B C]`, and `[tuple A B C D]`. Each field must be an `int` or enum scalar. Nested tuples are not supported.
+Tuples are constructed by the built-in functions `[tuple A B]`, `[tuple A B C]`, and `[tuple A B C D]`. Each field must be a `Scalar`. Nested tuples are not supported.
 
 ```
 PAIR: [tuple 3 5]
@@ -128,9 +141,9 @@ output #PAIR                \ Outputs 2
 
 Tuple fields are selected with `[element INDEX of TUPLE]`. Indices are one-based and must be within the tuple's bounds; an invalid index is an error. The `@` operator does not project tuple fields.
 
-Tuples support structural equality and inequality with tuples of the same type. A tuple whose fields are all `int`s is _additive_: `+`, `-`, and unary `-` operate componentwise, multiplication by an `int` is supported in either operand order, and division by an `int` operates componentwise. `int / tuple` is not defined. Tuple division uses the same truncation toward zero as integer division. Arithmetic requires matching tuple types where both operands are tuples.
+Tuples support structural equality and inequality with tuples of the same type. A tuple whose fields are all `int`s or `additive_identity`s is _additive_: `+`, `-`, and unary `-` operate componentwise, multiplication by an `int` is supported in either operand order, and division by an `int` operates componentwise. `int / tuple` is not defined.
 
-Tuples containing enum fields do not support arithmetic. Ordering, boolean negation, ranges, numeric dice-side or dice-count use, and sorting are errors for every tuple. Homogeneous tuples can be placed in lists and pools, passed to functions, returned, repeated, reversed, counted, tested for containment, and displayed. An additive tuple pool may have any dimension and is summed componentwise; other tuple pools must have dimension one. A tuple pool is a joint or multi-valued distribution: each outcome is one complete tuple, so correlations between its fields are preserved.
+Ordering, boolean negation, ranges, numeric dice-side or dice-count use, and sorting are errors for every tuple. Tuples containing enum fields are not additive and do not support arithmetic.
 
 Tuple constructors and field projection participate in normal [pool-based function evaluation](#pool-based-evaluation). Consequently, constructing a tuple from pool-valued arguments produces their joint distribution, and passing a tuple-valued pool to an `n` parameter evaluates the function once per tuple outcome.
 
@@ -142,14 +155,11 @@ JOINT: [tuple A B]
 output [element 1 of JOINT]
 ```
 
-> [!IMPORTANT]
-> AnyDice does not support tuples or multi-valued distributions.
-
 ### Pools
 
 It is not possible to create a pool value representing a pool of different types of dice. For instance, `3d6` is a pool of three d6s, but there is no way to represent a pool of one d6 and one d8.
 
-Pools whose outcomes are neither integers nor additive tuples must have dimension one. Enum pools and tuple pools containing enum fields therefore represent categorical or joint distributions rather than collections of values which can be summed. An untyped pool with no outcomes may have any dimension because it has not yet acquired an outcome type.
+Pools whose outcomes are not additive (essentially, those containing enums) must have dimension one. Pools of type `pool uninhabited` may have any dimension.
 
 Pools may have no possible outcomes (for instance, such a pool is created with expression `d{}`). Such a pool has dimension 0.
 
@@ -157,9 +167,13 @@ The following operations are frequently referred to in this document:
 
 #### Summing
 
-_Summing_ an additive pool transforms it into a pool of dimension 1 whose outcomes are the possible sums when sampling from the dice in the pool, with associated probabilities. Integer outcomes are added normally and all-int tuple outcomes are added componentwise. Summing a pool of dimension 1 does nothing, including for a non-additive pool. Summing a dimension-0 pool with a concrete additive type creates a dimension-1 pool containing its additive identity: `0` for integers or an all-zero tuple of the appropriate type. If the empty pool is untyped, summing it produces the universal additive identity described above.
+_Summing_ an [additive pool](#terminology) transforms it into a pool of dimension 1 whose outcomes are the possible sums when sampling from the dice in the pool, with associated probabilities. Integer outcomes are added normally and additive tuple outcomes are added componentwise.
 
 For instance, summing `2d2` results in a pool equivalent to `d{2, 3, 3, 4}`.
+
+Summing a pool of type `pool uninhabited` of any dimension produces a pool of dimension 1, with no outcomes, and with type `pool additive_identity`. This guarantees that expressions such as `d{} + 2d{} + d{[tuple 1 2]}` are well-typed.
+
+Summing a pool of dimension 1 of another type does nothing, including for a non-additive pool. Summing a dimension-0 pool with a concrete additive type creates a dimension-1 pool containing its additive identity: `0` for integers or an all-zero tuple of the appropriate type.
 
 #### Multiset iteration
 
@@ -362,11 +376,11 @@ If a repeat expression is present, it must evaluate to an `int`. If this value i
 
 List flattening transforms values in the following way:
 
-* Scalar values are flattened by enclosing them in a single-element list.
+* Element values are flattened by enclosing them in a single-element list.
 * `list` values are unchanged by flattening.
 * `pool` values are flattened first by [summing](#summing), then by discarding the probabilities and creating a list containing each outcome in ascending order. Outcomes with nonzero probability appear once regardless of their probabilities.
 
-Flattening preserves concrete outcome types. Non-additive pools always have dimension one, so flattening them does not require adding their outcomes together. Additive tuple pools are summed componentwise before flattening. Flattening an untyped empty pool produces the universal additive identity, which may subsequently adopt the outcome type of the list containing it.
+Flattening preserves `pool` outcome types. Non-additive `pool`s always have dimension one, so flattening them does not require adding their outcomes together.
 
 #### Examples
 
@@ -390,11 +404,11 @@ A single expression enclosed in parentheses yields the result of that expression
 
 There are 4 unary operators, which all bind tighter than any binary operator. There are `!`, `-`, `#`, and `d`.
 
-`!` and `-` compute logical and arithmetic negation respectively. `!` requires numeric outcomes. `-` accepts numeric outcomes and all-int tuple outcomes; it negates tuple fields componentwise. Applying either operator to an enum or enum-containing tuple is an error.
+`!` and `-` compute logical and arithmetic negation respectively. `!` requires a numeric value. `-` accepts all additive values; it negates tuple fields componentwise.
 
-* If the argument is an `int`, `-` negates the value, while `!` evaluates 0 if the argument is nonzero, and 1 otherwise.
-* If the argument is a `list`, its values are summed, then the operator is applied. Tuple lists can therefore be negated when their outcome type is additive.
-* If the argument is a `pool`, the pool is summed, then the [outcomes of the pool are all mapped](#outcome-mapping) with the operator. For an additive tuple pool, summing and negation are componentwise.
+* If the argument is a numeric type, `-` negates the value, while `!` evaluates 0 if the argument is nonzero, and 1 otherwise.
+* If the argument is a `list`, its values are summed to an element type, to which the operator is applied.
+* If the argument is a `pool`, the pool is summed, then the [outcomes of the pool are all mapped](#outcome-mapping) with the operator.
 
 `#` evaluates to the length of its argument:
 
@@ -424,48 +438,53 @@ All operators are left-associative.
 
 The `d` operator is the main way to create a pool.
 
-1. The RHS operand is converted to a pool with the following operation.
-   1. If it is an `int` `i`, it is converted to a pool with values 1 to `abs(i)` inclusive (if `i` is 0, the pool contains the single outcome 0). If `i` is negative, the pool outcomes then are mapped to their opposite. For instance, `d(-3)` evaluates to `d{-1, -2, -3}`.
+1. The RHS operand is converted to a pool with the following operation:
+   1. If it is a numeric value `i`, it is converted to a pool with values 1 to `abs(i)` inclusive (if `i` is 0 or `additive_identity`, the pool contains the single outcome 0). If `i` is negative, the pool outcomes then are mapped to their opposite. For instance, `d(-3)` evaluates to `d{-1, -2, -3}`.
    2. If it is a `list`, it is converted to a pool whose outcomes are the distinct values in the list, and whose probability for each outcome is proportional to the number of occurrences of each value in the list. An empty list produces a pool of dimension 0.
    3. Pools provided as an RHS operand are not transformed.
-2. The LHS operand is summed if it is a `list`, resulting in either an `int` or a `pool`.
-   1. If it is an `int` `i`, the dimension of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
-   2. If it is a `pool`, then the RHS is [flat mapped](#flat-mapping) with the operation described in (a). (Recall that flat-mapping takes a pool and an `int -> pool` function; the operation described in (a) is such a function).
-
-The LHS must have numeric outcomes. A non-numeric scalar cannot be used directly as the RHS; it must be enclosed in a list. If the RHS list or pool is non-additive, the resulting pool must have dimension one. All-int tuples are additive, so `2d{[tuple 1 2], [tuple 3 4]}` is valid and its rolls are summed componentwise. Tuples containing enum fields remain limited to dimension one.
+2. The LHS operand is first summed if it is `list` (which must be an additive list), then:
+   1. If it is a numeric value `i`, the dimension of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
+   2. If it is a pool with numeric outcomes, then the RHS is [flat mapped](#flat-mapping) with the operation described in (a). (Recall that flat-mapping takes a pool and an `int -> pool` function; the operation described in (a) is such a function).
+   3. It is an error if a value of another type is used as LHS to `d`.
 
 #### `@` operator
 
-The `@` operator selects the (LHS)-th element from its RHS. The LHS must be numeric. A tuple scalar is not treated as a sequence by this operator; use `[element INDEX of TUPLE]` to project a tuple field.
+The `@` operator selects the (LHS)-th element from its RHS. A tuple is not treated as a list by this operator; use `[element INDEX of TUPLE]` to project a tuple field.
 
-First, if the LHS argument is an int, it is converted to a singleton list. It is an error if the LHS argument is a pool.
+First, if the LHS argument is an additive type, it is converted to a singleton list. It is an error if the LHS argument is not an additive element or an additive type.
 
-* If the RHS is an `int` or `list`, for each value `i` in the resulting list:
+* If the RHS is an `int` or `list`, for each value `i` in the resulting LHS list:
   * If the RHS is an `int` `j`, the base-10 digit of `abs(j)` at index `i` is selected. If `j` is negative, this digit is multiplied by -1. If the `"position order"` [global setting](#global-settings) is set to `"highest first"`, index 1 corresponds to the most significant digit; otherwise, to the least significant. Valid indices start at 1.
   * If the RHS is a `list`, its element at position `i` is selected. The first element of the list has index 1. This is not affected by the `"position order"` setting.
   * In both the int and list RHS cases, if `i` is invalid (zero or negative, or greater than list length or digit count), the expression evaluates to 0.
-  * Finally, all selected elements are summed to produce an `int`.
+  * Finally, all selected elements are summed to produce an `int`. It is an error if the LHS list has a length different than one and the RHS' outcome type is not additive.
 * If the RHS argument is a `pool`, then, each outcome multiset is flat mapped with the following function:
   * The multiset is sorted according to the `"position order"` [global setting](#global-settings).
   * Elements are selected from the multiset and summed as if using the `@` operator from a list.
-
-Additive tuple values selected from a list or pool are summed componentwise, with invalid positions contributing the all-zero tuple. As an exception for non-additive outcomes, a single valid position may select an enum or enum-containing tuple value from a list. Selecting multiple positions, or an invalid position, from such a list is an error because those values cannot be summed and have no additive identity.
 
 #### Mathematical operators
 
 The operators `^`, `*`, `/`, `+`, `-`, `&`, and `|` are mathematical operators, performing exponentiation, multiplication, integer division, addition, subtraction, logical conjunction, and logical disjunction, respectively.
 
-Applied to `int`s, `&` evaluates to `1` if both of its arguments are nonzero, `0` otherwise; `|` evaluates to `1` if at least one argument is nonzero. Other mathematical operators have standard behavior on the integers.
+Applied to numeric values, `&` evaluates to `1` if both of its arguments are nonzero, `0` otherwise; `|` evaluates to `1` if at least one argument is nonzero. Other mathematical operators have standard behavior on the integers.
 
 Division by 0 causes an error to be raised. `0^0` evaluates to 1.
 
-Enums and enum-containing tuples cannot be used with mathematical operators. All-int tuples support componentwise addition and subtraction, integer scalar multiplication in either operand order, and tuple-by-integer division. Other mathematical operations involving tuples are errors.
+Operators have the following signatures on element values:
 
-The universal additive identity is preserved by addition, subtraction, negation, multiplication, and division by a nonzero integer until another operand determines a concrete additive result type. Consequently, grouping does not change the meaning of expressions such as `2d{} + 2d{} + [tuple 1 2]`. Operators that intrinsically require integers, including exponentiation and logical operators, resolve an unconstrained identity to `0`.
+```
+* + -         : additive identity, additive identity -> additive identity
+^ * / + - & | : numeric, numeric -> numeric
++ -           : additive tuple, additive tuple -> additive tuple
+* /           : additive tuple, numeric -> additive tuple
+```
 
-1. If either argument to a mathematical operator is a `list`, it is summed to an additive scalar.
-2. After this, if both arguments are scalars, the operator is applied according to the integer and tuple rules above.
-3. Otherwise, both arguments are converted to `pool`s and summed. The LHS is then flat mapped with a function that applies the operator to the LHS and each value in the RHS.
+If the arguments are not both elements, the coercion rules are the following:
+
+1. It is an error if either argument is a non-additive list or pool.
+2. If either argument to a mathematical operator is an additive `list`, it is summed to a numeric element.
+3. After this, if both arguments are elements, the operator is applied according to the rules above.
+4. Otherwise, both arguments are converted to `pool`s and summed. The LHS is then flat mapped with a function that applies the operator to the LHS and each value in the RHS.
 
 #### Comparison operators
 
@@ -473,10 +492,10 @@ The operators `=`, `!=`, `<`, `<=`, `>`, and `>=` are comparison operators, perf
 
 In all cases, these operators evaluate to `1` if their condition is true, or `0` otherwise.
 
-Equality and inequality are also defined structurally for enum members and tuples of the same outcome type. Two tuples are equal exactly when every pair of corresponding fields is equal. Ordering comparisons are not defined for enums or tuples. Comparing values with different outcome types is an error.
+Equality and inequality are also defined nominally for enum members and structurally for tuples of the same type. Two tuples are equal exactly when every pair of corresponding fields is equal. Ordering comparisons are not defined for enums or tuples. Comparing values with different types is an error.
 
-1. If both arguments are scalars, equality or inequality compares them directly. Ordering comparisons require two `int`s.
-2. If one argument is a `list`, and the other is a scalar of the same outcome type, the comparison is performed between the scalar and each member of the `list`. The expression's value is an `int`: the count of comparisons that evaluated to true. Ordering in this form requires numeric outcomes.
+1. If both arguments are elements, equality or inequality compares them directly. Ordering comparisons require two numeric values
+2. If one argument is a `list`, and the other is an  element of the same outcome type, the comparison is performed between the element and each member of the `list`. The expression's value is an `int`: the count of comparisons that evaluated to true. Ordering in this form requires numeric outcomes.
 3. If both arguments are `list`s, equality and inequality compare the complete lists structurally. Numeric lists may additionally be compared in [lexicographic order](https://en.wikipedia.org/wiki/Lexicographic_order).
 4. If either argument is a `pool`, both arguments are converted to `pool`s and summed. The LHS is then flat mapped with a function that applies the operator to the LHS and each value in the RHS. Additive tuple pools are summed componentwise. For non-additive pools, only equality and inequality are available, and summing their dimension-one pools is a no-op.
 
@@ -508,27 +527,27 @@ From then, function calls proceed in several steps.
 
 #### Argument coercion
 
-The actual types of the argument expressions are compared to the expected argument types, and each is transformed in the following way:
+The actual types of the arguments are compared to the expected argument types, and each is transformed in the following way:
 
 * If the expected argument type is unspecified, or if the expected shape and outcome type match the actual value, the value is not transformed.
 * If the actual argument is a `list`:
-  * If a scalar is requested, an additive `list` is summed to an `int` or all-int tuple. A non-additive list cannot be summed to a scalar.
+  * If an element type is requested, an additive `list` is summed to an additive type. It is an error if the list is not additive.
   * If a `pool` is requested, a `pool` is created, with equally likely outcomes from the `list`.
-* If the actual argument is a scalar:
+* If the actual argument is an element:
   * If a `list` is requested, a singleton list is created.
   * If a `pool` is requested, a single-outcome `pool` is created.
-* If the actual argument type is a `pool`, and a scalar is requested, an additive pool is summed, creating a new `pool` (see note below: `pool`-typed values can be passed to scalar-typed arguments). A dimension-one non-additive pool is already in the required form and is expanded outcome by outcome during pool-based evaluation.
+* If the actual argument type is a `pool`, and an element is requested, the pool is summed, creating a new `pool` (see note below: `pool`-typed values can be passed to element-typed arguments).
 
-After this process, some values of type `pool` may still correspond to arguments where scalar or `list` shapes are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#function-evaluation). If it is the case, evaluation proceeds as described in the next section.
+After this process, some values of type `pool` may still correspond to arguments where element or `list` shapes are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#function-evaluation). If it is the case, evaluation proceeds as described in the next section.
 
 #### Pool-based evaluation
 
-This section applies if any `pool` values are being passed to scalar- or `list`-typed arguments. As mentioned above, any additive pool corresponding to a scalar argument is summed to dimension 1; non-additive pools already have dimension one. Then, the [multiset cross product](#multiset-cross-product) of the pools is generated. The order in which elements inside each multiset are ordered follows the `"position order"` [global setting](#global-settings).
+This section applies if any `pool` values are passed to element- or `list`-typed arguments. As mentioned above, any pool corresponding to an element argument is summed to dimension 1. Then, the [multiset cross product](#multiset-cross-product) of the pools is generated. The order in which elements inside each multiset are ordered follows the `"position order"` [global setting](#global-settings).
 
 The function is then evaluated once for each value in the multiset cross product (this may be 0 times if the cross product is empty). In each invocation, the argument values are:
 
-* For any argument whose actual type correspond to its declared type, the actual value.
-* For arguments where a `pool` was provided but a `list` or scalar was requested, that pool's multiset value in the current element of the multiset cross product iterator. A scalar argument receives the multiset's sole value, which may be an `int`, enum member, or tuple.
+* For any argument whose actual type corresponds to its declared type, the value is passed untransformed.
+* For arguments where a `pool` was provided but a `list` or element was requested, that pool's multiset value in the current item of the multiset cross product iterator. An element argument receives the multiset's sole value, which may be of any element type.
 
 Each invocation's result is converted to a `pool` through the standard conversions. The final result of the function call is a `pool` created by iterating through every possible outcome of the intermediate pools, and summing the probability of that outcome in each of the intermediate pools, multiplied by the probability of the value that generated this intermediate pool.
 
@@ -611,7 +630,7 @@ OutputOptions = ['named' Str ['labeled' Str {',' Str}]
 ```
 
 > [!IMPORTANT]
-> AnyDice does not support the `print` statement.
+> AnyDice does not support the `print` statement or the `labeled` clause.
 
 It is an error if an `output` statement occurs inside a function. No such restriction exists for the `print` statement.
 
@@ -684,9 +703,7 @@ Type = 'n' | 's' | 'd'.
 
 The function's identifier is the sequence of words and argument positions in the name. It is valid for a function identifier to contain no words, or to contain no argument positions.
 
-Each argument name can optionally be annotated with a shape: `n` for a scalar, `s` for a sequence, or `d` for a pool. The value's outcomes may be integers, members of any one enum, or tuples; function declarations cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
-
-An enum or tuple scalar may be coerced to a singleton sequence or pool. An additive tuple sequence or pool may be summed into a scalar tuple. A dimension-one enum or enum-containing tuple pool may be expanded for a scalar or sequence parameter. Non-additive sequences cannot be summed into scalars, and non-additive pools always have dimension one. Generic function parameters preserve an unconstrained additive identity; a concrete outcome constraint or operation inside the function resolves it only when required.
+Each argument name can optionally be annotated with a shape: `n` for an element type, `s` for a list, or `d` for a pool (dice). The value's outcomes may be integers, members of any one enum, or tuples; function declarations cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
 
 ### Return from function
 
@@ -736,11 +753,11 @@ output [choose FIRST if d{0:SECOND_WEIGHT, 1:FIRST_WEIGHT} else SECOND]
 
 ### `[SEQ:s contains N:n]`
 
-Returns `1` if `SEQ` contains `N`, or `0` otherwise. `SEQ` and `N` must have the same outcome type. This operation supports integers, enum members, and tuples.
+Returns `1` if `SEQ` contains `N`, or `0` otherwise. `SEQ` and `N` must have the same outcome type.
 
 ### `[count NEEDLES:s in HAYSTACK:s]`
 
-Counts the number of occurrences of each element of `NEEDLES` in `HAYSTACK`. Returns the sum of these counts. Both sequences must have the same outcome type. This operation supports integers, enum members, and tuples.
+Counts the number of occurrences of each element of `NEEDLES` in `HAYSTACK`. Returns the sum of these counts. Both lists must have the same outcome type.
 
 Examples:
 
@@ -831,21 +848,25 @@ Sums `POOL`, then returns its largest possible outcome as an int.
 
 ### `[reverse SEQUENCE:s]`
 
-Returns `SEQUENCE` in reverse order. This operation supports integer, enum, and tuple sequences.
+Returns `SEQUENCE` in reverse order.
 
 ### `[sort SEQUENCE:s]`
 
-This function returns a sequence with the same elements as `SEQUENCE`, sorted in ascending or descending order depending on the value of the `"position order"` global setting.
+This function returns a list with the same elements as `SEQUENCE`, sorted in ascending or descending order depending on the value of the `"position order"` global setting.
 
-The sequence must have numeric outcomes; enums and tuples have no language-level ordering.
+The list must have numeric outcomes; enums and tuples have no language-level ordering.
 
 ### `[tuple A:n B:n]`, `[tuple A:n B:n C:n]`, `[tuple A:n B:n C:n D:n]`
 
-Constructs a tuple from two, three, or four scalar fields. Each field must be an `int` or enum member; nested tuples are an error. Pool-valued arguments are expanded using normal [pool-based evaluation](#pool-based-evaluation), producing a joint tuple distribution.
+Constructs a tuple from two, three, or four element fields. Each field must be an `int`, `additive_identity`, or enum member; nested tuples are an error.
+
+Pool-valued arguments are expanded using normal [pool-based evaluation](#pool-based-evaluation), producing a joint tuple distribution.
 
 ### `[element INDEX:n of TUPLE:n]`
 
-Returns the field at the one-based `INDEX` in `TUPLE`. `INDEX` must be an integer, `TUPLE` must be a tuple, and an out-of-bounds index is an error. If `TUPLE` is a pool, normal [pool-based evaluation](#pool-based-evaluation) projects the field from every tuple outcome while preserving its probabilities.
+Returns the field at the one-based `INDEX` in `TUPLE`. `INDEX` must be an `int` or `additive_identity`, `TUPLE` must be a tuple, and an out-of-bounds index is an error.
+
+If `TUPLE` is a pool, normal [pool-based evaluation](#pool-based-evaluation) projects the field from every tuple outcome while preserving its probabilities.
 
 ## Acknowledgements
 
