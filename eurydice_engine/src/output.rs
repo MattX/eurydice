@@ -1,10 +1,10 @@
 use malachite::base::num::conversion::traits::RoundingFrom;
-use malachite::{base::rounding_modes::RoundingMode, rational::Rational, Natural};
+use malachite::{Natural, base::rounding_modes::RoundingMode, rational::Rational};
 use serde::Serialize;
 use std::fmt::Write;
 
 use crate::dice::Pool;
-use crate::eval::{sum_pool, ElementType, ElementValue, RuntimeValue};
+use crate::eval::{ElementType, ElementValue, RuntimeValue, sum_pool};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Distribution {

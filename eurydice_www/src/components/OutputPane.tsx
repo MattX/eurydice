@@ -129,8 +129,8 @@ function NumericOutputSection({
   const [lowerBound, setLowerBound] = React.useState(0);
   const [upperBound, setUpperBound] = React.useState(0);
 
-  // The plugin is a ref because we can't recreate it every time the distributions change.
-  const plugin = React.useRef<ChartJsRangeSelect>(
+  // Keep one plugin instance for the lifetime of this output section.
+  const [plugin] = React.useState<ChartJsRangeSelect>(() =>
     makeChartJsRangeSelect({
       onRangeChange: (startValue, endValue) => {
         setLowerBound(startValue < endValue ? startValue : endValue);
@@ -151,14 +151,14 @@ function NumericOutputSection({
       distribution.probabilities.map(([[outcome]]) => outcome)
     );
     if (outcomes.length > 0) {
-      plugin.current.setOffset(Math.min(...outcomes));
+      plugin.setOffset(Math.min(...outcomes));
     }
-  }, [distributions]);
+  }, [distributions, plugin]);
 
   // Keep plugin enabled state in sync with the display mode.
   React.useEffect(() => {
-    plugin.current.setEnabled(displayMode !== DisplayMode.Transposed);
-  }, [displayMode]);
+    plugin.setEnabled(displayMode !== DisplayMode.Transposed);
+  }, [displayMode, plugin]);
 
   const isDarkMode = React.useContext(DarkModeContext);
   const bracketUnavailableMessage =
@@ -170,7 +170,7 @@ function NumericOutputSection({
     setDisplayMode(mode);
     if (mode === DisplayMode.Transposed && showBracketing) {
       setShowBracketing(false);
-      plugin.current.setActive(false);
+      plugin.setActive(false);
     }
   };
 
@@ -218,8 +218,8 @@ function NumericOutputSection({
             onClick={() => {
               if (displayMode === DisplayMode.Transposed) return;
               setShowBracketing(!showBracketing);
-              plugin.current.setActive(!showBracketing);
-              plugin.current.setRange(lowerBound, upperBound);
+              plugin.setActive(!showBracketing);
+              plugin.setRange(lowerBound, upperBound);
             }}
             aria-disabled={bracketUnavailableMessage !== undefined}
             aria-describedby={
@@ -251,7 +251,7 @@ function NumericOutputSection({
                       upperBound
                     );
                     setUpperBound(newUpperBound);
-                    plugin.current.setRange(
+                    plugin.setRange(
                       Number(e.target.value),
                       newUpperBound
                     );
@@ -272,7 +272,7 @@ function NumericOutputSection({
                       lowerBound
                     );
                     setLowerBound(newLowerBound);
-                    plugin.current.setRange(
+                    plugin.setRange(
                       newLowerBound,
                       Number(e.target.value)
                     );
@@ -300,7 +300,7 @@ function NumericOutputSection({
           distributions={distributions}
           mode={displayMode}
           isDarkMode={isDarkMode}
-          plugin={plugin.current}
+          plugin={plugin}
         />
       )}
     </section>

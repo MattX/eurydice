@@ -2,7 +2,7 @@
 
 use std::{fmt::Write, rc::Rc};
 
-use malachite::{base::num::basic::traits::One, Natural};
+use malachite::{Natural, base::num::basic::traits::One};
 
 use crate::{ast::StaticType, dice::Pool};
 

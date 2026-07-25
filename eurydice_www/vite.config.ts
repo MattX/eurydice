@@ -143,6 +143,22 @@ export default defineConfig(({ isSsrBuild }) => ({
               about: "help/about/index.html",
               spec: "help/spec/index.html",
             },
+            output: {
+              manualChunks: {
+                charts: [
+                  "chart.js",
+                  "chartjs-chart-matrix",
+                  "react-chartjs-2",
+                ],
+                editor: [
+                  "@codemirror/language",
+                  "@codemirror/lint",
+                  "@lezer/highlight",
+                  "@uiw/codemirror-theme-github",
+                  "@uiw/react-codemirror",
+                ],
+              },
+            },
           },
         }),
   },

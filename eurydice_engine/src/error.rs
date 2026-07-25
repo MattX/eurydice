@@ -52,7 +52,7 @@ pub enum RuntimeError {
         range: SourceSpan,
     },
 
-    #[error("Return statxement outside a function")]
+    #[error("Return statement outside a function")]
     ReturnOutsideFunction {
         #[label = "Return statement outside a function"]
         range: SourceSpan,
@@ -106,10 +106,10 @@ pub enum RuntimeError {
         op: BinaryOp,
         expected: &'static str,
 
-        // TODO - show value
-        #[label = "This is a {found}."]
+        #[label = "This is a {found} with value {value}."]
         found_range: SourceSpan,
         found: StaticType,
+        value: RuntimeValue,
     },
 
     #[error("Invalid argument to function")]

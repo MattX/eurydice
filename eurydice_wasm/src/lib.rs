@@ -1,6 +1,6 @@
 mod utils;
 
-use eurydice_engine::{output::Distribution, Engine};
+use eurydice_engine::{Engine, output::Distribution};
 use js_sys::Function;
 use serde::Serialize;
 use utils::set_panic_hook;

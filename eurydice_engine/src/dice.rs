@@ -12,9 +12,9 @@
 //! _Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital
 //! Entertainment_, 18(1), 258-265. https://doi.org/10.1609/aiide.v18i1.21971
 use lazy_static::lazy_static;
+use malachite::Natural;
 use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::base::num::basic::traits::{One, Zero};
-use malachite::Natural;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
@@ -599,7 +599,8 @@ lazy_static! {
 /// Calculate binomial coefficient n choose k, with value caching.
 ///
 /// Panics if k > n.
-// TODO - this can likely be made faster / smaller by only caching factorials.
+// Pascal rows use more memory than cached factorials, but make repeated
+// coefficient lookups addition-only and avoid large-integer division.
 #[allow(clippy::needless_range_loop)]
 fn binom(n: usize, k: usize) -> Natural {
     if n == k {
@@ -764,7 +765,7 @@ mod tests {
         StateMapper {
             initial_state: (Some(0), 0),
             f: move |state: &MaxDiceToReachState, outcome: &i32, count| {
-                let count = count as i32;
+                let count = i32::try_from(count).expect("pool dimension fits in i32");
                 let (sum, rolls) = *state;
                 let sum = match sum {
                     Some(sum) => sum,
@@ -913,7 +914,7 @@ mod tests {
                 (11, 1)
             ]
             .into_iter()
-            .map(|(i, w)| (i, Natural::from(w as u32)))
+            .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
             .collect::<Vec<_>>()
         );
     }
@@ -962,7 +963,7 @@ mod tests {
             (34, 1),
         ]
         .into_iter()
-        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
         .collect::<HashMap<_, _>>();
         assert_eq!(map, expected);
     }
@@ -991,7 +992,7 @@ mod tests {
             (17, 54),
         ]
         .into_iter()
-        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
         .collect::<HashMap<_, _>>();
         assert_eq!(map, expected);
     }
@@ -1002,7 +1003,7 @@ mod tests {
         fn multiset_to_int(multiset: &[i32]) -> i32 {
             let mut total = 0;
             for (idx, item) in multiset.iter().rev().enumerate() {
-                total += (item - 1) * 5i32.pow(idx as u32);
+                total += (item - 1) * 5i32.pow(u32::try_from(idx).expect("test pool is small"));
             }
             total
         }
@@ -1142,7 +1143,7 @@ mod tests {
             (3124, 1),
         ]
         .into_iter()
-        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
         .collect::<HashMap<_, _>>();
         assert_eq!(map, expected);
     }
@@ -1212,7 +1213,7 @@ mod tests {
         let pool2 = Pool::from_list(1, vec![1, 2, 3, 4]);
         let result = pool1.flat_map(|outcome| {
             let mut summed_pool = pool2.clone();
-            summed_pool.set_dimension(outcome[0] as u32);
+            summed_pool.set_dimension(u32::try_from(outcome[0]).unwrap());
             summed_pool.sum().into()
         });
         let map = result
@@ -1234,7 +1235,7 @@ mod tests {
             (12, 1),
         ]
         .into_iter()
-        .map(|(i, w)| (i, Natural::from(w as u32)))
+        .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
         .collect::<HashMap<_, _>>();
         assert_eq!(map, expected);
     }

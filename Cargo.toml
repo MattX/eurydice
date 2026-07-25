@@ -9,3 +9,6 @@ members = [
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[profile.release.package.eurydice_wasm]
+opt-level = "s"

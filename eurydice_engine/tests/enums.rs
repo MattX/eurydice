@@ -113,10 +113,11 @@ fn serialized_tuple_distribution_hoists_field_schema() {
 
     // Every outcome is a raw i32 vector matching the field count, and the
     // probabilities form a valid distribution.
-    assert!(dist
-        .probabilities
-        .iter()
-        .all(|(values, _)| values.len() == 2));
+    assert!(
+        dist.probabilities
+            .iter()
+            .all(|(values, _)| values.len() == 2)
+    );
     let total: f64 = dist.probabilities.iter().map(|(_, p)| p).sum();
     assert!((total - 1.0).abs() < 1e-9, "probabilities should sum to 1");
 }

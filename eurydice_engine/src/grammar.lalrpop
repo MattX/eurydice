@@ -58,7 +58,6 @@ IfStatement: Statement = {
 };
 
 SetStatement: Statement = {
-    // TODO: remove as here
     "set" "\"explode depth\"" "to" <n:Num> => Statement::Set(SetParam::ExplodeDepth(n as usize)),
     "set" "\"maximum function depth\"" "to" <n:Num> => Statement::Set(SetParam::MaximumFunctionDepth(n as usize)),
     "set" "\"position order\"" "to" "\"lowest first\"" => Statement::Set(SetParam::PositionOrder(PositionOrder::Ascending)),

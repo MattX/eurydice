@@ -2,7 +2,7 @@
 name = "eurydice_wasm"
 version = "0.1.0"
 authors = ["Matthieu Felix <matthieufelix@gmail.com>"]
-edition = "2018"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -25,7 +25,3 @@ js-sys = "0.3.70"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
-
-[profile.release]
-# Tell `rustc` to optimize for small code size.
-opt-level = "s"

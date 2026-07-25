@@ -12,8 +12,8 @@ use eurydice_engine::{
     dice::Pool,
     eval, grammar,
     output::{
-        export_anydice_format, mean, min_and_max, stddev, to_probabilities, Distribution,
-        FieldSchema,
+        Distribution, FieldSchema, export_anydice_format, mean, min_and_max, stddev,
+        to_probabilities,
     },
 };
 use pretty_assertions::StrComparison;

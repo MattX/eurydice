@@ -12,7 +12,7 @@ use crate::{
     },
     dice::{MultisetCrossProductIterator, Pool},
     operators::{apply_binary_op, apply_unary_op},
-    primitives::{register_primitives, Primitive},
+    primitives::{Primitive, register_primitives},
     value::sum_elements,
 };
 
@@ -445,7 +445,7 @@ impl Evaluator {
                             range: condition.range.into(),
                             found: condition_value.runtime_type(),
                             value: condition_value,
-                        })
+                        });
                     }
                 };
                 let block = if cond_value != 0 {
@@ -480,7 +480,7 @@ impl Evaluator {
                         return Err(RuntimeError::LoopOverNonSequence {
                             range: range_expression.range.into(),
                             found: range.runtime_type(),
-                        })
+                        });
                     }
                 };
                 let nested_context = eval_context.nested_block();
@@ -627,7 +627,7 @@ impl Evaluator {
                         range: repeat.range.into(),
                         found: repeat_value.runtime_type(),
                         value: repeat_value,
-                    })
+                    });
                 }
             },
             None => 1,
@@ -643,7 +643,7 @@ impl Evaluator {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: start_expr.range.into(),
                             found: start.runtime_type(),
-                        })
+                        });
                     }
                 };
                 let end = self.evaluate(eval_context, end_expr)?;
@@ -654,7 +654,7 @@ impl Evaluator {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: end_expr.range.into(),
                             found: end.runtime_type(),
-                        })
+                        });
                     }
                 };
                 Ok(RuntimeValue::List(

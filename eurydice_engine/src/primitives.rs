@@ -4,7 +4,7 @@ use malachite::Natural;
 
 use crate::{
     ast::{self, StaticType},
-    dice::{explode, reroll, Pool},
+    dice::{Pool, explode, reroll},
     eval::{ElementValue, Function, RuntimeError, RuntimeValue},
 };
 
@@ -57,6 +57,26 @@ fn absolute_execute(
     Ok(arg.map_numeric_outcomes(i32::abs))
 }
 
+fn materialize_compatible_pair(
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+    ctx: PrimitiveCtx,
+    message: &'static str,
+) -> Result<(RuntimeValue, RuntimeValue), RuntimeError> {
+    let error = || RuntimeError::EnumTypeError {
+        range: ctx.function_range.into(),
+        message: message.to_string(),
+    };
+    let outcome_type = left
+        .merged_outcome_type(right)
+        .ok_or_else(error)?
+        .summed_type();
+    Ok((
+        left.materialize_identities(&outcome_type),
+        right.materialize_identities(&outcome_type),
+    ))
+}
+
 fn contains_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
@@ -69,12 +89,12 @@ fn contains_execute(
     let (RuntimeValue::List(_, _), RuntimeValue::Element(_)) = (&args[0], &args[1]) else {
         return Err(error());
     };
-    let outcome_type = args[0]
-        .merged_outcome_type(&args[1])
-        .ok_or_else(error)?
-        .summed_type();
-    let haystack = args[0].materialize_identities(&outcome_type);
-    let needle = args[1].materialize_identities(&outcome_type);
+    let (haystack, needle) = materialize_compatible_pair(
+        &args[0],
+        &args[1],
+        ctx,
+        "[contains] requires a sequence and element with the same outcome type",
+    )?;
     let (RuntimeValue::List(haystack, _), RuntimeValue::Element(needle)) = (haystack, needle)
     else {
         unreachable!("contains argument shapes were checked")
@@ -97,12 +117,12 @@ fn count_execute(
     ) {
         return Err(error());
     }
-    let outcome_type = args[0]
-        .merged_outcome_type(&args[1])
-        .ok_or_else(error)?
-        .summed_type();
-    let needle = args[0].materialize_identities(&outcome_type);
-    let haystack = args[1].materialize_identities(&outcome_type);
+    let (needle, haystack) = materialize_compatible_pair(
+        &args[0],
+        &args[1],
+        ctx,
+        "[count] requires sequences with the same outcome type",
+    )?;
     let (RuntimeValue::List(needle, _), RuntimeValue::List(haystack, _)) = (needle, haystack)
     else {
         unreachable!("count argument shapes were checked")
@@ -217,7 +237,14 @@ fn middle_execute(
     keep_execute(KeepMode::Middle, args, ctx)
 }
 
-fn highest_of_execute(
+#[derive(Debug, Clone, Copy)]
+enum ExtremumMode {
+    Highest,
+    Lowest,
+}
+
+fn extremum_execute(
+    mode: ExtremumMode,
     args: &[RuntimeValue],
     _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
@@ -226,25 +253,28 @@ fn highest_of_execute(
         RuntimeValue::Element(ElementValue::Int(j)),
     ) = (&args[0], &args[1])
     {
-        Ok((*(i.max(j))).into())
+        let value = match mode {
+            ExtremumMode::Highest => i.max(j),
+            ExtremumMode::Lowest => i.min(j),
+        };
+        Ok((*value).into())
     } else {
-        panic!("wrong argument types to [highest of]");
+        panic!("wrong argument types to extremum primitive");
     }
+}
+
+fn highest_of_execute(
+    args: &[RuntimeValue],
+    ctx: PrimitiveCtx,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    extremum_execute(ExtremumMode::Highest, args, ctx)
 }
 
 fn lowest_of_execute(
     args: &[RuntimeValue],
-    _ctx: PrimitiveCtx,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let (
-        RuntimeValue::Element(ElementValue::Int(i)),
-        RuntimeValue::Element(ElementValue::Int(j)),
-    ) = (&args[0], &args[1])
-    {
-        Ok((*(i.min(j))).into())
-    } else {
-        panic!("wrong argument types to [lowest of]");
-    }
+    extremum_execute(ExtremumMode::Lowest, args, ctx)
 }
 
 fn maximum_execute(
@@ -384,110 +414,106 @@ fn numeric_list(list: &[ElementValue]) -> Vec<i32> {
         .collect()
 }
 
-pub static ABSOLUTE_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int)],
-    accepts_non_numeric: false,
-    execute: absolute_execute,
-};
-pub static CONTAINS_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::List), Some(StaticType::Int)],
-    accepts_non_numeric: true,
-    execute: contains_execute,
-};
-pub static COUNT_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::List), Some(StaticType::List)],
-    accepts_non_numeric: true,
-    execute: count_execute,
-};
-pub static EXPLODE_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Pool)],
-    accepts_non_numeric: false,
-    execute: explode_execute,
-};
-pub static HIGHEST_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int), Some(StaticType::Pool)],
-    accepts_non_numeric: false,
-    execute: highest_execute,
-};
-pub static LOWEST_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int), Some(StaticType::Pool)],
-    accepts_non_numeric: false,
-    execute: lowest_execute,
-};
-pub static MIDDLE_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int), Some(StaticType::Pool)],
-    accepts_non_numeric: false,
-    execute: middle_execute,
-};
-pub static HIGHEST_OF_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int), Some(StaticType::Int)],
-    accepts_non_numeric: false,
-    execute: highest_of_execute,
-};
-pub static LOWEST_OF_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int), Some(StaticType::Int)],
-    accepts_non_numeric: false,
-    execute: lowest_of_execute,
-};
-pub static MAXIMUM_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Pool)],
-    accepts_non_numeric: false,
-    execute: maximum_execute,
-};
-pub static CHOOSE_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[
-        Some(StaticType::Pool),
-        Some(StaticType::Int),
-        Some(StaticType::Pool),
-    ],
-    accepts_non_numeric: true,
-    execute: choose_execute,
-};
-pub static REVERSE_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::List)],
-    accepts_non_numeric: true,
-    execute: reverse_execute,
-};
-pub static SORT_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::List)],
-    accepts_non_numeric: false,
-    execute: sort_execute,
-};
-pub static EXPLODE_ON_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Pool), Some(StaticType::List)],
-    accepts_non_numeric: false,
-    execute: explode_on_execute,
-};
-pub static REROLL_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Pool)],
-    accepts_non_numeric: false,
-    execute: reroll_execute,
-};
-pub static REROLL_ON_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Pool), Some(StaticType::List)],
-    accepts_non_numeric: false,
-    execute: reroll_on_execute,
-};
-pub static TUPLE_2_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int); 2],
-    accepts_non_numeric: true,
-    execute: tuple_execute,
-};
-pub static TUPLE_3_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int); 3],
-    accepts_non_numeric: true,
-    execute: tuple_execute,
-};
-pub static TUPLE_4_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int); 4],
-    accepts_non_numeric: true,
-    execute: tuple_execute,
-};
-pub static FIELD_PRIMITIVE: Primitive = Primitive {
-    arg_types: &[Some(StaticType::Int); 2],
-    accepts_non_numeric: true,
-    execute: field_execute,
-};
+macro_rules! define_primitives {
+    (
+        $(
+            $constant:ident:
+            $name:literal,
+            $arg_types:expr,
+            $accepts_non_numeric:literal,
+            $execute:path;
+        )+
+    ) => {
+        $(
+            pub static $constant: Primitive = Primitive {
+                arg_types: $arg_types,
+                accepts_non_numeric: $accepts_non_numeric,
+                execute: $execute,
+            };
+        )+
+
+        static PRIMITIVES: &[(&str, &Primitive)] = &[
+            $(($name, &$constant),)+
+        ];
+    };
+}
+
+define_primitives! {
+    ABSOLUTE_PRIMITIVE:
+        "absolute {}", &[Some(StaticType::Int)], false, absolute_execute;
+    CONTAINS_PRIMITIVE:
+        "{} contains {}",
+        &[Some(StaticType::List), Some(StaticType::Int)],
+        true,
+        contains_execute;
+    COUNT_PRIMITIVE:
+        "count {} in {}",
+        &[Some(StaticType::List), Some(StaticType::List)],
+        true,
+        count_execute;
+    EXPLODE_PRIMITIVE:
+        "explode {}", &[Some(StaticType::Pool)], false, explode_execute;
+    HIGHEST_PRIMITIVE:
+        "highest {} of {}",
+        &[Some(StaticType::Int), Some(StaticType::Pool)],
+        false,
+        highest_execute;
+    LOWEST_PRIMITIVE:
+        "lowest {} of {}",
+        &[Some(StaticType::Int), Some(StaticType::Pool)],
+        false,
+        lowest_execute;
+    MIDDLE_PRIMITIVE:
+        "middle {} of {}",
+        &[Some(StaticType::Int), Some(StaticType::Pool)],
+        false,
+        middle_execute;
+    HIGHEST_OF_PRIMITIVE:
+        "highest of {} and {}",
+        &[Some(StaticType::Int), Some(StaticType::Int)],
+        false,
+        highest_of_execute;
+    LOWEST_OF_PRIMITIVE:
+        "lowest of {} and {}",
+        &[Some(StaticType::Int), Some(StaticType::Int)],
+        false,
+        lowest_of_execute;
+    MAXIMUM_PRIMITIVE:
+        "maximum of {}", &[Some(StaticType::Pool)], false, maximum_execute;
+    CHOOSE_PRIMITIVE:
+        "choose {} if {} else {}",
+        &[
+            Some(StaticType::Pool),
+            Some(StaticType::Int),
+            Some(StaticType::Pool),
+        ],
+        true,
+        choose_execute;
+    REVERSE_PRIMITIVE:
+        "reverse {}", &[Some(StaticType::List)], true, reverse_execute;
+    SORT_PRIMITIVE:
+        "sort {}", &[Some(StaticType::List)], false, sort_execute;
+    EXPLODE_ON_PRIMITIVE:
+        "explode {} on {}",
+        &[Some(StaticType::Pool), Some(StaticType::List)],
+        false,
+        explode_on_execute;
+    REROLL_PRIMITIVE:
+        "reroll {}", &[Some(StaticType::Pool)], false, reroll_execute;
+    REROLL_ON_PRIMITIVE:
+        "reroll {} on {}",
+        &[Some(StaticType::Pool), Some(StaticType::List)],
+        false,
+        reroll_on_execute;
+    TUPLE_2_PRIMITIVE:
+        "tuple {} {}", &[Some(StaticType::Int); 2], true, tuple_execute;
+    TUPLE_3_PRIMITIVE:
+        "tuple {} {} {}", &[Some(StaticType::Int); 3], true, tuple_execute;
+    TUPLE_4_PRIMITIVE:
+        "tuple {} {} {} {}", &[Some(StaticType::Int); 4], true, tuple_execute;
+    FIELD_PRIMITIVE:
+        "field {} of {}", &[Some(StaticType::Int); 2], true, field_execute;
+}
 
 fn keep_list_for_primitive(
     mode: KeepMode,
@@ -531,31 +557,9 @@ fn keep_list_for_primitive(
 }
 
 pub fn register_primitives(functions: &mut HashMap<String, Function>) {
-    let primitives = [
-        ("absolute {}", &ABSOLUTE_PRIMITIVE),
-        ("{} contains {}", &CONTAINS_PRIMITIVE),
-        ("count {} in {}", &COUNT_PRIMITIVE),
-        ("explode {}", &EXPLODE_PRIMITIVE),
-        ("highest {} of {}", &HIGHEST_PRIMITIVE),
-        ("lowest {} of {}", &LOWEST_PRIMITIVE),
-        ("middle {} of {}", &MIDDLE_PRIMITIVE),
-        ("highest of {} and {}", &HIGHEST_OF_PRIMITIVE),
-        ("lowest of {} and {}", &LOWEST_OF_PRIMITIVE),
-        ("maximum of {}", &MAXIMUM_PRIMITIVE),
-        ("choose {} if {} else {}", &CHOOSE_PRIMITIVE),
-        ("reverse {}", &REVERSE_PRIMITIVE),
-        ("sort {}", &SORT_PRIMITIVE),
-        ("explode {} on {}", &EXPLODE_ON_PRIMITIVE),
-        ("reroll {}", &REROLL_PRIMITIVE),
-        ("reroll {} on {}", &REROLL_ON_PRIMITIVE),
-        ("tuple {} {}", &TUPLE_2_PRIMITIVE),
-        ("tuple {} {} {}", &TUPLE_3_PRIMITIVE),
-        ("tuple {} {} {} {}", &TUPLE_4_PRIMITIVE),
-        ("field {} of {}", &FIELD_PRIMITIVE),
-    ];
     functions.extend(
-        primitives
-            .into_iter()
+        PRIMITIVES
+            .iter()
             .map(|(name, primitive)| (name.to_string(), Function::Primitive(primitive))),
     );
 }
@@ -902,29 +906,10 @@ mod tests {
         let mut functions = HashMap::new();
         register_primitives(&mut functions);
 
-        // Check that all expected primitives are registered
-        assert!(functions.contains_key("absolute {}"));
-        assert!(functions.contains_key("{} contains {}"));
-        assert!(functions.contains_key("count {} in {}"));
-        assert!(functions.contains_key("explode {}"));
-        assert!(functions.contains_key("explode {} on {}"));
-        assert!(functions.contains_key("reroll {}"));
-        assert!(functions.contains_key("reroll {} on {}"));
-        assert!(functions.contains_key("highest {} of {}"));
-        assert!(functions.contains_key("lowest {} of {}"));
-        assert!(functions.contains_key("middle {} of {}"));
-        assert!(functions.contains_key("highest of {} and {}"));
-        assert!(functions.contains_key("lowest of {} and {}"));
-        assert!(functions.contains_key("maximum of {}"));
-        assert!(functions.contains_key("choose {} if {} else {}"));
-        assert!(functions.contains_key("reverse {}"));
-        assert!(functions.contains_key("sort {}"));
-        assert!(functions.contains_key("tuple {} {}"));
-        assert!(functions.contains_key("tuple {} {} {}"));
-        assert!(functions.contains_key("tuple {} {} {} {}"));
-        assert!(functions.contains_key("field {} of {}"));
-
-        // Should have registered exactly 20 functions
-        assert_eq!(functions.len(), 20);
+        let mut registered = functions.keys().map(String::as_str).collect::<Vec<_>>();
+        registered.sort_unstable();
+        let mut expected = PRIMITIVES.iter().map(|(name, _)| *name).collect::<Vec<_>>();
+        expected.sort_unstable();
+        assert_eq!(registered, expected);
     }
 }

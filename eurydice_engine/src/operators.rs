@@ -6,7 +6,7 @@ use crate::{
     ast::{self, BinaryOp, UnaryOp, WithRange},
     dice::Pool,
     error::RuntimeError,
-    value::{expect_int, sum_elements, sum_pool, ElementType, ElementValue, RuntimeValue},
+    value::{ElementType, ElementValue, RuntimeValue, expect_int, sum_elements, sum_pool},
 };
 
 pub(crate) fn apply_unary_op(
@@ -292,7 +292,8 @@ pub(crate) fn apply_binary_op(
                         expected: "an int or a list",
                         found_range: left_range.into(),
                         found: left.runtime_type(),
-                    })
+                        value: left.clone(),
+                    });
                 }
                 RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
                     unreachable!()
@@ -613,7 +614,7 @@ fn make_d(
                 range: range.into(),
                 message: "a non-numeric element cannot specify die sides; use a sequence"
                     .to_string(),
-            })
+            });
         }
     };
     if !outcome_type.is_additive() && !matches!(&repeat, DiceCount::Int(1)) {

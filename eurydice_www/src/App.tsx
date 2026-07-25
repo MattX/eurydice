@@ -23,10 +23,17 @@ export default function App() {
 }
 
 function AppInner() {
-  const [editorText, setEditorText] = React.useState("");
+  const [editorText, setEditorText] = React.useState(() => {
+    const hash = window.location.hash;
+    return hash.startsWith("#p=")
+      ? decodeURIComponent(hash.slice(3))
+      : localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
+  });
   const [output, setOutput] = React.useState<NamedDistribution[]>([]);
   const [error, setError] = React.useState<EurydiceError | null>(null);
-  const [runLive, setRunLiveInner] = React.useState(true);
+  const [runLive, setRunLiveInner] = React.useState(
+    () => localStorage.getItem("eurydice0_run_live") !== "false"
+  );
   const [running, setRunning] = React.useState(false);
   const [printOutputs, setPrintOutputs] = React.useState<[string, string][]>(
     [],
@@ -36,7 +43,8 @@ function AppInner() {
   const [isDesktopLayout, setIsDesktopLayout] = React.useState(() =>
     window.matchMedia("(min-width: 768px)").matches
   );
-  const runLiveRef = useRef(true);
+  const runLiveRef = useRef(runLive);
+  const initialEditorTextRef = useRef(editorText);
   const runningRef = useRef(false);
   const workerRef = useRef<WorkerWrapper | null>(null);
 
@@ -130,24 +138,8 @@ function AppInner() {
   }, [attachOnMessage]);
 
   useEffect(() => {
-    // Load the saved state from local storage
-    const savedRunLive = localStorage.getItem("eurydice0_run_live") !== "false";
-    if (!savedRunLive) {
-      runLiveRef.current = false;
-      setRunLiveInner(false);
-    }
-
-    // If there is a hash (shared link), use that
-    const hash = window.location.hash;
-    let savedText: string | null = null;
-    if (hash.startsWith("#p=")) {
-      savedText = decodeURIComponent(hash.slice(3));
-    } else {
-      savedText = localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
-    }
-    setEditorText(savedText);
-    if (savedRunLive) {
-      run(savedText);
+    if (runLiveRef.current) {
+      run(initialEditorTextRef.current);
     }
   }, [run]);
 
