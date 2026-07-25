@@ -1,17 +1,26 @@
 import React from "react";
+import { DarkModeContext } from "./DarkModeContext";
 
-export const DarkModeContext = React.createContext(false);
+function prefersDarkMode() {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+}
 
-const darkModeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-
-/** Provides DarkModeContext as a context, allowing children to switch to light or dark mode. */
+/** Provides the active system color scheme to the application. */
 export function DarkModeSwitcher({ children }: { children: React.ReactNode }) {
-  const [darkMode, setDarkMode] = React.useState(darkModeMediaQuery.matches);
+  const [darkMode, setDarkMode] = React.useState(prefersDarkMode);
+
   React.useEffect(() => {
-    darkModeMediaQuery.addEventListener("change", (e) => {
-      setDarkMode(e.matches);
-    });
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateDarkMode = (event: MediaQueryListEvent) =>
+      setDarkMode(event.matches);
+
+    mediaQuery.addEventListener("change", updateDarkMode);
+    return () => mediaQuery.removeEventListener("change", updateDarkMode);
   }, []);
+
   return (
     <DarkModeContext.Provider value={darkMode}>
       {children}

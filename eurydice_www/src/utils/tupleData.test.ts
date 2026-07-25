@@ -89,14 +89,20 @@ describe("tupleData marginals", () => {
   it("sums out other fields", () => {
     const [marginal0, marginal1] = computeMarginals(jointIntEnum);
     expect(marginal0.probabilities).toEqual([
-      [1, 0.30000000000000004],
-      [2, 0.7],
+      [[1], 0.30000000000000004],
+      [[2], 0.7],
     ]);
-    expect(marginal0.enum_name).toBeUndefined();
+    expect(marginal0.fields).toEqual([{ kind: "int" }]);
 
-    expect(marginal1.enum_name).toBe("RESULT");
-    expect(marginal1.labels).toEqual(["MISS", "HIT"]);
-    const byValue = new Map(marginal1.probabilities);
+    expect(marginal1.fields).toEqual([
+      { kind: "enum", enumName: "RESULT", labels: ["MISS", "HIT"] },
+    ]);
+    const byValue = new Map(
+      marginal1.probabilities.map(([[value], probability]) => [
+        value,
+        probability,
+      ])
+    );
     expect(byValue.get(0)).toBeCloseTo(0.4);
     expect(byValue.get(1)).toBeCloseTo(0.6);
   });

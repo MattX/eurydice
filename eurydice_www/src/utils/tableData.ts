@@ -1,5 +1,5 @@
-import { ScalarDistribution } from "../util";
-import { DisplayMode, partialSums } from "./chartData";
+import { NamedScalarDistribution, ScalarDistribution } from "../util";
+import { DisplayMode } from "./chartData";
 
 export interface TableRowData {
   outcome: number;
@@ -23,10 +23,12 @@ export interface BracketingProbabilities {
 /**
  * Gets all unique outcomes across all distributions, sorted in ascending order
  */
-export function getAllUniqueOutcomes(distributions: [string, ScalarDistribution][]): number[] {
+export function getAllUniqueOutcomes(
+  distributions: NamedScalarDistribution[]
+): number[] {
   const allOutcomes = new Set<number>();
   distributions.forEach(([, distribution]) => {
-    distribution.probabilities.forEach(([outcome]) => {
+    distribution.probabilities.forEach(([[outcome]]) => {
       allOutcomes.add(outcome);
     });
   });
@@ -37,43 +39,40 @@ export function getAllUniqueOutcomes(distributions: [string, ScalarDistribution]
  * Pre-computes table data for the combined probability table
  */
 export function computeTableData(
-  distributions: [string, ScalarDistribution][],
+  distributions: NamedScalarDistribution[],
   mode: DisplayMode,
   sortedOutcomes: number[]
 ): TableRowData[] {
   return sortedOutcomes.map((outcome) => {
     const enumLabel = distributions
-      .map(([, distribution]) => distribution.labels?.[outcome])
+      .map(([, distribution]) => {
+        const field = distribution.fields[0];
+        return field.kind === "enum" ? field.labels[outcome] : undefined;
+      })
       .find((label) => label !== undefined);
-    const row = { outcome, outcomeLabel: enumLabel ?? outcome.toString(), values: [] as string[] };
+    const row = {
+      outcome,
+      outcomeLabel: enumLabel ?? outcome.toString(),
+      values: [] as string[],
+    };
     distributions.forEach(([, distribution]) => {
-      const probabilityEntry = distribution.probabilities.find(
-        ([outcomeValue]) => outcomeValue === outcome
+      const probability = Math.min(
+        100,
+        distribution.probabilities.reduce(
+          (total, [[value], entryProbability]) => {
+            const include =
+              mode === DisplayMode.AtMost
+                ? value <= outcome
+                : mode === DisplayMode.AtLeast
+                  ? value >= outcome
+                  : value === outcome;
+            return include ? total + entryProbability * 100 : total;
+          },
+          0
+        )
       );
-      
-      let probability = probabilityEntry ? probabilityEntry[1] * 100 : 0;
-      
-      // Apply mode transformations
-      if (probability > 0) {
-        const allProbs = distribution.probabilities.map(([, p]) => p * 100);
-        const outcomes = distribution.probabilities.map(([o]) => o);
-        const outcomeIndex = outcomes.indexOf(outcome);
-        
-        if (outcomeIndex !== -1) {
-          switch (mode) {
-            case DisplayMode.AtMost: {
-              probability = partialSums(allProbs, false)[outcomeIndex];
-              break;
-            }
-            case DisplayMode.AtLeast: {
-              probability = partialSums(allProbs, true)[outcomeIndex];
-              break;
-            }
-          }
-        }
-      }
-      
-      row.values.push(probability > 0 ? `${probability.toFixed(2)}%` : '-');
+
+      row.values.push(probability > 0 ? `${probability.toFixed(2)}%` : "-");
     });
     return row;
   });
@@ -83,11 +82,11 @@ export function computeTableData(
  * Pre-computes statistics for each distribution
  */
 export function computeDistributionStatistics(
-  distributions: [string, ScalarDistribution][]
+  distributions: NamedScalarDistribution[]
 ): DistributionStatistics[] {
   return distributions.map(([, distribution]) => {
     const data = distribution.probabilities;
-    const outcomes = data.map(([outcome]) => outcome);
+    const outcomes = data.map(([[outcome]]) => outcome);
     const probabilities = data.map(([, probability]) => probability);
 
     const mean = outcomes.reduce(
@@ -123,7 +122,7 @@ export function calculateBracketingProbabilities(
   let pBetween = 0; // P(Lower <= X <= Upper)
   let pUpper = 0; // P(X > Upper)
 
-  for (const [outcome, probability] of distribution.probabilities) {
+  for (const [[outcome], probability] of distribution.probabilities) {
     if (outcome < lowerBound) {
       pLower += probability;
     } else if (outcome >= lowerBound && outcome <= upperBound) {

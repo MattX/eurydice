@@ -9,11 +9,10 @@
  */
 export class WorkerWrapper {
   private worker: Worker;
-  private workerReady: boolean = false;
+  private workerReady = false;
 
-  private pendingMessage: unknown = undefined;
-  private pendingCallback: ((event: MessageEvent) => void) | undefined =
-    undefined;
+  private pendingMessage?: string;
+  private pendingCallback?: (event: MessageEvent) => void;
 
   constructor(worker: Worker) {
     this.worker = worker;
@@ -22,7 +21,7 @@ export class WorkerWrapper {
         this.worker.onmessage = this.pendingCallback;
         this.pendingCallback = undefined;
       }
-      if (this.pendingMessage) {
+      if (this.pendingMessage !== undefined) {
         this.worker.postMessage(this.pendingMessage);
         this.pendingMessage = undefined;
       }
@@ -30,7 +29,7 @@ export class WorkerWrapper {
     };
   }
 
-  postMessage(message: unknown) {
+  postMessage(message: string) {
     if (this.workerReady) {
       this.worker.postMessage(message);
     } else {
@@ -38,7 +37,7 @@ export class WorkerWrapper {
     }
   }
 
-  setOnmessage(callback: (event: MessageEvent) => void) {
+  setOnMessage(callback: (event: MessageEvent) => void) {
     if (this.workerReady) {
       this.worker.onmessage = callback;
     } else {

@@ -2,7 +2,6 @@ import React from "react";
 import { ExternalWebsite, Github, D20Logo } from "./Icons";
 
 interface HeaderProps {
-  showTutorial?: boolean;
   onTutorialClick?: () => void;
 }
 
@@ -10,7 +9,6 @@ const linkClass =
   "block rounded px-2 py-1 text-sm font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]";
 
 export default function Header({
-  showTutorial = false,
   onTutorialClick,
 }: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -65,7 +63,7 @@ export default function Header({
               Specification
             </a>
           </li>
-          {showTutorial && (
+          {onTutorialClick && (
             <li>
               <a
                 className={linkClass}
@@ -73,7 +71,6 @@ export default function Header({
                 onClick={() => {
                   close();
                   if (
-                    onTutorialClick &&
                     confirm(
                       "Opening the tutorial will clear the current code. Continue?",
                     )

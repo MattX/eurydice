@@ -1,20 +1,19 @@
-import { Distribution, ScalarDistribution } from "../util";
-import { type NamedDistribution, partitionDistributions } from "./chartData";
+import {
+  NamedDistribution,
+  NamedScalarDistribution,
+  isNamedScalarDistribution,
+} from "../util";
+import { partitionDistributions } from "./chartData";
 import { computeTupleRows, fieldName } from "./tupleData";
-
-export interface DistributionData {
-  name: string;
-  distribution: ScalarDistribution;
-}
-
-export interface TupleData {
-  name: string;
-  distribution: Distribution;
-}
 
 export function escapeCSVField(field: string): string {
   // If field contains comma, newline, or double quote, it needs to be quoted
-  if (field.includes(',') || field.includes('\n') || field.includes('\r') || field.includes('"')) {
+  if (
+    field.includes(",") ||
+    field.includes("\n") ||
+    field.includes("\r") ||
+    field.includes('"')
+  ) {
     // Escape double quotes by doubling them
     const escaped = field.replace(/"/g, '""');
     return `"${escaped}"`;
@@ -24,7 +23,7 @@ export function escapeCSVField(field: string): string {
 
 function generateWideBlock(
   title: string,
-  distributions: NamedDistribution[],
+  distributions: NamedScalarDistribution[],
   outcomes: number[],
   outcomeLabel: (outcome: number) => string
 ): string {
@@ -39,7 +38,9 @@ function generateWideBlock(
         escapeCSVField(outcomeLabel(outcome)),
         ...distributions.map(([, distribution]) =>
           (
-            distribution.probabilities.find(([value]) => value === outcome)?.[1] ?? 0
+            distribution.probabilities.find(
+              ([[value]]) => value === outcome
+            )?.[1] ?? 0
           ).toString()
         ),
       ].join(",")
@@ -50,9 +51,11 @@ function generateWideBlock(
 }
 
 /** One CSV block per tuple: a field-per-column joint table. */
-function generateTupleBlock({ name, distribution }: TupleData): string {
+function generateTupleBlock([name, distribution]: NamedDistribution): string {
   const header = [
-    ...distribution.fields.map((_, i) => escapeCSVField(fieldName(distribution, i))),
+    ...distribution.fields.map((_, index) =>
+      escapeCSVField(fieldName(distribution, index))
+    ),
     "Probability",
   ].join(",");
   const rows = computeTupleRows(distribution, "lexicographic").map((row) =>
@@ -61,14 +64,12 @@ function generateTupleBlock({ name, distribution }: TupleData): string {
   return [escapeCSVField(name), header, ...rows].join("\n");
 }
 
-export function generateSpreadsheetCSV(
-  distributions: DistributionData[],
-  tuples: TupleData[] = []
-): string {
-  const namedDistributions: NamedDistribution[] = distributions.map(
-    ({ name, distribution }) => [name, distribution]
+export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
+  const distributions = outputs.filter(isNamedScalarDistribution);
+  const tuples = outputs.filter(
+    ([, distribution]) => distribution.fields.length > 1
   );
-  const { sections } = partitionDistributions(namedDistributions);
+  const { sections } = partitionDistributions(distributions);
 
   const blocks = sections
     .map((section) => {
@@ -76,7 +77,7 @@ export function generateSpreadsheetCSV(
         const outcomes = Array.from(
           new Set(
             section.distributions.flatMap(([, distribution]) =>
-              distribution.probabilities.map(([outcome]) => outcome)
+              distribution.probabilities.map(([[outcome]]) => outcome)
             )
           )
         ).sort((a, b) => a - b);
@@ -90,7 +91,7 @@ export function generateSpreadsheetCSV(
 
       const probabilityOutcomes = section.group.distributions.flatMap(
         ([, distribution]) =>
-          distribution.probabilities.map(([outcome]) => outcome)
+          distribution.probabilities.map(([[outcome]]) => outcome)
       );
       const outcomes = Array.from(
         new Set([
@@ -109,29 +110,39 @@ export function generateSpreadsheetCSV(
   return [...blocks, ...tuples.map(generateTupleBlock)].join("\n\n");
 }
 
-export function generateAnyDiceFormatCSV(distributions: DistributionData[]): string {
-  let csv = '';
+export function generateAnyDiceFormatCSV(outputs: NamedDistribution[]): string {
+  let csv = "";
 
-  const numericDistributions = distributions.filter(
-    ({ distribution }) => distribution.enum_name === undefined
-  );
+  const numericDistributions = outputs
+    .filter(isNamedScalarDistribution)
+    .filter(
+      ([, distribution]) => distribution.fields[0].kind === "int"
+    );
 
-  numericDistributions.forEach(({ name, distribution }, index) => {
-    if (index > 0) csv += '\n';
+  numericDistributions.forEach(([name, distribution], index) => {
+    if (index > 0) csv += "\n";
 
-    const outcomes = distribution.probabilities.map(([outcome]) => outcome);
-    const probabilities = distribution.probabilities.map(([, probability]) => probability);
-    
-    const mean = outcomes.reduce((sum, val, i) => sum + val * probabilities[i], 0);
-    const variance = outcomes.reduce((sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i], 0);
+    const outcomes = distribution.probabilities.map(([[outcome]]) => outcome);
+    const probabilities = distribution.probabilities.map(
+      ([, probability]) => probability
+    );
+
+    const mean = outcomes.reduce(
+      (sum, val, i) => sum + val * probabilities[i],
+      0
+    );
+    const variance = outcomes.reduce(
+      (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
+      0
+    );
     const stdDev = Math.sqrt(variance);
     const min = outcomes.length > 0 ? Math.min(...outcomes) : 0;
     const max = outcomes.length > 0 ? Math.max(...outcomes) : 0;
-    
+
     csv += `${escapeCSVField(name)},${mean},${stdDev},${min},${max}\n`;
-    csv += '#,%\n';
-    
-    distribution.probabilities.forEach(([outcome, probability]) => {
+    csv += "#,%\n";
+
+    distribution.probabilities.forEach(([[outcome], probability]) => {
       csv += `${outcome},${(probability * 100).toFixed(10)}\n`;
     });
   });
@@ -140,9 +151,9 @@ export function generateAnyDiceFormatCSV(distributions: DistributionData[]): str
 }
 
 export function downloadCSV(content: string, filename: string): void {
-  const blob = new Blob([content], { type: 'text/csv' });
+  const blob = new Blob([content], { type: "text/csv" });
   const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);

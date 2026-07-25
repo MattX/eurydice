@@ -102,15 +102,10 @@ export function computeMarginals(dist: Distribution): ScalarDistribution[] {
       const value = outcome[field];
       totals.set(value, (totals.get(value) ?? 0) + probability);
     }
-    const probabilities: [number, number][] = Array.from(totals.entries()).sort(
-      (a, b) => a[0] - b[0]
-    );
-    const marginal: ScalarDistribution = { probabilities };
-    if (schema.kind === "enum") {
-      marginal.enum_name = schema.enumName;
-      marginal.labels = schema.labels;
-    }
-    return marginal;
+    const probabilities: [[number], number][] = Array.from(totals.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([value, probability]) => [[value], probability]);
+    return { fields: [schema], probabilities };
   });
 }
 

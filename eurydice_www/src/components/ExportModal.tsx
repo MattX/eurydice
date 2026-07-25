@@ -4,69 +4,64 @@ import {
   generateSpreadsheetCSV,
   generateAnyDiceFormatCSV,
   downloadCSV,
-  DistributionData,
-  TupleData,
 } from "../utils/csvExport";
+import { NamedDistribution, isScalarDistribution } from "../util";
 
 interface ExportModalProps {
-  distributions: DistributionData[];
-  tuples?: TupleData[];
+  outputs: NamedDistribution[];
   isOpen: boolean;
   onClose: () => void;
 }
 
 export default function ExportModal({
-  distributions,
-  tuples = [],
+  outputs,
   isOpen,
   onClose,
 }: ExportModalProps) {
-  const [csvContent, setCsvContent] = React.useState("");
-  const [csvFilename, setCsvFilename] = React.useState("");
   const [csvFormat, setCsvFormat] = React.useState<"spreadsheet" | "anydice">(
     "spreadsheet"
   );
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   // AnyDice format is numeric-only, so enum and tuple outputs are dropped there.
-  const omittedFromAnyDice =
-    distributions.filter(({ distribution }) => distribution.enum_name !== undefined)
-      .length + tuples.length;
+  const omittedFromAnyDice = outputs.filter(([, distribution]) =>
+    !isScalarDistribution(distribution) ||
+    distribution.fields[0].kind === "enum"
+  ).length;
 
-  // Update CSV content when format or outputs change
-  React.useEffect(() => {
-    if (distributions.length > 0 || tuples.length > 0) {
-      const csv =
-        csvFormat === "spreadsheet"
-          ? generateSpreadsheetCSV(distributions, tuples)
-          : generateAnyDiceFormatCSV(distributions);
-      const filename = csvFormat === "spreadsheet"
-        ? "distributions.csv"
-        : "distributions_anydice.csv";
-      setCsvContent(csv);
-      setCsvFilename(filename);
-    } else {
-      setCsvContent("");
-      setCsvFilename("");
+  const { csvContent, csvFilename } = React.useMemo(() => {
+    if (outputs.length === 0) {
+      return { csvContent: "", csvFilename: "" };
     }
-  }, [csvFormat, distributions, tuples]);
+    return {
+      csvContent:
+        csvFormat === "spreadsheet"
+          ? generateSpreadsheetCSV(outputs)
+          : generateAnyDiceFormatCSV(outputs),
+      csvFilename:
+        csvFormat === "spreadsheet"
+          ? "distributions.csv"
+          : "distributions_anydice.csv",
+    };
+  }, [csvFormat, outputs]);
 
   // Handle modal open/close
   React.useEffect(() => {
-    if (isOpen) {
-      dialogRef.current?.showModal();
-    } else {
-      dialogRef.current?.close();
+    const dialog = dialogRef.current;
+    if (isOpen && !dialog?.open) {
+      dialog?.showModal();
+    } else if (!isOpen && dialog?.open) {
+      dialog.close();
     }
   }, [isOpen]);
 
   const handleCopyToClipboard = React.useCallback(async () => {
     try {
       await navigator.clipboard.writeText(csvContent);
-      toast.success('CSV copied to clipboard!');
+      toast.success("CSV copied to clipboard!");
       onClose();
     } catch (err) {
-      console.error('Failed to copy to clipboard:', err);
-      toast.error('Failed to copy to clipboard');
+      console.error("Failed to copy to clipboard:", err);
+      toast.error("Failed to copy to clipboard");
     }
   }, [csvContent, onClose]);
 

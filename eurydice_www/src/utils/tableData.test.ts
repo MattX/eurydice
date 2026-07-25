@@ -7,14 +7,15 @@ import {
 } from './tableData';
 import { DisplayMode } from './chartData';
 import { ScalarDistribution } from '../util';
+import { scalarDistribution } from './testData';
 
 describe('tableData', () => {
   const testDistributions: [string, ScalarDistribution][] = [
     [
       'output 1',
-      {
+      scalarDistribution(
         // Mean = 4.2, Stddev = 1.249
-        probabilities: [
+        [
           //           At least At most
           [2, 0.1], // 0.1   1
           [3, 0.2], // 0.3   0.9
@@ -22,13 +23,13 @@ describe('tableData', () => {
           [5, 0.2], // 0.8   0.4
           [6, 0.2]  // 1.0   0.2
         ]
-      }
+      )
     ],
     [
       'output 2',
-      {
+      scalarDistribution(
         // Mean = 6.543, stddev = 1.770
-        probabilities: [
+        [
           //           At least At most
           [3, 0.037], // 0.037 1
           [4, 0.111], // 0.148 0.963
@@ -38,7 +39,7 @@ describe('tableData', () => {
           [8, 0.111], // 0.815 0.296
           [9, 0.185]  // 1.000 0.185
         ]
-      }
+      )
     ]
   ];
 
@@ -55,7 +56,7 @@ describe('tableData', () => {
 
     it('should handle single distribution', () => {
       const singleDistribution: [string, ScalarDistribution][] = [
-        ['test', { probabilities: [[1, 0.5], [3, 0.5]] }]
+        ['test', scalarDistribution([[1, 0.5], [3, 0.5]])]
       ];
       const result = getAllUniqueOutcomes(singleDistribution);
       expect(result).toEqual([1, 3]);
@@ -63,8 +64,8 @@ describe('tableData', () => {
 
     it('should handle duplicate outcomes across distributions', () => {
       const duplicateDistributions: [string, ScalarDistribution][] = [
-        ['dist1', { probabilities: [[1, 0.5], [2, 0.5]] }],
-        ['dist2', { probabilities: [[2, 0.3], [3, 0.7]] }]
+        ['dist1', scalarDistribution([[1, 0.5], [2, 0.5]])],
+        ['dist2', scalarDistribution([[2, 0.3], [3, 0.7]])]
       ];
       const result = getAllUniqueOutcomes(duplicateDistributions);
       expect(result).toEqual([1, 2, 3]);
@@ -72,7 +73,7 @@ describe('tableData', () => {
 
     it('should sort outcomes numerically, not lexicographically', () => {
       const unsortedDistributions: [string, ScalarDistribution][] = [
-        ['test', { probabilities: [[10, 0.3], [2, 0.4], [20, 0.3]] }]
+        ['test', scalarDistribution([[10, 0.3], [2, 0.4], [20, 0.3]])]
       ];
       const result = getAllUniqueOutcomes(unsortedDistributions);
       expect(result).toEqual([2, 10, 20]);
@@ -119,6 +120,27 @@ describe('tableData', () => {
       expect(outcome5Row?.values[0]).toBe('40.00%');
     });
 
+    it('computes cumulative values at outcomes missing from a distribution', () => {
+      const distributions: [string, ScalarDistribution][] = [
+        ['sparse', scalarDistribution([[3, 0.6], [1, 0.4]])],
+        ['fills gap', scalarDistribution([[2, 1]])],
+      ];
+
+      const atMost = computeTableData(
+        distributions,
+        DisplayMode.AtMost,
+        [1, 2, 3]
+      );
+      const atLeast = computeTableData(
+        distributions,
+        DisplayMode.AtLeast,
+        [1, 2, 3]
+      );
+
+      expect(atMost[1].values[0]).toBe('40.00%');
+      expect(atLeast[1].values[0]).toBe('60.00%');
+    });
+
     it('should handle empty outcomes array', () => {
       const result = computeTableData(testDistributions, DisplayMode.Distribution, []);
       expect(result).toEqual([]);
@@ -134,7 +156,7 @@ describe('tableData', () => {
 
     it('should format percentages to 2 decimal places', () => {
       const precisionDistributions: [string, ScalarDistribution][] = [
-        ['test', { probabilities: [[1, 0.123456789]] }]
+        ['test', scalarDistribution([[1, 0.123456789]])]
       ];
       const result = computeTableData(precisionDistributions, DisplayMode.Distribution, [1]);
       expect(result[0].values[0]).toBe('12.35%');
@@ -164,7 +186,7 @@ describe('tableData', () => {
 
     it('should handle single outcome distribution', () => {
       const singleOutcome: [string, ScalarDistribution][] = [
-        ['constant', { probabilities: [[5, 1.0]] }]
+        ['constant', scalarDistribution([[5, 1.0]])]
       ];
       const result = computeDistributionStatistics(singleOutcome);
 
@@ -181,7 +203,7 @@ describe('tableData', () => {
 
     it('should format numbers to 2 decimal places', () => {
       const precisionDistribution: [string, ScalarDistribution][] = [
-        ['test', { probabilities: [[1, 0.123456], [2, 0.876544]] }]
+        ['test', scalarDistribution([[1, 0.123456], [2, 0.876544]])]
       ];
       const result = computeDistributionStatistics(precisionDistribution);
 
@@ -193,7 +215,7 @@ describe('tableData', () => {
     it('should calculate correct mean and variance', () => {
       // Simple distribution: [1, 2] with equal probabilities
       const simpleDistribution: [string, ScalarDistribution][] = [
-        ['simple', { probabilities: [[1, 0.5], [2, 0.5]] }]
+        ['simple', scalarDistribution([[1, 0.5], [2, 0.5]])]
       ];
       const result = computeDistributionStatistics(simpleDistribution);
 
@@ -276,9 +298,8 @@ describe('tableData', () => {
     });
 
     it('should return percentages (multiply by 100)', () => {
-      const distribution: ScalarDistribution = {
-        probabilities: [[1, 0.5], [2, 0.5]]
-      };
+      const distribution: ScalarDistribution =
+        scalarDistribution([[1, 0.5], [2, 0.5]]);
       const result = calculateBracketingProbabilities(distribution, 1, 1);
 
       // Should return 50%, not 0.5

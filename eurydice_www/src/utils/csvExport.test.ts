@@ -1,24 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { generateSpreadsheetCSV, generateAnyDiceFormatCSV, escapeCSVField, DistributionData } from './csvExport';
+import { generateSpreadsheetCSV, generateAnyDiceFormatCSV, escapeCSVField } from './csvExport';
+import { NamedDistribution } from '../util';
+import { scalarDistribution } from './testData';
 
 describe('csvExport', () => {
-  const testDistributions: DistributionData[] = [
-    {
-      name: 'output 1',
-      distribution: {
-        probabilities: [
+  const testDistributions: NamedDistribution[] = [
+    [
+      'output 1',
+      scalarDistribution([
           [2, 0.111111111111],
           [3, 0.222222222222],
           [4, 0.333333333333],
           [5, 0.222222222222],
           [6, 0.111111111111]
-        ]
-      }
-    },
-    {
-      name: 'output 2',
-      distribution: {
-        probabilities: [
+      ])
+    ],
+    [
+      'output 2',
+      scalarDistribution([
           [3, 0.037037037037],
           [4, 0.111111111111],
           [5, 0.222222222222],
@@ -26,9 +25,8 @@ describe('csvExport', () => {
           [7, 0.222222222222],
           [8, 0.111111111111],
           [9, 0.037037037037]
-        ]
-      }
-    }
+      ])
+    ]
   ];
 
   describe('generateSpreadsheetCSV', () => {
@@ -69,32 +67,20 @@ describe('csvExport', () => {
     });
 
     it('separates incompatible output types into ordered blocks', () => {
-      const mixed: DistributionData[] = [
-        {
-          name: 'attack',
-          distribution: {
-            probabilities: [[0, 0.25], [1, 0.75]],
-            enum_name: 'RESULT',
-            labels: ['MISS', 'HIT'],
-          },
-        },
+      const mixed: NamedDistribution[] = [
+        ['attack', scalarDistribution(
+          [[0, 0.25], [1, 0.75]],
+          { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT'] },
+        )],
         testDistributions[0],
-        {
-          name: 'defend',
-          distribution: {
-            probabilities: [[1, 1]],
-            enum_name: 'RESULT',
-            labels: ['MISS', 'HIT'],
-          },
-        },
-        {
-          name: 'weather',
-          distribution: {
-            probabilities: [[0, 1]],
-            enum_name: 'WEATHER',
-            labels: ['SUN', 'RAIN'],
-          },
-        },
+        ['defend', scalarDistribution(
+          [[1, 1]],
+          { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT'] },
+        )],
+        ['weather', scalarDistribution(
+          [[0, 1]],
+          { kind: 'enum', enumName: 'WEATHER', labels: ['SUN', 'RAIN'] },
+        )],
       ];
 
       expect(generateSpreadsheetCSV(mixed)).toBe([
@@ -119,14 +105,11 @@ describe('csvExport', () => {
     });
 
     it('uses explicit tuple field names as CSV columns', () => {
-      const result = generateSpreadsheetCSV([], [{
-        name: 'round',
-        distribution: {
+      const result = generateSpreadsheetCSV([['round', {
           fields: [{ kind: 'int' }, { kind: 'int' }],
           fieldNames: ['Attacker losses', 'Defender losses'],
           probabilities: [[[1, 2], 1]],
-        },
-      }]);
+      }]]);
 
       expect(result).toBe([
         'round',
@@ -201,14 +184,10 @@ describe('csvExport', () => {
     });
 
     it('omits categorical outputs', () => {
-      const categorical: DistributionData = {
-        name: 'attack',
-        distribution: {
-          probabilities: [[0, 0.25], [1, 0.75]],
-          enum_name: 'RESULT',
-          labels: ['MISS', 'HIT'],
-        },
-      };
+      const categorical: NamedDistribution = ['attack', scalarDistribution(
+        [[0, 0.25], [1, 0.75]],
+        { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT'] },
+      )];
       const result = generateAnyDiceFormatCSV([
         categorical,
         testDistributions[0],
@@ -246,19 +225,9 @@ describe('csvExport', () => {
   });
 
   describe('CSV generation with special characters in names', () => {
-    const specialDistributions: DistributionData[] = [
-      {
-        name: 'output "with quotes"',
-        distribution: {
-          probabilities: [[1, 0.5], [2, 0.5]]
-        }
-      },
-      {
-        name: 'output, with comma',
-        distribution: {
-          probabilities: [[1, 0.3], [2, 0.7]]
-        }
-      }
+    const specialDistributions: NamedDistribution[] = [
+      ['output "with quotes"', scalarDistribution([[1, 0.5], [2, 0.5]])],
+      ['output, with comma', scalarDistribution([[1, 0.3], [2, 0.7]])],
     ];
 
     it('should handle special characters in generateSpreadsheetCSV', () => {
@@ -281,10 +250,8 @@ describe('csvExport', () => {
   });
 
   describe('tuple export', () => {
-    const tuples = [
-      {
-        name: 'joint',
-        distribution: {
+    const tuples: NamedDistribution[] = [
+      ['joint', {
           fields: [
             { kind: 'int' as const },
             { kind: 'enum' as const, enumName: 'R', labels: ['MISS', 'HIT'] },
@@ -294,12 +261,11 @@ describe('csvExport', () => {
             [[1, 0], 0.1],
             [[2, 0], 0.5],
           ] as [number[], number][],
-        },
-      },
+      }],
     ];
 
     it('appends a field-per-column block for each tuple', () => {
-      const result = generateSpreadsheetCSV([], tuples);
+      const result = generateSpreadsheetCSV(tuples);
       const lines = result.split('\n');
 
       expect(lines[0]).toBe('joint');
@@ -311,7 +277,7 @@ describe('csvExport', () => {
     });
 
     it('places tuple blocks after scalar blocks', () => {
-      const result = generateSpreadsheetCSV(testDistributions, tuples);
+      const result = generateSpreadsheetCSV([...testDistributions, ...tuples]);
       expect(result.indexOf('Numeric outcomes')).toBeLessThan(result.indexOf('joint'));
     });
   });

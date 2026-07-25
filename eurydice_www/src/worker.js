@@ -1,19 +1,17 @@
 import { run } from "eurydice_wasm";
 
-self.onmessage = async (event) => {
-  const start = performance.now();
-  var workerResult;
+self.onmessage = (event) => {
   try {
-    workerResult = run(event.data, (value, name) => {
+    const result = run(event.data, (value, name) => {
       self.postMessage({ Print: [value, name] });
     });
+    self.postMessage(result);
   } catch (e) {
     console.error(e);
-    workerResult = { Err: { message: "Internal error", from: 0, to: 0 } };
+    self.postMessage({
+      Err: { message: "Internal error", from: 0, to: 0 },
+    });
   }
-  const end = performance.now();
-  self.postMessage(workerResult);
-  // console.log(`Worker execution time: ${end - start}ms`);
 };
 // Signal to the main thread's WorkerWrapper that the onmessage handler
 // has been attached, and the worker is ready.

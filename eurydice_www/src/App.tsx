@@ -1,15 +1,8 @@
 import React, { useCallback, useEffect, useRef } from "react";
 
 import { WorkerWrapper } from "./worker-wrapper";
-import {
-  Distribution,
-  ScalarDistribution,
-  asScalarDistribution,
-} from "./util";
-import {
-  WireDistribution,
-  normalizeDistribution,
-} from "./utils/tupleData";
+import { NamedDistribution, isNamedScalarDistribution } from "./util";
+import { WireDistribution, normalizeDistribution } from "./utils/tupleData";
 import OutputPane from "./components/OutputPane";
 import ExportModal from "./components/ExportModal";
 import EditorPane from "./components/EditorPane";
@@ -21,8 +14,6 @@ import { Toaster } from "react-hot-toast";
 import { numericOutcomeRange } from "./utils/chartData";
 import { Group, Panel, Separator } from "react-resizable-panels";
 
-let worker = new WorkerWrapper(new EurydiceWorker());
-
 export default function App() {
   return (
     <DarkModeSwitcher>
@@ -33,7 +24,7 @@ export default function App() {
 
 function AppInner() {
   const [editorText, setEditorText] = React.useState("");
-  const [output, setOutput] = React.useState<[string, Distribution][]>([]);
+  const [output, setOutput] = React.useState<NamedDistribution[]>([]);
   const [error, setError] = React.useState<EurydiceError | null>(null);
   const [runLive, setRunLiveInner] = React.useState(true);
   const [running, setRunning] = React.useState(false);
@@ -47,6 +38,7 @@ function AppInner() {
   );
   const runLiveRef = useRef(true);
   const runningRef = useRef(false);
+  const workerRef = useRef<WorkerWrapper | null>(null);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(min-width: 768px)");
@@ -68,51 +60,55 @@ function AppInner() {
   }
 
   const attachOnMessage = useCallback((worker: WorkerWrapper) => {
-    worker.setOnmessage((event: MessageEvent<EurydiceMessage>) => {
-      if (event.data.Err !== undefined) {
+    worker.setOnMessage((event: MessageEvent<EurydiceMessage>) => {
+      if ("Err" in event.data) {
         runningRef.current = false;
         setRunning(false);
         setError(event.data.Err);
-      } else if (event.data.Ok !== undefined) {
+      } else if ("Ok" in event.data) {
         runningRef.current = false;
         setRunning(false);
         setError(null);
-        const distributions: [string, Distribution][] = event.data.Ok!.map(
+        const distributions: NamedDistribution[] = event.data.Ok.map(
           ([name, distribution]) => [name, normalizeDistribution(distribution)]
         );
-        const chartData: [string, ScalarDistribution][] = distributions
-          .filter(([, distribution]) => distribution.fields.length === 1)
-          .map(([name, distribution]) => [
-            name,
-            asScalarDistribution(distribution),
-          ]);
+        const chartData = distributions.filter(isNamedScalarDistribution);
 
         // Categorical outcomes use enum member ordinals, not a numeric axis.
         const range = numericOutcomeRange(chartData);
         if (range !== null && range >= 5000) {
           setOutput(
-            distributions.filter(([, distribution]) => distribution.fields.length > 1)
+            distributions.filter(
+              ([, distribution]) => distribution.fields.length > 1
+            )
           );
           setError({
             message: `Range of outcomes (${range}) is too large to display. Maximum range is 5000.`,
             from: 0,
-            to: 0
+            to: 0,
           });
         } else {
           setOutput(distributions);
         }
-      } else if (event.data.Print !== undefined) {
-        const evt = event.data.Print as [string, string];
-        setPrintOutputs((printOutputs) => [...printOutputs, evt]);
+      } else if ("Print" in event.data) {
+        const printOutput = event.data.Print;
+        setPrintOutputs((printOutputs) => [...printOutputs, printOutput]);
       }
     });
   }, []);
 
   const run = useCallback((val: string) => {
+    let worker = workerRef.current;
+    if (worker === null) {
+      worker = new WorkerWrapper(new EurydiceWorker());
+      attachOnMessage(worker);
+      workerRef.current = worker;
+    }
     if (runningRef.current) {
       worker.terminate();
       worker = new WorkerWrapper(new EurydiceWorker());
       attachOnMessage(worker);
+      workerRef.current = worker;
     }
     runningRef.current = true;
     setRunning(true);
@@ -122,7 +118,15 @@ function AppInner() {
   }, [attachOnMessage]);
 
   useEffect(() => {
+    const worker = new WorkerWrapper(new EurydiceWorker());
     attachOnMessage(worker);
+    workerRef.current = worker;
+
+    return () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+      runningRef.current = false;
+    };
   }, [attachOnMessage]);
 
   useEffect(() => {
@@ -165,18 +169,6 @@ function AppInner() {
   // Export lives in the shared toolbar rather than an output section so it's
   // clearly a global action over every output, and never wraps onto its own
   // line inside the results pane.
-  const scalarOutput = output
-    .filter(([, distribution]) => distribution.fields.length === 1)
-    .map(
-      ([name, distribution]) =>
-        [name, asScalarDistribution(distribution)] as [
-          string,
-          ScalarDistribution,
-        ]
-    );
-  const tupleOutput = output.filter(
-    ([, distribution]) => distribution.fields.length > 1
-  );
   const canExport = output.length > 0;
   const exportButton = (
     <button
@@ -213,12 +205,11 @@ function AppInner() {
 
   return (
     <>
-      <div><Toaster /></div>
+      <div>
+        <Toaster />
+      </div>
       <div className="flex min-h-screen flex-col md:h-dvh md:min-h-0 md:overflow-hidden">
-        <Header
-          showTutorial={true}
-          onTutorialClick={() => setShowTutorial(true)}
-        />
+        <Header onTutorialClick={() => setShowTutorial(true)} />
         <div className="flex grow md:min-h-0">
           {isDesktopLayout ? (
             <Group
@@ -247,14 +238,7 @@ function AppInner() {
       </div>
 
       <ExportModal
-        distributions={scalarOutput.map(([name, distribution]) => ({
-          name,
-          distribution,
-        }))}
-        tuples={tupleOutput.map(([name, distribution]) => ({
-          name,
-          distribution,
-        }))}
+        outputs={output}
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
       />
@@ -262,11 +246,10 @@ function AppInner() {
   );
 }
 
-interface EurydiceMessage {
-  Ok: [string, WireDistribution][] | undefined;
-  Err: EurydiceError | undefined;
-  Print: [string, string] | undefined;
-}
+type EurydiceMessage =
+  | { Ok: [string, WireDistribution][] }
+  | { Err: EurydiceError }
+  | { Print: [string, string] };
 
 interface EurydiceError {
   message: string;

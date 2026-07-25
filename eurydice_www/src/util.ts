@@ -1,9 +1,3 @@
-export interface ScalarDistribution {
-  probabilities: [number, number][];
-  enum_name?: string;
-  labels?: string[];
-}
-
 /**
  * Per-field output schema, mirroring the engine's
  * `FieldSchema`. Enum fields carry their member labels; the outcome
@@ -23,23 +17,30 @@ export interface Distribution {
   probabilities: [number[], number][];
 }
 
-/** Projects a canonical one-field distribution into the existing chart view. */
-export function asScalarDistribution(
+/**
+ * A one-field refinement of the canonical distribution shape. Keeping scalar
+ * outputs in their canonical representation avoids maintaining a second,
+ * chart-specific copy of field metadata.
+ */
+export type ScalarDistribution = Omit<
+  Distribution,
+  "fields" | "probabilities"
+> & {
+  fields: [FieldSchema];
+  probabilities: [[number], number][];
+};
+
+export type NamedDistribution = [string, Distribution];
+export type NamedScalarDistribution = [string, ScalarDistribution];
+
+export function isScalarDistribution(
   distribution: Distribution
-): ScalarDistribution {
-  if (distribution.fields.length !== 1) {
-    throw new Error("expected a one-field distribution");
-  }
-  const scalar: ScalarDistribution = {
-    probabilities: distribution.probabilities.map(([values, probability]) => [
-      values[0],
-      probability,
-    ]),
-  };
-  const field = distribution.fields[0];
-  if (field.kind === "enum") {
-    scalar.enum_name = field.enumName;
-    scalar.labels = field.labels;
-  }
-  return scalar;
+): distribution is ScalarDistribution {
+  return distribution.fields.length === 1;
+}
+
+export function isNamedScalarDistribution(
+  output: NamedDistribution
+): output is NamedScalarDistribution {
+  return isScalarDistribution(output[1]);
 }

@@ -9,25 +9,23 @@ import {
   partialSums,
 } from './chartData';
 import { ScalarDistribution } from '../util';
+import { scalarDistribution } from './testData';
 
 describe('chartData', () => {
   const testDistributions: [string, ScalarDistribution][] = [
     [
       'output 1',
-      {
-        probabilities: [
+      scalarDistribution([
           [2, 0.111111111111],
           [3, 0.222222222222],
           [4, 0.333333333333],
           [5, 0.222222222222],
           [6, 0.111111111111]
-        ]
-      }
+      ])
     ],
     [
       'output 2',
-      {
-        probabilities: [
+      scalarDistribution([
           [3, 0.037037037037],
           [4, 0.111111111111],
           [5, 0.222222222222],
@@ -35,8 +33,7 @@ describe('chartData', () => {
           [7, 0.222222222222],
           [8, 0.111111111111],
           [9, 0.037037037037]
-        ]
-      }
+      ])
     ]
   ];
 
@@ -142,12 +139,10 @@ describe('chartData', () => {
       const sparseDistributions: [string, ScalarDistribution][] = [
         [
           'sparse',
-          {
-            probabilities: [
+          scalarDistribution([
               [1, 0.5],
               [5, 0.5]
-            ]
-          }
+          ])
         ]
       ];
       
@@ -204,13 +199,11 @@ describe('chartData', () => {
       const unorderedDistributions: [string, ScalarDistribution][] = [
         [
           'test',
-          {
-            probabilities: [
+          scalarDistribution([
               [10, 0.3],
               [2, 0.4],
               [5, 0.3]
-            ]
-          }
+          ])
         ]
       ];
       
@@ -243,22 +236,19 @@ describe('chartData', () => {
 
   describe('categorical distributions', () => {
     const mixedDistributions: [string, ScalarDistribution][] = [
-      ['numeric', { probabilities: [[1, 1]] }],
-      ['attack', {
-        probabilities: [[0, 0.25], [2, 0.75]],
-        enum_name: 'RESULT',
-        labels: ['MISS', 'HIT', 'CRITICAL'],
-      }],
-      ['defend', {
-        probabilities: [[1, 1]],
-        enum_name: 'RESULT',
-        labels: ['MISS', 'HIT', 'CRITICAL'],
-      }],
-      ['weather', {
-        probabilities: [[0, 1]],
-        enum_name: 'WEATHER',
-        labels: ['SUN', 'RAIN'],
-      }],
+      ['numeric', scalarDistribution([[1, 1]])],
+      ['attack', scalarDistribution(
+        [[0, 0.25], [2, 0.75]],
+        { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT', 'CRITICAL'] },
+      )],
+      ['defend', scalarDistribution(
+        [[1, 1]],
+        { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT', 'CRITICAL'] },
+      )],
+      ['weather', scalarDistribution(
+        [[0, 1]],
+        { kind: 'enum', enumName: 'WEATHER', labels: ['SUN', 'RAIN'] },
+      )],
     ];
 
     it('partitions numeric outputs and groups enum outputs by type in input order', () => {
@@ -297,12 +287,11 @@ describe('chartData', () => {
 
     it('ignores enum ordinals when calculating the numeric display range', () => {
       const distributions: [string, ScalarDistribution][] = [
-        ['numeric', { probabilities: [[10, 0.5], [20, 0.5]] }],
-        ['enum', {
-          probabilities: [[0, 0.5], [10000, 0.5]],
-          enum_name: 'LARGE_ENUM',
-          labels: ['FIRST'],
-        }],
+        ['numeric', scalarDistribution([[10, 0.5], [20, 0.5]])],
+        ['enum', scalarDistribution(
+          [[0, 0.5], [10000, 0.5]],
+          { kind: 'enum', enumName: 'LARGE_ENUM', labels: ['FIRST'] },
+        )],
       ];
 
       expect(numericOutcomeRange(distributions)).toBe(10);

@@ -3,8 +3,9 @@ import { Bar, Line, Chart as ReactChart } from "react-chartjs-2";
 import { MatrixController, MatrixElement } from "chartjs-chart-matrix";
 import {
   Distribution,
-  ScalarDistribution,
-  asScalarDistribution,
+  NamedDistribution,
+  NamedScalarDistribution,
+  isNamedScalarDistribution,
 } from "../util";
 import {
   fieldName,
@@ -21,7 +22,7 @@ import {
   ScriptableContext,
   TooltipItem,
 } from "chart.js";
-import { DarkModeContext } from "./DarkModeSwitcher";
+import { DarkModeContext } from "./DarkModeContext";
 import {
   ChartJsRangeSelect,
   makeChartJsRangeSelect,
@@ -61,16 +62,7 @@ function formatPercent(probability: number, digits = 2): string {
 
 export default function OutputPane(props: OutputPaneProps) {
   const scalarDistributions = React.useMemo(
-    () =>
-      props.distributions
-        .filter(([, distribution]) => distribution.fields.length === 1)
-        .map(
-          ([name, distribution]) =>
-            [name, asScalarDistribution(distribution)] as [
-              string,
-              ScalarDistribution,
-            ]
-        ),
+    () => props.distributions.filter(isNamedScalarDistribution),
     [props.distributions]
   );
   const tupleDistributions = props.distributions.filter(
@@ -99,7 +91,7 @@ export default function OutputPane(props: OutputPaneProps) {
 function OutputSections({
   distributions,
 }: {
-  distributions: [string, ScalarDistribution][];
+  distributions: NamedScalarDistribution[];
 }) {
   const { sections } = React.useMemo(
     () => partitionDistributions(distributions),
@@ -127,7 +119,7 @@ function OutputSections({
 function NumericOutputSection({
   distributions,
 }: {
-  distributions: [string, ScalarDistribution][];
+  distributions: NamedScalarDistribution[];
 }) {
   const [displayMode, setDisplayMode] = React.useState(
     DisplayMode.Distribution
@@ -156,7 +148,7 @@ function NumericOutputSection({
   // Keep the range selection plugin's offset in sync with the minimum numeric outcome.
   React.useEffect(() => {
     const outcomes = distributions.flatMap(([, distribution]) =>
-      distribution.probabilities.map(([outcome]) => outcome)
+      distribution.probabilities.map(([[outcome]]) => outcome)
     );
     if (outcomes.length > 0) {
       plugin.current.setOffset(Math.min(...outcomes));
@@ -772,7 +764,7 @@ function TupleMarginals({ distribution }: { distribution: Distribution }) {
     [distribution]
   );
   const named = React.useMemo(
-    (): [string, ScalarDistribution][] =>
+    (): NamedScalarDistribution[] =>
       marginals.map((marginal, i) => [fieldName(distribution, i), marginal]),
     [distribution, marginals]
   );
@@ -781,7 +773,7 @@ function TupleMarginals({ distribution }: { distribution: Distribution }) {
 }
 
 interface NumericChartProps {
-  distributions: [string, ScalarDistribution][];
+  distributions: NamedScalarDistribution[];
   mode: DisplayMode;
   isDarkMode: boolean;
   plugin: ChartJsRangeSelect;
@@ -940,18 +932,18 @@ function CategoricalChart({
 }
 
 export interface OutputPaneProps {
-  distributions: [string, Distribution][];
+  distributions: NamedDistribution[];
 }
 
 interface CombinedProbabilityTableProps {
-  distributions: [string, ScalarDistribution][];
+  distributions: NamedScalarDistribution[];
   mode: DisplayMode;
   outcomes?: number[];
   showStatistics?: boolean;
 }
 
 interface BracketingTableProps {
-  distributions: [string, ScalarDistribution][];
+  distributions: NamedScalarDistribution[];
   lowerBound: number;
   upperBound: number;
 }

@@ -12,10 +12,7 @@ export default function Tutorial(props: TutorialProps) {
     step > 0 ? (
       <button
         className="btn btn-secondary"
-        onClick={() => {
-          props.setEditorText(steps[step - 1].editorText);
-          setStep(step - 1);
-        }}
+        onClick={() => setStep((currentStep) => currentStep - 1)}
       >
         ← Previous
       </button>
@@ -24,10 +21,7 @@ export default function Tutorial(props: TutorialProps) {
     step < steps.length - 1 ? (
       <button
         className="btn btn-primary"
-        onClick={() => {
-          props.setEditorText(steps[step + 1].editorText);
-          setStep(step + 1);
-        }}
+        onClick={() => setStep((currentStep) => currentStep + 1)}
       >
         Next →
       </button>
@@ -108,7 +102,7 @@ output {1, 3, 5}@5d10 \\\\\\ Sums the lowest, middle, and highest of 5 d10s.`,
   {
     text: (
       <span>
-        You can implement abritrary transformations of dice pools with
+        You can implement arbitrary transformations of dice pools with
         functions.
       </span>
     ),

@@ -12,7 +12,7 @@ import {
   LRLanguage,
 } from "@codemirror/language";
 import WithTooltip from "./Tooltip";
-import { DarkModeContext } from "./DarkModeSwitcher";
+import { DarkModeContext } from "./DarkModeContext";
 import React from "react";
 import { toast } from "react-hot-toast";
 
