@@ -21,9 +21,11 @@ import {
 import WithTooltip from "./Tooltip";
 import { DarkModeContext } from "./DarkModeContext";
 import React from "react";
+import Markdown from "react-markdown";
 import { toast } from "react-hot-toast";
 import {
   applyTextEdits,
+  editorDiagnostics,
   EurydiceDiagnostic,
   SuggestedFix,
 } from "../diagnostics";
@@ -37,21 +39,10 @@ function diagnosticLinter(
   diagnosticSourceId: number | null,
 ) {
   return linter((view) =>
-    diagnostics.flatMap((diagnostic) =>
-      diagnostic.labels
-        .filter((label) => label.range.source === diagnosticSourceId)
-        .map((label) => ({
-          // Clamp values here - a slightly delayed worker response can cause
-          // a crash if the diagnostic is now out of bounds.
-          from: Math.min(label.range.range.start, view.state.doc.length),
-          to: Math.min(label.range.range.end, view.state.doc.length),
-          message: [
-            diagnostic.summary,
-            label.message || null,
-            diagnostic.help,
-          ].filter(Boolean).join(" — "),
-          severity: diagnostic.severity,
-        })),
+    editorDiagnostics(
+      diagnostics,
+      diagnosticSourceId,
+      view.state.doc.length,
     ),
   );
 }
@@ -266,7 +257,7 @@ export interface EditorPaneProps {
   exportButton?: React.ReactNode;
 }
 
-function DiagnosticCard({
+export function DiagnosticCard({
   diagnostic,
   canApplyFix,
   applyFix,
@@ -276,32 +267,56 @@ function DiagnosticCard({
   applyFix: (fix: SuggestedFix) => void;
 }) {
   const color = diagnostic.severity === "error" ? "var(--danger)" : "var(--warning)";
+  const supportingMessages = Array.from(
+    new Set(
+      diagnostic.labels
+        .map((label) => label.message?.trim() ?? "")
+        .filter(
+          (message) =>
+            message.length > 0 &&
+            message !== diagnostic.summary &&
+            message !== diagnostic.help &&
+            !message.startsWith("while calling `"),
+        ),
+    ),
+  );
   return (
     <section
-      className="rounded-lg border p-3 text-sm"
+      className="rounded-lg border p-2 text-sm"
       style={{ borderLeftColor: color, borderLeftWidth: 3, background: "var(--surface-2)" }}
     >
       <div className="flex items-start gap-2">
-        <Warning color={color} />
+        <Warning color={color} className="mt-0.5 size-5" />
         <div className="min-w-0 grow">
-          <div className="font-semibold">{diagnostic.summary}</div>
-          <div className="mt-0.5 font-mono text-xs text-[var(--text-muted)]">
-            {diagnostic.code}
+          <div className="text-sm font-medium leading-5">
+            <InlineMarkdown>{diagnostic.summary}</InlineMarkdown>
           </div>
-          {diagnostic.help && <p className="mt-2">{diagnostic.help}</p>}
-          {diagnostic.notes.map((note, index) => (
-            <p className="mt-1 text-[var(--text-muted)]" key={index}>
-              {note}
-            </p>
-          ))}
-          {diagnostic.trace.length > 0 && (
-            <div className="mt-2 space-y-1 font-mono text-xs">
+          {(supportingMessages.length > 0 ||
+            diagnostic.help ||
+            diagnostic.notes.length > 0 ||
+            diagnostic.trace.length > 0) && (
+            <div className="mt-1 space-y-0.5 text-xs leading-5 text-(--text-muted)">
+              {supportingMessages.map((message, index) => (
+                <p key={`label-${index}`}>
+                  <InlineMarkdown>{message}</InlineMarkdown>
+                </p>
+              ))}
+              {diagnostic.help && (
+                <p>
+                  <InlineMarkdown>{diagnostic.help}</InlineMarkdown>
+                </p>
+              )}
+              {diagnostic.notes.map((note, index) => (
+                <p key={`note-${index}`}>
+                  <InlineMarkdown>{note}</InlineMarkdown>
+                </p>
+              ))}
               {diagnostic.trace.map((frame, index) => {
                 const bindings = frame.bindings
                   .map((binding) => `${binding.name} = ${binding.value.preview}`)
                   .join(", ");
                 return (
-                  <div key={index}>
+                  <div className="font-mono" key={index}>
                     while calling [{frame.function.split("{}").join("…")}]
                     {bindings && ` with ${bindings}`}
                   </div>
@@ -312,16 +327,44 @@ function DiagnosticCard({
           {diagnostic.fixes.filter(canApplyFix).map((fix, index) => (
             <button
               type="button"
-              className="btn btn-secondary mt-2 mr-2"
+              className="btn btn-compact btn-secondary mt-1.5 mr-1.5"
               onClick={() => applyFix(fix)}
               key={index}
             >
-              {fix.message}
+              <InlineMarkdown>{fix.message}</InlineMarkdown>
             </button>
           ))}
         </div>
       </div>
     </section>
+  );
+}
+
+function InlineMarkdown({ children }: { children: string }) {
+  return (
+    <Markdown
+      disallowedElements={["p"]}
+      unwrapDisallowed
+      components={{
+        code: ({ children: code }) => (
+          <code className="rounded bg-(--surface-3) px-1 py-0.5 font-mono text-[0.9em] text-[var(--text)]">
+            {code}
+          </code>
+        ),
+        a: ({ children: link, href }) => (
+          <a
+            className="text-(--accent) underline underline-offset-2"
+            href={href}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {link}
+          </a>
+        ),
+      }}
+    >
+      {children}
+    </Markdown>
   );
 }
 

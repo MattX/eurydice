@@ -6,6 +6,10 @@ use serde::Serialize;
 use crate::{
     ast::{self, StaticType},
     dice::{Pool, explode, reroll},
+    error::{
+        PrimitiveArgumentError, PrimitiveArgumentErrorKind, PrimitiveArgumentsError,
+        PrimitiveValueError,
+    },
     eval::{ElementValue, Function, RuntimeError, RuntimeValue},
 };
 
@@ -21,6 +25,8 @@ pub struct PrimitiveCtx<'a> {
     pub lowest_first: bool,
     /// Source range of the whole function call, used for error reporting.
     pub function_range: ast::Range,
+    /// Canonical function identifier from the primitive registry.
+    pub identifier: &'static str,
 }
 
 type PrimitiveExecutor =
@@ -78,11 +84,34 @@ fn materialize_compatible_pair(
     left: &RuntimeValue,
     right: &RuntimeValue,
     ctx: PrimitiveCtx,
-    message: &'static str,
+    left_name: &'static str,
+    right_name: &'static str,
+    requirement: &'static str,
 ) -> Result<(RuntimeValue, RuntimeValue), RuntimeError> {
-    let error = || RuntimeError::EnumTypeError {
-        range: ctx.function_range.into(),
-        message: message.to_string(),
+    let error = || {
+        RuntimeError::InvalidPrimitiveArguments(Box::new(PrimitiveArgumentsError {
+            range: ctx.function_range.into(),
+            function: ctx.identifier,
+            requirement: requirement.to_string(),
+            help: Some(
+                "Both arguments must use integers or members of the same enum type.".to_string(),
+            ),
+            kind: PrimitiveArgumentErrorKind::OutcomeType,
+            arguments: vec![
+                PrimitiveArgumentError {
+                    name: left_name,
+                    range: ctx.arg_ranges[0].into(),
+                    expected: format!("the same outcome type as `{right_name}`"),
+                    value: left.clone(),
+                },
+                PrimitiveArgumentError {
+                    name: right_name,
+                    range: ctx.arg_ranges[1].into(),
+                    expected: format!("the same outcome type as `{left_name}`"),
+                    value: right.clone(),
+                },
+            ],
+        }))
     };
     let outcome_type = left
         .merged_outcome_type(right)
@@ -98,19 +127,16 @@ fn contains_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let error = || crate::eval::RuntimeError::EnumTypeError {
-        range: ctx.function_range.into(),
-        message: "[contains] requires a sequence and element with the same outcome type"
-            .to_string(),
-    };
     let (RuntimeValue::List(_, _), RuntimeValue::Element(_)) = (&args[0], &args[1]) else {
-        return Err(error());
+        unreachable!("contains argument shapes are enforced by the evaluator")
     };
     let (haystack, needle) = materialize_compatible_pair(
         &args[0],
         &args[1],
         ctx,
-        "[contains] requires a sequence and element with the same outcome type",
+        "SEQ",
+        "N",
+        "requires `SEQ` and `N` to have the same outcome type",
     )?;
     let (RuntimeValue::List(haystack, _), RuntimeValue::Element(needle)) = (haystack, needle)
     else {
@@ -124,21 +150,19 @@ fn count_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let error = || crate::eval::RuntimeError::EnumTypeError {
-        range: ctx.function_range.into(),
-        message: "[count] requires sequences with the same outcome type".to_string(),
-    };
     if !matches!(
         (&args[0], &args[1]),
         (RuntimeValue::List(_, _), RuntimeValue::List(_, _))
     ) {
-        return Err(error());
+        unreachable!("count argument shapes are enforced by the evaluator")
     }
     let (needle, haystack) = materialize_compatible_pair(
         &args[0],
         &args[1],
         ctx,
-        "[count] requires sequences with the same outcome type",
+        "NEEDLES",
+        "HAYSTACK",
+        "requires `NEEDLES` and `HAYSTACK` to have the same outcome type",
     )?;
     let (RuntimeValue::List(needle, _), RuntimeValue::List(haystack, _)) = (needle, haystack)
     else {
@@ -225,6 +249,7 @@ fn keep_execute(
     };
     let keep_list = keep_list_for_primitive(
         mode,
+        ctx.identifier,
         *i,
         ctx.arg_ranges[0],
         d.dimension() as usize,
@@ -371,44 +396,105 @@ fn sort_execute(
 /// Builds a tuple from its arguments. Registered for each supported arity; the
 /// arity is enforced by function-name matching, not by this executor.
 fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
+    const ARGUMENT_NAMES: [&str; 4] = ["A", "B", "C", "D"];
+    let invalid_arguments = args
+        .iter()
+        .enumerate()
+        .filter(|(_, arg)| matches!(arg, RuntimeValue::Element(ElementValue::Tuple(_))))
+        .map(|(index, arg)| PrimitiveArgumentError {
+            name: ARGUMENT_NAMES[index],
+            range: ctx.arg_ranges[index].into(),
+            expected: "a non-tuple value".to_string(),
+            value: arg.clone(),
+        })
+        .collect::<Vec<_>>();
+    if !invalid_arguments.is_empty() {
+        return Err(RuntimeError::InvalidPrimitiveArguments(Box::new(
+            PrimitiveArgumentsError {
+                range: ctx.function_range.into(),
+                function: ctx.identifier,
+                requirement: "cannot contain another tuple".to_string(),
+                help: Some("Pass each inner field as its own tuple argument.".to_string()),
+                kind: PrimitiveArgumentErrorKind::Type,
+                arguments: invalid_arguments,
+            },
+        )));
+    }
     let fields = args
         .iter()
         .map(|arg| match arg {
-            RuntimeValue::Element(ElementValue::AdditiveIdentity) => Ok(ElementValue::Int(0)),
+            RuntimeValue::Element(ElementValue::AdditiveIdentity) => ElementValue::Int(0),
             RuntimeValue::Element(value @ (ElementValue::Int(_) | ElementValue::Enum { .. })) => {
-                Ok(value.clone())
+                value.clone()
             }
-            RuntimeValue::Element(ElementValue::Tuple(_)) => Err(RuntimeError::EnumTypeError {
-                range: ctx.function_range.into(),
-                message: "nested tuples are not supported".to_string(),
-            }),
+            RuntimeValue::Element(ElementValue::Tuple(_)) => {
+                unreachable!("nested tuple arguments were rejected above")
+            }
             RuntimeValue::List(_, _) | RuntimeValue::Pool(_, _) => {
                 unreachable!("tuple arguments are coerced to elements")
             }
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     Ok(RuntimeValue::Element(ElementValue::Tuple(fields.into())))
 }
 
 fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
+    let mut invalid_arguments = Vec::new();
+    if !matches!(args[0], RuntimeValue::Element(ElementValue::Int(_))) {
+        invalid_arguments.push(PrimitiveArgumentError {
+            name: "INDEX",
+            range: ctx.arg_ranges[0].into(),
+            expected: "an integer".to_string(),
+            value: args[0].clone(),
+        });
+    }
+    if !matches!(args[1], RuntimeValue::Element(ElementValue::Tuple(_))) {
+        invalid_arguments.push(PrimitiveArgumentError {
+            name: "TUPLE",
+            range: ctx.arg_ranges[1].into(),
+            expected: "a tuple".to_string(),
+            value: args[1].clone(),
+        });
+    }
+    if !invalid_arguments.is_empty() {
+        return Err(RuntimeError::InvalidPrimitiveArguments(Box::new(
+            PrimitiveArgumentsError {
+                range: ctx.function_range.into(),
+                function: ctx.identifier,
+                requirement: "requires `INDEX` to be an integer and `TUPLE` to be a tuple"
+                    .to_string(),
+                help: Some(
+                    "Build a tuple with `[tuple A B]`. Tuple field positions start at 1."
+                        .to_string(),
+                ),
+                kind: PrimitiveArgumentErrorKind::Type,
+                arguments: invalid_arguments,
+            },
+        )));
+    }
     let (
         RuntimeValue::Element(ElementValue::Int(index)),
         RuntimeValue::Element(ElementValue::Tuple(fields)),
     ) = (&args[0], &args[1])
     else {
-        return Err(RuntimeError::EnumTypeError {
-            range: ctx.function_range.into(),
-            message: "[field I of T] requires an integer index and a tuple".to_string(),
-        });
+        unreachable!("field argument types were checked above")
     };
     let index = index
         .checked_sub(1)
         .and_then(|index| usize::try_from(index).ok());
     let Some(value) = index.and_then(|index| fields.get(index)) else {
-        return Err(RuntimeError::EnumTypeError {
-            range: ctx.function_range.into(),
-            message: format!("tuple index must be between 1 and {}", fields.len()),
-        });
+        return Err(RuntimeError::InvalidPrimitiveValue(Box::new(
+            PrimitiveValueError {
+                range: ctx.function_range.into(),
+                function: ctx.identifier,
+                requirement: format!("cannot select field `{}`", args[0]),
+                argument: "INDEX",
+                found_range: ctx.arg_ranges[0].into(),
+                value: args[0].clone(),
+                constraint: format!("an index from 1 through {}", fields.len()),
+                help: Some("Tuple field positions start at 1.".to_string()),
+            },
+        )));
     };
     Ok(RuntimeValue::Element(value.clone()))
 }
@@ -589,6 +675,7 @@ define_primitives! {
 
 fn keep_list_for_primitive(
     mode: KeepMode,
+    identifier: &'static str,
     keep: i32,
     keep_range: ast::Range,
     pool_size: usize,
@@ -599,7 +686,7 @@ fn keep_list_for_primitive(
     if keep < 0 {
         return Err(RuntimeError::NegativeArgumentToFunction {
             range: function_range.into(),
-            name: mode.name().to_string(),
+            name: identifier.to_string(),
             found_range: keep_range.into(),
             value: keep,
         });
@@ -641,6 +728,13 @@ pub fn primitive_metadata() -> &'static [PrimitiveMetadata] {
     PRIMITIVE_METADATA
 }
 
+pub(crate) fn primitive_signature(identifier: &str) -> Option<&'static str> {
+    PRIMITIVE_METADATA
+        .iter()
+        .find(|primitive| primitive.identifier == identifier)
+        .map(|primitive| primitive.signature)
+}
+
 #[cfg(test)]
 mod tests {
     use malachite::Natural;
@@ -658,6 +752,7 @@ mod tests {
             explode_depth,
             lowest_first,
             function_range: dummy_range(),
+            identifier: "test {}",
         }
     }
 

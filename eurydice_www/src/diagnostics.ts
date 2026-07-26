@@ -1,4 +1,5 @@
 import { WireDistribution } from "./utils/tupleData";
+import type { Diagnostic as CodeMirrorDiagnostic } from "@codemirror/lint";
 
 export interface SourceRange {
   source: number;
@@ -7,7 +8,7 @@ export interface SourceRange {
 
 export interface DiagnosticLabel {
   range: SourceRange;
-  message: string;
+  message?: string;
   style: "primary" | "secondary";
 }
 
@@ -75,4 +76,25 @@ export function applyTextEdits(source: string, edits: TextEdit[]): string {
 
 export function currentSourceId(report: RunReport): number | null {
   return report.sources[report.sources.length - 1]?.id ?? null;
+}
+
+export function editorDiagnostics(
+  diagnostics: readonly EurydiceDiagnostic[],
+  diagnosticSourceId: number | null,
+  documentLength: number,
+): CodeMirrorDiagnostic[] {
+  return diagnostics.flatMap((diagnostic) =>
+    diagnostic.labels
+      .filter((label) => label.range.source === diagnosticSourceId)
+      .map((label) => ({
+        // Clamp values here - a slightly delayed worker response can cause
+        // a crash if the diagnostic is now out of bounds.
+        from: Math.min(label.range.range.start, documentLength),
+        to: Math.min(label.range.range.end, documentLength),
+        // CodeMirror already supplies severity styling and the source underline.
+        // Keep its hover concise; the full explanation lives in the card below.
+        message: diagnostic.summary.replace(/`/g, ""),
+        severity: diagnostic.severity,
+      })),
+  );
 }

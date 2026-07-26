@@ -247,7 +247,7 @@ impl Evaluator {
             summary: "The same dice pool is sampled independently more than once".to_string(),
             labels: vec![DiagnosticLabel {
                 range: SourceRange { source, range },
-                message: format!("{description} refers to the same pool"),
+                message: Some(format!("{description} refers to the same pool")),
                 style: LabelStyle::Primary,
             }],
             notes: vec![
@@ -282,7 +282,7 @@ impl Evaluator {
             summary: summary.to_string(),
             labels: vec![DiagnosticLabel {
                 range: SourceRange { source, range },
-                message: format!("`{setting}` is currently {value}"),
+                message: Some(format!("`{setting}` is currently {value}")),
                 style: LabelStyle::Primary,
             }],
             notes: vec!["The returned distribution is bounded by this setting.".to_string()],
@@ -961,6 +961,7 @@ impl Evaluator {
                         explode_depth: self.explode_depth,
                         lowest_first: self.lowest_first,
                         function_range: function.range,
+                        identifier: primitive.identifier,
                     },
                 )
             }

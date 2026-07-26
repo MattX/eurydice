@@ -9,6 +9,48 @@ use crate::{
     value::RuntimeValue,
 };
 
+#[derive(Debug)]
+pub struct PrimitiveArgumentError {
+    pub name: &'static str,
+    pub range: SourceSpan,
+    pub expected: String,
+    pub value: RuntimeValue,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PrimitiveArgumentErrorKind {
+    Type,
+    OutcomeType,
+}
+
+#[derive(Debug, Error, Diagnostic)]
+#[error("Invalid arguments to primitive function [{function}]: {requirement}")]
+pub struct PrimitiveArgumentsError {
+    #[label = "{requirement}"]
+    pub range: SourceSpan,
+    pub function: &'static str,
+    pub requirement: String,
+    #[help]
+    pub help: Option<String>,
+    pub kind: PrimitiveArgumentErrorKind,
+    pub arguments: Vec<PrimitiveArgumentError>,
+}
+
+#[derive(Debug, Error, Diagnostic)]
+#[error("Invalid value passed to primitive function [{function}]: {requirement}")]
+pub struct PrimitiveValueError {
+    #[label = "{requirement}"]
+    pub range: SourceSpan,
+    pub function: &'static str,
+    pub requirement: String,
+    pub argument: &'static str,
+    pub found_range: SourceSpan,
+    pub value: RuntimeValue,
+    pub constraint: String,
+    #[help]
+    pub help: Option<String>,
+}
+
 impl From<ast::Range> for SourceSpan {
     fn from(range: ast::Range) -> Self {
         SourceSpan::new(range.start.into(), range.end - range.start)
@@ -133,6 +175,14 @@ pub enum RuntimeError {
         value: i32,
     },
 
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    InvalidPrimitiveArguments(Box<PrimitiveArgumentsError>),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    InvalidPrimitiveValue(Box<PrimitiveValueError>),
+
     #[error("Invalid repeat expression")]
     #[diagnostic(help("The expression inside the repeat operator must evaluate to an int."))]
     InvalidRepeatExpression {
@@ -167,6 +217,8 @@ impl RuntimeError {
             RuntimeError::RangeHasNonSequenceEndpoints { range, .. } => range.into(),
             RuntimeError::InvalidArgumentToOperator { operator_range, .. } => operator_range.into(),
             RuntimeError::NegativeArgumentToFunction { range, .. } => range.into(),
+            RuntimeError::InvalidPrimitiveArguments(error) => (&error.range).into(),
+            RuntimeError::InvalidPrimitiveValue(error) => (&error.range).into(),
             RuntimeError::InvalidRepeatExpression { range, .. } => range.into(),
             RuntimeError::MathError { range, .. } => range.into(),
         }

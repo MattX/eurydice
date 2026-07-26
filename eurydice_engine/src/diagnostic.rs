@@ -7,8 +7,9 @@ use serde::Serialize;
 use crate::{
     ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
     engine::EngineError,
-    error::RuntimeError,
-    value::RuntimeValue,
+    error::{PrimitiveArgumentErrorKind, RuntimeError},
+    primitives::primitive_signature,
+    value::{ElementValue, RuntimeValue},
 };
 
 /// Identifies one source submission within a stateful [`crate::Engine`].
@@ -47,7 +48,8 @@ pub enum LabelStyle {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiagnosticLabel {
     pub range: SourceRange,
-    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     pub style: LabelStyle,
 }
 
@@ -153,6 +155,8 @@ impl EngineDiagnostic {
 
 pub(crate) fn summarize_value(value: &RuntimeValue) -> ValueSummary {
     let (shape, collection_size) = match value {
+        RuntimeValue::Element(ElementValue::Tuple(_)) => ("tuple".to_string(), None),
+        RuntimeValue::Element(ElementValue::Enum { .. }) => ("enum".to_string(), None),
         RuntimeValue::Element(_) => ("number".to_string(), None),
         RuntimeValue::List(values, _) => ("sequence".to_string(), u32::try_from(values.len()).ok()),
         RuntimeValue::Pool(pool, _) => ("dice_pool".to_string(), Some(pool.dimension())),
@@ -169,6 +173,33 @@ pub(crate) fn summarize_value(value: &RuntimeValue) -> ValueSummary {
         collection_size,
         preview,
     }
+}
+
+fn describe_value(value: &RuntimeValue) -> String {
+    match value {
+        RuntimeValue::Element(ElementValue::AdditiveIdentity | ElementValue::Int(_)) => {
+            "an integer".to_string()
+        }
+        RuntimeValue::Element(ElementValue::Enum { ty, .. }) => {
+            format!("a `{}` value", ty.name)
+        }
+        RuntimeValue::Element(ElementValue::Tuple(_)) => "a tuple".to_string(),
+        RuntimeValue::List(_, outcome_type) => {
+            format!("a sequence of `{}` values", outcome_type.display_name())
+        }
+        RuntimeValue::Pool(_, outcome_type) => {
+            format!(
+                "a dice pool with `{}` outcomes",
+                outcome_type.display_name()
+            )
+        }
+    }
+}
+
+fn primitive_call(identifier: &str) -> String {
+    primitive_signature(identifier)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("[{}]", identifier.replace("{}", "…")))
 }
 
 struct DiagnosticParts {
@@ -236,7 +267,7 @@ impl ParseDiagnosticParts {
                 summary,
                 vec![DiagnosticLabel {
                     range: SourceRange { source, range },
-                    message: "here".to_string(),
+                    message: None,
                     style: LabelStyle::Primary,
                 }],
                 DiagnosticDetails::Syntax,
@@ -346,7 +377,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                         source: source_id,
                         range: Range::from((opener, opener + 1)),
                     },
-                    message: "opened here".to_string(),
+                    message: Some("opened here".to_string()),
                     style: LabelStyle::Secondary,
                 })
             } else {
@@ -502,7 +533,7 @@ pub(crate) fn missing_return_warning(
                 source,
                 range: definition.name.range,
             },
-            message: "not every path reaches `result:`".to_string(),
+            message: Some("not every path reaches `result:`".to_string()),
             style: LabelStyle::Primary,
         }],
         notes: vec![
@@ -633,7 +664,7 @@ pub(crate) fn runtime_diagnostic(
             source: source_id,
             range: range.into(),
         },
-        message,
+        message: Some(message),
         style: LabelStyle::Primary,
     };
     let secondary = |range: &SourceSpan, message: String| DiagnosticLabel {
@@ -641,15 +672,23 @@ pub(crate) fn runtime_diagnostic(
             source: source_id,
             range: range.into(),
         },
-        message,
+        message: Some(message),
         style: LabelStyle::Secondary,
+    };
+    let unlabeled = |range: &SourceSpan, style: LabelStyle| DiagnosticLabel {
+        range: SourceRange {
+            source: source_id,
+            range: range.into(),
+        },
+        message: None,
+        style,
     };
 
     let mut parts = match error {
         RuntimeError::UndefinedReference { range, name } => DiagnosticParts::new(
             "name.undefined_variable",
             format!("Variable `{name}` is not defined"),
-            vec![primary(range, "not found in the current scope".to_string())],
+            vec![unlabeled(range, LabelStyle::Primary)],
             DiagnosticDetails::UndefinedName {
                 name: name.clone(),
                 namespace: "variable".to_string(),
@@ -740,9 +779,9 @@ pub(crate) fn runtime_diagnostic(
             value,
         } => DiagnosticParts::new(
             "value.nonnegative_required",
-            format!("Function `{name}` needs a nonnegative count"),
+            format!("`{}` needs a nonnegative count", primitive_call(name)),
             vec![
-                secondary(range, "called here".to_string()),
+                unlabeled(range, LabelStyle::Secondary),
                 primary(found_range, format!("this evaluates to {value}")),
             ],
             DiagnosticDetails::InvalidValue {
@@ -750,10 +789,75 @@ pub(crate) fn runtime_diagnostic(
                 actual: value.to_string(),
             },
         ),
+        RuntimeError::InvalidPrimitiveArguments(error) => {
+            let arguments = &error.arguments;
+            let labels = arguments
+                .iter()
+                .enumerate()
+                .map(|(index, argument)| DiagnosticLabel {
+                    range: SourceRange {
+                        source: source_id,
+                        range: (&argument.range).into(),
+                    },
+                    message: Some(format!(
+                        "`{}` is {}: `{}`; expected {}",
+                        argument.name,
+                        describe_value(&argument.value),
+                        summarize_value(&argument.value).preview,
+                        argument.expected
+                    )),
+                    style: if index == 0 {
+                        LabelStyle::Primary
+                    } else {
+                        LabelStyle::Secondary
+                    },
+                })
+                .collect::<Vec<_>>();
+            let actual = (arguments.len() == 1).then(|| summarize_value(&arguments[0].value));
+            let expected = match arguments.as_slice() {
+                [argument] => argument.expected.clone(),
+                _ => error.requirement.clone(),
+            };
+            let code = match error.kind {
+                PrimitiveArgumentErrorKind::Type => "type.function_argument",
+                PrimitiveArgumentErrorKind::OutcomeType => "type.outcome_mismatch",
+            };
+            let mut parts = DiagnosticParts::new(
+                code,
+                format!("`{}` {}", primitive_call(error.function), error.requirement),
+                labels,
+                DiagnosticDetails::TypeMismatch { expected, actual },
+            );
+            parts.help = error.help.clone();
+            parts
+        }
+        RuntimeError::InvalidPrimitiveValue(error) => {
+            let summary = summarize_value(&error.value);
+            let mut parts = DiagnosticParts::new(
+                "value.out_of_range",
+                format!("`{}` {}", primitive_call(error.function), error.requirement),
+                vec![primary(
+                    &error.found_range,
+                    format!(
+                        "`{}` is {}: `{}`; expected {}",
+                        error.argument,
+                        describe_value(&error.value),
+                        summary.preview,
+                        error.constraint
+                    ),
+                )],
+                DiagnosticDetails::InvalidValue {
+                    constraint: error.constraint.clone(),
+                    actual: summary.preview,
+                },
+            );
+            parts.help = error.help.clone();
+            parts
+        }
         RuntimeError::MathError { range, message } => DiagnosticParts::new(
             "value.arithmetic",
             message,
-            vec![primary(range, "this operation failed".to_string())],
+            vec![unlabeled(range, LabelStyle::Primary)],
             DiagnosticDetails::Evaluation,
         ),
         RuntimeError::OutputNotAtTopLevel { range } => placement_diagnostic(
@@ -771,7 +875,7 @@ pub(crate) fn runtime_diagnostic(
         RuntimeError::ReturnOutsideFunction { range } => DiagnosticParts::new(
             "placement.result_outside_function",
             "`result:` can only appear inside a function",
-            vec![primary(range, "not inside a function".to_string())],
+            vec![unlabeled(range, LabelStyle::Primary)],
             DiagnosticDetails::Evaluation,
         ),
         RuntimeError::LabelsOnNonTupleOutput { range } => DiagnosticParts::new(
@@ -839,7 +943,10 @@ pub(crate) fn runtime_diagnostic(
         .labels
         .extend(trace.iter().map(|frame| DiagnosticLabel {
             range: frame.call,
-            message: format!("while calling `{}`", frame.function.replace("{}", "…")),
+            message: Some(format!(
+                "while calling `{}`",
+                frame.function.replace("{}", "…")
+            )),
             style: LabelStyle::Secondary,
         }));
     parts.finish(DiagnosticSeverity::Error, trace)
@@ -955,7 +1062,7 @@ pub(crate) fn add_later_definition(
     if let Some(range) = definition {
         diagnostic.labels.push(DiagnosticLabel {
             range: SourceRange { source, range },
-            message: "defined later".to_string(),
+            message: Some("defined later".to_string()),
             style: LabelStyle::Secondary,
         });
         diagnostic.notes.push(
@@ -1051,7 +1158,7 @@ fn placement_diagnostic(
                 source: source_id,
                 range: range.into(),
             },
-            message: "inside a function".to_string(),
+            message: None,
             style: LabelStyle::Primary,
         }],
         DiagnosticDetails::Evaluation,

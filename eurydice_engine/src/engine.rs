@@ -314,12 +314,13 @@ mod tests {
         let DiagnosticDetails::UndefinedName { suggestions, .. } = &error.details else {
             panic!("expected undefined-name details");
         };
+        assert_eq!(error.labels[0].message, None);
         assert_eq!(suggestions, &["FOOD"]);
         assert!(
             error
                 .labels
                 .iter()
-                .any(|label| label.message == "defined later")
+                .any(|label| label.message.as_deref() == Some("defined later"))
         );
     }
 
@@ -351,6 +352,144 @@ output [pick d3]";
         assert_eq!(error.trace[0].function, "pick {}");
         assert_eq!(error.trace[0].bindings[0].name, "I");
         assert_eq!(error.trace[0].bindings[0].value.preview, "3");
+    }
+
+    #[test]
+    fn primitive_diagnostics_identify_invalid_field_arguments() {
+        let source = "output [field d2 of 1]";
+        let report = Engine::new().run_with_diagnostics(source);
+        let error = report.error().unwrap();
+
+        assert_eq!(error.code, "type.function_argument");
+        assert_eq!(
+            error.summary,
+            "`[field INDEX:n of TUPLE:n]` requires `INDEX` to be an integer and `TUPLE` to be a tuple"
+        );
+        assert_eq!(error.labels.len(), 1);
+        let label = &error.labels[0];
+        assert_eq!(&source[label.range.range.start..label.range.range.end], "1");
+        let message = label.message.as_deref().unwrap();
+        assert!(message.contains("`TUPLE` is an integer: `1`"));
+        assert!(message.contains("expected a tuple"));
+        assert_eq!(
+            error.help.as_deref(),
+            Some("Build a tuple with `[tuple A B]`. Tuple field positions start at 1.")
+        );
+        let DiagnosticDetails::TypeMismatch {
+            actual: Some(actual),
+            ..
+        } = &error.details
+        else {
+            panic!("expected a type mismatch with the actual value");
+        };
+        assert_eq!(actual.preview, "1");
+        assert_eq!(actual.outcome_type, "int");
+    }
+
+    #[test]
+    fn primitive_diagnostics_report_every_bad_tuple_or_field_argument() {
+        let nested =
+            Engine::new().run_with_diagnostics("output [tuple [tuple 1, 2], [tuple 3, 4]]");
+        let nested_error = nested.error().unwrap();
+        assert_eq!(nested_error.code, "type.function_argument");
+        assert_eq!(
+            nested_error.summary,
+            "`[tuple A:n B:n]` cannot contain another tuple"
+        );
+        assert_eq!(nested_error.labels.len(), 2);
+        assert!(
+            nested_error.labels[0]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("`A` is a tuple")
+        );
+        assert!(
+            nested_error.labels[1]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("`B` is a tuple")
+        );
+
+        let field = Engine::new().run_with_diagnostics("output [field [tuple 1, 2] of 1]");
+        let field_error = field.error().unwrap();
+        assert_eq!(field_error.code, "type.function_argument");
+        assert_eq!(field_error.labels.len(), 2);
+        assert!(
+            field_error.labels[0]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("`INDEX` is a tuple")
+        );
+        assert!(
+            field_error.labels[1]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("`TUPLE` is an integer")
+        );
+    }
+
+    #[test]
+    fn primitive_diagnostics_explain_outcome_and_value_constraints() {
+        for (source, signature) in [
+            (
+                "enum: R { A, B } output [{A} contains 1]",
+                "[SEQ:s contains N:n]",
+            ),
+            (
+                "enum: R { A, B } output [count {A} in {1}]",
+                "[count NEEDLES:s in HAYSTACK:s]",
+            ),
+        ] {
+            let report = Engine::new().run_with_diagnostics(source);
+            let error = report.error().unwrap();
+            assert_eq!(error.code, "type.outcome_mismatch");
+            assert!(error.summary.contains(signature));
+            assert_eq!(error.labels.len(), 2);
+            assert!(
+                error.labels[0]
+                    .message
+                    .as_deref()
+                    .unwrap()
+                    .contains("sequence of `R` values")
+            );
+            assert!(
+                error.labels[1]
+                    .message
+                    .as_deref()
+                    .unwrap()
+                    .contains("sequence of `int` values")
+                    || error.labels[1]
+                        .message
+                        .as_deref()
+                        .unwrap()
+                        .contains("an integer")
+            );
+        }
+
+        let bounds = Engine::new().run_with_diagnostics("output [field 3 of [tuple 1, 2]]");
+        let bounds_error = bounds.error().unwrap();
+        assert_eq!(bounds_error.code, "value.out_of_range");
+        assert_eq!(
+            bounds_error.summary,
+            "`[field INDEX:n of TUPLE:n]` cannot select field `3`"
+        );
+        assert!(
+            bounds_error.labels[0]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("expected an index from 1 through 2")
+        );
+
+        let negative = Engine::new().run_with_diagnostics("output [highest -1 of 2d6]");
+        assert_eq!(
+            negative.error().unwrap().summary,
+            "`[highest COUNT:n of POOL:d]` needs a nonnegative count"
+        );
     }
 
     #[test]

@@ -91,6 +91,11 @@
     @apply cursor-not-allowed opacity-50;
   }
 
+  .btn-compact {
+    @apply px-2 py-1 text-xs;
+    line-height: 1rem;
+  }
+
   .btn-primary {
     background: var(--accent);
     color: var(--accent-fg);

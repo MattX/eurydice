@@ -84,9 +84,9 @@ pub fn format_engine_diagnostics(
                         label.range.range.end - label.range.range.start,
                     );
                     if label.style == LabelStyle::Primary {
-                        LabeledSpan::new_primary_with_span(Some(label.message.clone()), span)
+                        LabeledSpan::new_primary_with_span(label.message.clone(), span)
                     } else {
-                        LabeledSpan::new_with_span(Some(label.message.clone()), span)
+                        LabeledSpan::new_with_span(label.message.clone(), span)
                     }
                 })
                 .collect();
