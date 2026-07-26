@@ -1,4 +1,4 @@
-import { runWithDiagnostics } from "eurydice_wasm";
+import { primitiveMetadata, runWithDiagnostics } from "eurydice_wasm";
 
 self.onmessage = (event) => {
   try {
@@ -13,6 +13,5 @@ self.onmessage = (event) => {
     });
   }
 };
-// Signal to the main thread's WorkerWrapper that the onmessage handler
-// has been attached, and the worker is ready.
-self.postMessage("ready");
+// Signal readiness and provide editor metadata before evaluating any program.
+self.postMessage({ Ready: { primitives: primitiveMetadata() } });

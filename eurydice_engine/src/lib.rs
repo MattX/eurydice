@@ -16,6 +16,7 @@ pub use diagnostic::{
     TraceBinding, ValueSummary,
 };
 pub use engine::{Engine, EngineError, EngineOutput, RunReport};
+pub use primitives::{PrimitiveMetadata, primitive_metadata};
 
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(

@@ -1,7 +1,14 @@
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import { Information, Share, Spinner, Warning } from "./Icons";
 import CodeMirror from "@uiw/react-codemirror";
-import { linter } from "@codemirror/lint";
+import { forceLinting, linter } from "@codemirror/lint";
+import {
+  autocompletion,
+  nextSnippetField,
+  prevSnippetField,
+} from "@codemirror/autocomplete";
+import { Compartment, Prec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import { styleTags, tags as t } from "@lezer/highlight";
 import { parser } from "../grammar/eurydice";
 import {
@@ -20,19 +27,24 @@ import {
   EurydiceDiagnostic,
   SuggestedFix,
 } from "../diagnostics";
+import {
+  PrimitiveMetadata,
+  primitiveCompletionSource,
+} from "../autocomplete";
 
-export default function EditorPane(props: EditorPaneProps) {
-  const isDarkMode = React.useContext(DarkModeContext);
-
-  const eurydiceLinter = linter(() => {
-    return props.diagnostics.flatMap((diagnostic) =>
+function diagnosticLinter(
+  diagnostics: readonly EurydiceDiagnostic[],
+  diagnosticSourceId: number | null,
+) {
+  return linter((view) =>
+    diagnostics.flatMap((diagnostic) =>
       diagnostic.labels
-        .filter((label) => label.range.source === props.diagnosticSourceId)
+        .filter((label) => label.range.source === diagnosticSourceId)
         .map((label) => ({
           // Clamp values here - a slightly delayed worker response can cause
           // a crash if the diagnostic is now out of bounds.
-          from: Math.min(label.range.range.start, props.editorText.length),
-          to: Math.min(label.range.range.end, props.editorText.length),
+          from: Math.min(label.range.range.start, view.state.doc.length),
+          to: Math.min(label.range.range.end, view.state.doc.length),
           message: [
             diagnostic.summary,
             label.message || null,
@@ -40,8 +52,74 @@ export default function EditorPane(props: EditorPaneProps) {
           ].filter(Boolean).join(" — "),
           severity: diagnostic.severity,
         })),
-    );
+    ),
+  );
+}
+
+function primitiveAutocompletion(primitives: readonly PrimitiveMetadata[]) {
+  return autocompletion({
+    override: [primitiveCompletionSource(primitives)],
   });
+}
+
+// @uiw/react-codemirror uses this prop's identity as a signal to reconfigure
+// the entire editor. Keep it stable across React renders so accepting a
+// completion doesn't immediately remove CodeMirror's temporary snippet state.
+const editorBasicSetup = { autocompletion: false } as const;
+
+const snippetTabKeymap = Prec.highest(
+  keymap.of([
+    {
+      key: "Tab",
+      run: nextSnippetField,
+      shift: prevSnippetField,
+    },
+  ]),
+);
+
+export default function EditorPane(props: EditorPaneProps) {
+  const isDarkMode = React.useContext(DarkModeContext);
+  const editorViewRef = React.useRef<EditorView | null>(null);
+  const [editorConfiguration] = React.useState(() => {
+    const diagnostics = new Compartment();
+    const completions = new Compartment();
+    return {
+      diagnostics,
+      completions,
+      extensions: [
+        languageSupport,
+        snippetTabKeymap,
+        diagnostics.of(
+          diagnosticLinter(props.diagnostics, props.diagnosticSourceId),
+        ),
+        completions.of(primitiveAutocompletion(props.primitives)),
+      ],
+    };
+  });
+  const captureEditorView = React.useCallback((view: EditorView) => {
+    editorViewRef.current = view;
+  }, []);
+  React.useEffect(() => {
+    if (editorViewRef.current !== null) {
+      editorViewRef.current.dispatch({
+        effects: editorConfiguration.diagnostics.reconfigure(
+          diagnosticLinter(props.diagnostics, props.diagnosticSourceId),
+        ),
+      });
+      forceLinting(editorViewRef.current);
+    }
+  }, [editorConfiguration, props.diagnostics, props.diagnosticSourceId]);
+  React.useEffect(() => {
+    const view = editorViewRef.current;
+    if (view === null) {
+      return;
+    }
+    view.dispatch({
+      effects: editorConfiguration.completions.reconfigure(
+        primitiveAutocompletion(props.primitives),
+      ),
+    });
+  }, [editorConfiguration, props.primitives]);
 
   const errorCount = props.diagnostics.filter(
     (diagnostic) => diagnostic.severity === "error",
@@ -142,7 +220,9 @@ export default function EditorPane(props: EditorPaneProps) {
         <CodeMirror
           value={props.editorText}
           onChange={props.onChange}
-          extensions={[languageSupport, eurydiceLinter]}
+          onCreateEditor={captureEditorView}
+          extensions={editorConfiguration.extensions}
+          basicSetup={editorBasicSetup}
           theme={isDarkMode ? githubDark : githubLight}
         />
       </div>
@@ -180,6 +260,7 @@ export interface EditorPaneProps {
 
   diagnostics: EurydiceDiagnostic[];
   diagnosticSourceId: number | null;
+  primitives: PrimitiveMetadata[];
   printOutputs: [string, string][];
 
   exportButton?: React.ReactNode;

@@ -18,6 +18,7 @@ import {
   EurydiceDiagnostic,
   RunReport,
 } from "./diagnostics";
+import { PrimitiveMetadata } from "./autocomplete";
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ function AppInner() {
   const [output, setOutput] = React.useState<NamedDistribution[]>([]);
   const [diagnostics, setDiagnostics] = React.useState<EurydiceDiagnostic[]>([]);
   const [diagnosticSourceId, setDiagnosticSourceId] = React.useState<number | null>(null);
+  const [primitives, setPrimitives] = React.useState<PrimitiveMetadata[]>([]);
   const [runLive, setRunLiveInner] = React.useState(
     () => localStorage.getItem("eurydice0_run_live") !== "false"
   );
@@ -75,7 +77,9 @@ function AppInner() {
 
   const attachOnMessage = useCallback((worker: WorkerWrapper) => {
     worker.setOnMessage((event: MessageEvent<EurydiceMessage>) => {
-      if ("Report" in event.data) {
+      if ("Ready" in event.data) {
+        setPrimitives(event.data.Ready.primitives);
+      } else if ("Report" in event.data) {
         runningRef.current = false;
         setRunning(false);
         const report = event.data.Report;
@@ -198,6 +202,7 @@ function AppInner() {
         run={() => run(editorText)}
         diagnostics={diagnostics}
         diagnosticSourceId={diagnosticSourceId}
+        primitives={primitives}
         printOutputs={printOutputs}
         exportButton={exportButton}
       />
@@ -254,6 +259,7 @@ function AppInner() {
 }
 
 type EurydiceMessage =
+  | { Ready: { primitives: PrimitiveMetadata[] } }
   | { Report: RunReport }
   | { InternalError: string }
   | { Print: [string, string] };

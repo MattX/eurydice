@@ -2,7 +2,10 @@ mod utils;
 
 use std::collections::HashMap;
 
-use eurydice_engine::{Engine, RunReport, SourceRange, output::Distribution};
+use eurydice_engine::{
+    Engine, RunReport, SourceRange, output::Distribution,
+    primitive_metadata as engine_primitive_metadata,
+};
 use js_sys::Function;
 use serde::Serialize;
 use utils::set_panic_hook;
@@ -34,6 +37,12 @@ pub fn run_with_diagnostics(input: &str, print_callback: Function) -> JsValue {
     let mut report = engine.run_with_diagnostics(input);
     convert_report_offsets(&mut report);
     serde_wasm_bindgen::to_value(&report).unwrap()
+}
+
+/// Metadata used by editor integrations to complete built-in function calls.
+#[wasm_bindgen(js_name = primitiveMetadata)]
+pub fn primitive_metadata() -> JsValue {
+    serde_wasm_bindgen::to_value(engine_primitive_metadata()).unwrap()
 }
 
 #[derive(Debug, Clone, Serialize)]
