@@ -494,6 +494,8 @@ impl Evaluator {
                     let ElementType::Tuple(fields) = value.outcome_type() else {
                         return Err(RuntimeError::LabelsOnNonTupleOutput {
                             range: labels.range.into(),
+                            value_range: expr.range.into(),
+                            value,
                         });
                     };
                     if labels.value.len() != fields.len() {
@@ -591,6 +593,7 @@ impl Evaluator {
                         return Err(RuntimeError::LoopOverNonSequence {
                             range: range_expression.range.into(),
                             found: range.runtime_type(),
+                            value: range,
                         });
                     }
                 };
@@ -768,6 +771,7 @@ impl Evaluator {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: start_expr.range.into(),
                             found: start.runtime_type(),
+                            value: start,
                         });
                     }
                 };
@@ -779,6 +783,7 @@ impl Evaluator {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: end_expr.range.into(),
                             found: end.runtime_type(),
+                            value: end,
                         });
                     }
                 };

@@ -80,6 +80,8 @@ pub enum RuntimeError {
     LabelsOnNonTupleOutput {
         #[label = "Labels can only be specified for tuple-valued outputs"]
         range: SourceSpan,
+        value_range: SourceSpan,
+        value: RuntimeValue,
     },
 
     #[error("Wrong number of tuple output labels: expected {expected}, found {found}")]
@@ -115,6 +117,7 @@ pub enum RuntimeError {
         #[label = "This is a {found}."]
         range: SourceSpan,
         found: StaticType,
+        value: RuntimeValue,
     },
 
     #[error("Reference to undefined variable [{name}]")]
@@ -149,6 +152,7 @@ pub enum RuntimeError {
         #[label = "This is a {found}."]
         range: SourceSpan,
         found: StaticType,
+        value: RuntimeValue,
     },
 
     #[error("Invalid argument to operator")]
@@ -205,7 +209,7 @@ impl RuntimeError {
         match self {
             RuntimeError::InFunction { range, .. } => range.into(),
             RuntimeError::EnumTypeError { range, .. } => range.into(),
-            RuntimeError::LabelsOnNonTupleOutput { range } => range.into(),
+            RuntimeError::LabelsOnNonTupleOutput { range, .. } => range.into(),
             RuntimeError::OutputLabelCountMismatch { range, .. } => range.into(),
             RuntimeError::OutputNotAtTopLevel { range } => range.into(),
             RuntimeError::SetNotAtTopLevel { range } => range.into(),

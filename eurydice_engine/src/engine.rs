@@ -493,6 +493,104 @@ output [pick d3]";
     }
 
     #[test]
+    fn non_primitive_type_errors_include_the_actual_value_and_type() {
+        let cases = [
+            (
+                "loop X over d6 { print X }",
+                "type.expected_sequence",
+                "expected a sequence",
+            ),
+            (
+                "if d6 { print 1 }",
+                "type.expected_number",
+                "expected an integer",
+            ),
+            ("output {1:d6}", "type.repeat_count", "expected an integer"),
+            (
+                "output {1..d6}",
+                "type.range_endpoint",
+                "expected an integer",
+            ),
+        ];
+
+        for (source, code, expected_message) in cases {
+            let report = Engine::new().run_with_diagnostics(source);
+            let error = report.error().unwrap();
+            assert_eq!(error.code, code, "{source}");
+            assert!(
+                error.labels[0]
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.contains(expected_message)),
+                "{source}: {:?}",
+                error.labels[0].message
+            );
+            let DiagnosticDetails::TypeMismatch {
+                actual: Some(actual),
+                ..
+            } = &error.details
+            else {
+                panic!("expected the actual value for {source}");
+            };
+            assert_eq!(actual.shape, "dice_pool", "{source}");
+        }
+    }
+
+    #[test]
+    fn output_label_errors_explain_the_output_shape_and_arity() {
+        let non_tuple = Engine::new().run_with_diagnostics("output 1 labeled \"Value\"");
+        let error = non_tuple.error().unwrap();
+        assert_eq!(error.code, "type.labels_require_tuple");
+        assert_eq!(error.labels.len(), 2);
+        assert!(
+            error.labels[1]
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("`1` is an integer; expected a tuple"))
+        );
+        let DiagnosticDetails::TypeMismatch {
+            actual: Some(actual),
+            ..
+        } = &error.details
+        else {
+            panic!("expected the actual output value");
+        };
+        assert_eq!(actual.preview, "1");
+
+        let wrong_count =
+            Engine::new().run_with_diagnostics("output [tuple 1 2] labeled \"Only one\"");
+        let error = wrong_count.error().unwrap();
+        assert_eq!(
+            error.summary,
+            "This tuple has 2 fields, but 1 output label was provided"
+        );
+        assert_eq!(error.labels[0].message, None);
+    }
+
+    #[test]
+    fn non_primitive_diagnostics_do_not_repeat_the_summary_as_a_label() {
+        for source in ["output [missing]", "enum: R { A, B } output A + B"] {
+            let report = Engine::new().run_with_diagnostics(source);
+            let error = report.error().unwrap();
+            assert_eq!(error.labels[0].message, None, "{source}");
+        }
+
+        let operator = Engine::new().run_with_diagnostics("output d6 @ d6");
+        let error = operator.error().unwrap();
+        assert_eq!(
+            error.summary,
+            "Operator `@` expects an integer or a sequence"
+        );
+        assert_eq!(error.labels[0].message, None);
+        assert!(
+            error.labels[1]
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("is a dice pool"))
+        );
+    }
+
+    #[test]
     fn diagnostics_retain_sources_for_persisted_functions() {
         let mut engine = Engine::new();
         engine.run("function: broken { result: MISSING }").unwrap();

@@ -365,7 +365,9 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     format!("Missing closing `{closer}`"),
                 )
                 .incomplete()
-                .help(format!("Close the delimiter opened at byte {opener}."))
+                .help(format!(
+                    "Add the matching `{closer}` to complete this expression."
+                ))
                 .fix(replacement_fix(
                     source_id,
                     range,
@@ -667,14 +669,6 @@ pub(crate) fn runtime_diagnostic(
         message: Some(message),
         style: LabelStyle::Primary,
     };
-    let secondary = |range: &SourceSpan, message: String| DiagnosticLabel {
-        range: SourceRange {
-            source: source_id,
-            range: range.into(),
-        },
-        message: Some(message),
-        style: LabelStyle::Secondary,
-    };
     let unlabeled = |range: &SourceSpan, style: LabelStyle| DiagnosticLabel {
         range: SourceRange {
             source: source_id,
@@ -703,8 +697,8 @@ pub(crate) fn runtime_diagnostic(
             range, name, help, ..
         } => DiagnosticParts::new(
             "name.undefined_function",
-            format!("Function `{name}` is not defined"),
-            vec![primary(range, "no matching function signature".to_string())],
+            format!("Function `[{}]` is not defined", name.replace("{}", "…")),
+            vec![unlabeled(range, LabelStyle::Primary)],
             DiagnosticDetails::UndefinedName {
                 name: name.clone(),
                 namespace: "function".to_string(),
@@ -717,54 +711,84 @@ pub(crate) fn runtime_diagnostic(
                 function_suggestions,
             )
         })),
-        RuntimeError::LoopOverNonSequence { range, found } => DiagnosticParts::new(
-            "type.expected_sequence",
-            "A loop can only iterate over a sequence",
-            vec![primary(range, format!("this evaluates to a {found}"))],
-            DiagnosticDetails::TypeMismatch {
-                expected: "sequence".to_string(),
-                actual: None,
-            },
-        )
-        .help(
-            "A dice pool represents a distribution. Pass it through an `s` parameter to \
-             evaluate a function once for each possible roll.",
-        ),
+        RuntimeError::LoopOverNonSequence {
+            range,
+            found,
+            value,
+        } => {
+            let parts = DiagnosticParts::new(
+                "type.expected_sequence",
+                "A loop can only iterate over a sequence",
+                vec![primary(
+                    range,
+                    format!(
+                        "`{}` is {}; expected a sequence",
+                        summarize_value(value).preview,
+                        describe_value(value)
+                    ),
+                )],
+                DiagnosticDetails::TypeMismatch {
+                    expected: "sequence".to_string(),
+                    actual: Some(summarize_value(value)),
+                },
+            );
+            match found {
+                crate::ast::StaticType::Pool => parts.help(
+                    "A dice pool represents a distribution. Pass it through an `s` parameter to \
+                     evaluate a function once for each possible roll.",
+                ),
+                _ => parts.help("Write a sequence between `{` and `}`, such as `{1, 2, 3}`."),
+            }
+        }
         RuntimeError::InvalidCondition {
             range,
             found,
             value,
-        } => DiagnosticParts::new(
-            "type.expected_number",
-            "An `if` condition must be a number",
-            vec![primary(
-                range,
-                format!("this is a {found}: {}", summarize_value(value).preview),
-            )],
-            DiagnosticDetails::TypeMismatch {
-                expected: "number".to_string(),
-                actual: Some(summarize_value(value)),
-            },
-        )
-        .help(
-            "To branch on each possible die result, put the condition in a function with an \
-             `n` parameter and pass the die to it.",
-        ),
+        } => {
+            let parts = DiagnosticParts::new(
+                "type.expected_number",
+                "An `if` condition must be an integer",
+                vec![primary(
+                    range,
+                    format!(
+                        "`{}` is {}; expected an integer",
+                        summarize_value(value).preview,
+                        describe_value(value)
+                    ),
+                )],
+                DiagnosticDetails::TypeMismatch {
+                    expected: "integer".to_string(),
+                    actual: Some(summarize_value(value)),
+                },
+            );
+            match found {
+                crate::ast::StaticType::Pool => parts.help(
+                    "To branch on each possible die result, put the condition in a function with \
+                     an `n` parameter and pass the die to it.",
+                ),
+                _ => parts
+                    .help("Use a comparison such as `A = B` to produce `0` (false) or `1` (true)."),
+            }
+        }
         RuntimeError::InvalidArgumentToOperator {
             operator_range,
             op,
             expected,
             found_range,
-            found,
+            found: _,
             value,
         } => DiagnosticParts::new(
             "type.operator_argument",
-            format!("Operator `{op}` cannot use this value"),
+            format!("Operator `{op}` expects {expected}"),
             vec![
-                primary(operator_range, format!("`{op}` expects {expected}")),
-                secondary(
+                unlabeled(operator_range, LabelStyle::Secondary),
+                primary(
                     found_range,
-                    format!("this is a {found}: {}", summarize_value(value).preview),
+                    format!(
+                        "`{}` is {}",
+                        summarize_value(value).preview,
+                        describe_value(value)
+                    ),
                 ),
             ],
             DiagnosticDetails::TypeMismatch {
@@ -878,29 +902,47 @@ pub(crate) fn runtime_diagnostic(
             vec![unlabeled(range, LabelStyle::Primary)],
             DiagnosticDetails::Evaluation,
         ),
-        RuntimeError::LabelsOnNonTupleOutput { range } => DiagnosticParts::new(
-            "type.labels_require_tuple",
-            "Output labels require a tuple-valued output",
-            vec![primary(
-                range,
-                "labels cannot be applied to this value".to_string(),
-            )],
-            DiagnosticDetails::TypeMismatch {
-                expected: "tuple".to_string(),
-                actual: None,
-            },
-        ),
+        RuntimeError::LabelsOnNonTupleOutput {
+            range,
+            value_range,
+            value,
+        } => {
+            let actual = summarize_value(value);
+            DiagnosticParts::new(
+                "type.labels_require_tuple",
+                "Output labels require a tuple-valued output",
+                vec![
+                    unlabeled(range, LabelStyle::Secondary),
+                    primary(
+                        value_range,
+                        format!(
+                            "`{}` is {}; expected a tuple",
+                            actual.preview,
+                            describe_value(value)
+                        ),
+                    ),
+                ],
+                DiagnosticDetails::TypeMismatch {
+                    expected: "tuple".to_string(),
+                    actual: Some(actual),
+                },
+            )
+        }
         RuntimeError::OutputLabelCountMismatch {
             range,
             expected,
             found,
         } => DiagnosticParts::new(
             "value.output_label_count",
-            format!("Expected {expected} output labels, found {found}"),
-            vec![primary(
-                range,
-                "the label count does not match the tuple".to_string(),
-            )],
+            format!(
+                "This tuple has {expected} fields, but {found} output {} provided",
+                if *found == 1 {
+                    "label was"
+                } else {
+                    "labels were"
+                }
+            ),
+            vec![unlabeled(range, LabelStyle::Primary)],
             DiagnosticDetails::InvalidValue {
                 constraint: format!("{expected} labels"),
                 actual: found.to_string(),
@@ -908,31 +950,46 @@ pub(crate) fn runtime_diagnostic(
         ),
         RuntimeError::InvalidRepeatExpression {
             range,
-            found,
+            found: _,
             value,
         } => DiagnosticParts::new(
             "type.repeat_count",
-            "A repetition count must be a number",
+            "A repetition count must be an integer",
             vec![primary(
                 range,
-                format!("this is a {found}: {}", summarize_value(value).preview),
+                format!(
+                    "`{}` is {}; expected an integer",
+                    summarize_value(value).preview,
+                    describe_value(value)
+                ),
             )],
             DiagnosticDetails::TypeMismatch {
-                expected: "number".to_string(),
+                expected: "integer".to_string(),
                 actual: Some(summarize_value(value)),
             },
         ),
-        RuntimeError::RangeHasNonSequenceEndpoints { range, found } => DiagnosticParts::new(
+        RuntimeError::RangeHasNonSequenceEndpoints {
+            range,
+            found: _,
+            value,
+        } => DiagnosticParts::new(
             "type.range_endpoint",
-            "Both ends of a range must be numbers",
-            vec![primary(range, format!("this is a {found}"))],
+            "Both ends of a range must be integers",
+            vec![primary(
+                range,
+                format!(
+                    "`{}` is {}; expected an integer",
+                    summarize_value(value).preview,
+                    describe_value(value)
+                ),
+            )],
             DiagnosticDetails::TypeMismatch {
-                expected: "number".to_string(),
-                actual: None,
+                expected: "integer".to_string(),
+                actual: Some(summarize_value(value)),
             },
         ),
         RuntimeError::EnumTypeError { range, message } => {
-            classify_generic_runtime(range, message, &primary)
+            classify_generic_runtime(range, message, &unlabeled)
         }
         RuntimeError::InFunction { .. } => {
             unreachable!("function contexts were peeled before rendering")
@@ -955,7 +1012,7 @@ pub(crate) fn runtime_diagnostic(
 fn classify_generic_runtime(
     range: &SourceSpan,
     message: &str,
-    primary: &impl Fn(&SourceSpan, String) -> DiagnosticLabel,
+    unlabeled: &impl Fn(&SourceSpan, LabelStyle) -> DiagnosticLabel,
 ) -> DiagnosticParts {
     let normalized = message.to_ascii_lowercase();
     let (code, details) = if normalized.contains("out of range")
@@ -1013,7 +1070,7 @@ fn classify_generic_runtime(
     DiagnosticParts::new(
         code,
         message,
-        vec![primary(range, message.to_string())],
+        vec![unlabeled(range, LabelStyle::Primary)],
         details,
     )
 }

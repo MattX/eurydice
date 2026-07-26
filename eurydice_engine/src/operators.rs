@@ -289,7 +289,7 @@ pub(crate) fn apply_binary_op(
                     return Err(RuntimeError::InvalidArgumentToOperator {
                         operator_range: op.range.into(),
                         op: op.value,
-                        expected: "an int or a list",
+                        expected: "an integer or a sequence",
                         found_range: left_range.into(),
                         found: left.runtime_type(),
                         value: left.clone(),
