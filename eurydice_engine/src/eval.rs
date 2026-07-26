@@ -12,7 +12,7 @@ use crate::{
     },
     diagnostic::{
         DiagnosticDetails, DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame,
-        LabelStyle, SourceId, SourceRange, TraceBinding, summarize_value,
+        LabelStyle, SourceId, SourceRange, TraceBinding, missing_return_warning, summarize_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
     operators::{apply_binary_op, apply_unary_op},
@@ -447,6 +447,9 @@ impl Evaluator {
                 self.env.insert(name.value.clone(), value);
             }
             Statement::FunctionDefinition(fd) => {
+                if let Some(warning) = missing_return_warning(eval_context.source_id, fd) {
+                    self.push_warning(warning);
+                }
                 for arg in &fd.args {
                     self.validate_binding_name(
                         &arg.value.name,

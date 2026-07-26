@@ -5,7 +5,7 @@ use miette::SourceSpan;
 use serde::Serialize;
 
 use crate::{
-    ast::{ParseActionError, Range},
+    ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
     engine::EngineError,
     error::RuntimeError,
     value::RuntimeValue,
@@ -119,6 +119,9 @@ pub enum DiagnosticDetails {
     },
     PoolReuse {
         name: String,
+    },
+    MissingReturn {
+        function: String,
     },
 }
 
@@ -314,6 +317,10 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     format!("Unexpected token `{found}`"),
                 );
                 parts.diagnostic.help = readable_expected(&expected);
+                parts.diagnostic.notes.push(
+                    "At the top level, expressions you want to show must start with `output`."
+                        .to_string(),
+                );
                 parts
             }
         }
@@ -475,6 +482,53 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
         .diagnostic
         .finish(DiagnosticSeverity::Error, Vec::new());
     (legacy, diagnostic)
+}
+
+pub(crate) fn missing_return_warning(
+    source: SourceId,
+    definition: &FunctionDefinition,
+) -> Option<EngineDiagnostic> {
+    if block_always_returns(&definition.body) {
+        return None;
+    }
+
+    let function = definition.name.value.replace("{}", "…");
+    Some(EngineDiagnostic {
+        code: "control_flow.missing_result".to_string(),
+        severity: DiagnosticSeverity::Warning,
+        summary: format!("Function `[{function}]` may finish without a result"),
+        labels: vec![DiagnosticLabel {
+            range: SourceRange {
+                source,
+                range: definition.name.range,
+            },
+            message: "not every path reaches `result:`".to_string(),
+            style: LabelStyle::Primary,
+        }],
+        notes: vec![
+            "When execution reaches the end of a function, the function produces an empty die."
+                .to_string(),
+        ],
+        help: Some("Add `result:` on every path through this function.".to_string()),
+        fixes: Vec::new(),
+        trace: Vec::new(),
+        details: DiagnosticDetails::MissingReturn {
+            function: definition.name.value.clone(),
+        },
+        incomplete: false,
+    })
+}
+
+fn block_always_returns(block: &[WithRange<Statement>]) -> bool {
+    block.iter().any(|statement| match &statement.value {
+        Statement::Return { .. } => true,
+        Statement::If {
+            then_block,
+            else_block: Some(else_block),
+            ..
+        } => block_always_returns(then_block) && block_always_returns(else_block),
+        _ => false,
+    })
 }
 
 fn replacement_fix(

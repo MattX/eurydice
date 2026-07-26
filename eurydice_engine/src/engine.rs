@@ -290,6 +290,21 @@ mod tests {
     }
 
     #[test]
+    fn explains_that_top_level_expressions_need_output() {
+        for source in ["1d6", "D: d6\nD + D"] {
+            let report = Engine::new().run_with_diagnostics(source);
+            let error = report.error().unwrap();
+
+            assert_eq!(error.code, "syntax.unexpected_token");
+            assert_eq!(
+                error.notes,
+                ["At the top level, expressions you want to show must start with `output`."]
+            );
+            assert!(error.fixes.is_empty());
+        }
+    }
+
+    #[test]
     fn suggests_names_and_marks_definitions_that_execute_later() {
         let mut engine = Engine::new();
         engine.run("FOOD: 1").unwrap();
@@ -361,6 +376,38 @@ output [pick d3]";
 
         let no_warning = Engine::new().run_with_diagnostics("D: d6\noutput #D + #D");
         assert!(no_warning.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn warns_when_a_function_can_finish_without_a_result() {
+        let cases = [
+            "function: empty {}",
+            "function: partial X:n { if X { result: 1 } }",
+            "function: loop only S:s { loop X over S { result: X } }",
+        ];
+
+        for source in cases {
+            let report = Engine::new().run_with_diagnostics(source);
+            let warning = &report.diagnostics[0];
+            assert_eq!(warning.code, "control_flow.missing_result", "{source}");
+            assert_eq!(warning.severity, DiagnosticSeverity::Warning);
+            assert!(warning.fixes.is_empty());
+        }
+    }
+
+    #[test]
+    fn accepts_functions_that_return_on_every_path() {
+        let cases = [
+            "function: direct { result: 1 }",
+            "function: branched X:n { if X { result: 1 } else { result: 2 } }",
+            "function: fallback X:n { if X { result: 1 } result: 2 }",
+            "function: chained X:n { if X { result: 1 } else if X = 2 { result: 2 } else { result: 3 } }",
+        ];
+
+        for source in cases {
+            let report = Engine::new().run_with_diagnostics(source);
+            assert!(report.diagnostics.is_empty(), "{source}");
+        }
     }
 
     #[test]
