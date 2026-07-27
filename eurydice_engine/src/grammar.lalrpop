@@ -266,7 +266,7 @@ Comma1<T>: Vec<T> = {
     }
 };
 Word: String = {
-    <s:r"[a-z][a-z_]+"> => s.to_string(),
+    <s:r"[a-z][a-z_]*"> => s.to_string(),
     "if" => "if".to_string(),
     "set" => "set".to_string(),
     "else" => "else".to_string(),

@@ -416,6 +416,20 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_single_letter_function_name() {
+        let definition = grammar::FunctionDefinitionParser::new()
+            .parse("function: f { result: 1 }")
+            .unwrap();
+        assert_eq!(definition.name.value, "f");
+
+        let call = grammar::ExprParser::new().parse("[f]").unwrap();
+        assert_eq!(
+            serde_lexpr::to_string(&call).unwrap(),
+            "((value FunctionCall (name (value . \"f\")) (args)))"
+        );
+    }
+
+    #[test]
     fn test_parse_binary_op_precedence() {
         let text = "1 + 2 * 3";
         let ast = grammar::ExprParser::new().parse(text).unwrap();
