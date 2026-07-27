@@ -6,8 +6,7 @@ use serde::Serialize;
 
 use crate::{
     ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
-    engine::EngineError,
-    error::{PrimitiveArgumentErrorKind, RuntimeError},
+    error::{ArityMismatch, PrimitiveArgumentErrorKind, RuntimeError, SemanticErrorKind},
     primitives::primitive_signature,
     value::{ElementValue, RuntimeValue},
 };
@@ -73,19 +72,11 @@ pub struct SuggestedFix {
     pub edits: Vec<TextEdit>,
 }
 
-/// A compact value description suitable for diagnostics.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ValueSummary {
-    pub shape: String,
-    pub outcome_type: String,
-    pub collection_size: Option<u32>,
-    pub preview: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TraceBinding {
     pub name: String,
-    pub value: ValueSummary,
+    /// The bound value, rendered for display.
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -96,39 +87,10 @@ pub struct EvaluationFrame {
     pub bindings: Vec<TraceBinding>,
 }
 
-/// Stable semantic information for programmatic diagnostic consumers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum DiagnosticDetails {
-    Syntax,
-    UndefinedName {
-        name: String,
-        namespace: String,
-        suggestions: Vec<String>,
-    },
-    TypeMismatch {
-        expected: String,
-        actual: Option<ValueSummary>,
-    },
-    InvalidValue {
-        constraint: String,
-        actual: String,
-    },
-    Evaluation,
-    Limit {
-        setting: String,
-        value: usize,
-    },
-    PoolReuse {
-        name: String,
-    },
-    MissingReturn {
-        function: String,
-    },
-}
-
-/// A complete engine diagnostic. Human-readable strings are included for
-/// simple clients; structured fields let richer frontends choose their own UX.
+/// A complete engine diagnostic.
+///
+/// The `code` classifies the diagnostic for consumers that want to branch on
+/// it; everything else is prose and spans for them to present.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EngineDiagnostic {
     pub code: String,
@@ -139,7 +101,6 @@ pub struct EngineDiagnostic {
     pub help: Option<String>,
     pub fixes: Vec<SuggestedFix>,
     pub trace: Vec<EvaluationFrame>,
-    pub details: DiagnosticDetails,
     pub incomplete: bool,
 }
 
@@ -153,25 +114,14 @@ impl EngineDiagnostic {
     }
 }
 
-pub(crate) fn summarize_value(value: &RuntimeValue) -> ValueSummary {
-    let (shape, collection_size) = match value {
-        RuntimeValue::Element(ElementValue::Tuple(_)) => ("tuple".to_string(), None),
-        RuntimeValue::Element(ElementValue::Enum { .. }) => ("enum".to_string(), None),
-        RuntimeValue::Element(_) => ("number".to_string(), None),
-        RuntimeValue::List(values, _) => ("sequence".to_string(), u32::try_from(values.len()).ok()),
-        RuntimeValue::Pool(pool, _) => ("dice_pool".to_string(), Some(pool.dimension())),
-    };
+/// A value rendered for display, truncated so one oversized pool cannot push
+/// the rest of a diagnostic off the screen.
+pub(crate) fn preview_value(value: &RuntimeValue) -> String {
     let preview = value.to_string();
-    let preview = if preview.chars().count() > 80 {
+    if preview.chars().count() > 80 {
         format!("{}…", preview.chars().take(79).collect::<String>())
     } else {
         preview
-    };
-    ValueSummary {
-        shape,
-        outcome_type: value.outcome_type().display_name(),
-        collection_size,
-        preview,
     }
 }
 
@@ -202,6 +152,37 @@ fn primitive_call(identifier: &str) -> String {
         .unwrap_or_else(|| format!("[{}]", identifier.replace("{}", "…")))
 }
 
+/// A primary label reporting the value found where another type was required.
+fn type_mismatch_label(
+    source: SourceId,
+    range: &SourceSpan,
+    expected: &str,
+    value: &RuntimeValue,
+) -> DiagnosticLabel {
+    DiagnosticLabel {
+        range: SourceRange {
+            source,
+            range: range.into(),
+        },
+        message: Some(format!(
+            "`{}` is {}; expected {expected}",
+            preview_value(value),
+            describe_value(value)
+        )),
+        style: LabelStyle::Primary,
+    }
+}
+
+/// The same report for a named argument, which leads with the name because a
+/// call can have more than one argument at fault.
+fn argument_mismatch_message(name: &str, value: &RuntimeValue, expected: &str) -> String {
+    format!(
+        "`{name}` is {}: `{}`; expected {expected}",
+        describe_value(value),
+        preview_value(value)
+    )
+}
+
 struct DiagnosticParts {
     code: &'static str,
     summary: String,
@@ -209,17 +190,11 @@ struct DiagnosticParts {
     notes: Vec<String>,
     help: Option<String>,
     fixes: Vec<SuggestedFix>,
-    details: DiagnosticDetails,
     incomplete: bool,
 }
 
 impl DiagnosticParts {
-    fn new(
-        code: &'static str,
-        summary: impl Into<String>,
-        labels: Vec<DiagnosticLabel>,
-        details: DiagnosticDetails,
-    ) -> Self {
+    fn new(code: &'static str, summary: impl Into<String>, labels: Vec<DiagnosticLabel>) -> Self {
         Self {
             code,
             summary: summary.into(),
@@ -227,7 +202,6 @@ impl DiagnosticParts {
             notes: Vec::new(),
             help: None,
             fixes: Vec::new(),
-            details,
             incomplete: false,
         }
     }
@@ -242,7 +216,6 @@ impl DiagnosticParts {
             help: self.help,
             fixes: self.fixes,
             trace,
-            details: self.details,
             incomplete: self.incomplete,
         }
     }
@@ -251,57 +224,51 @@ impl DiagnosticParts {
         self.help = Some(help.into());
         self
     }
-}
 
-struct ParseDiagnosticParts {
-    range: Range,
-    diagnostic: DiagnosticParts,
-}
-
-impl ParseDiagnosticParts {
-    fn new(source: SourceId, range: Range, code: &'static str, summary: impl Into<String>) -> Self {
-        Self {
-            range,
-            diagnostic: DiagnosticParts::new(
-                code,
-                summary,
-                vec![DiagnosticLabel {
-                    range: SourceRange { source, range },
-                    message: None,
-                    style: LabelStyle::Primary,
-                }],
-                DiagnosticDetails::Syntax,
-            ),
-        }
-    }
-
-    fn incomplete(mut self) -> Self {
-        self.diagnostic.incomplete = true;
+    fn maybe_help(mut self, help: Option<String>) -> Self {
+        self.help = help;
         self
     }
 
-    fn help(mut self, help: impl Into<String>) -> Self {
-        self.diagnostic.help = Some(help.into());
+    fn note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
+        self
+    }
+
+    fn incomplete(mut self) -> Self {
+        self.incomplete = true;
         self
     }
 
     fn fix(mut self, fix: SuggestedFix) -> Self {
-        self.diagnostic.fixes.push(fix);
+        self.fixes.push(fix);
         self
     }
+}
 
-    fn secondary(mut self, label: DiagnosticLabel) -> Self {
-        self.diagnostic.labels.push(label);
-        self
-    }
+/// A syntax diagnostic with a single unlabeled primary span.
+fn syntax_parts(
+    source: SourceId,
+    range: Range,
+    code: &'static str,
+    summary: impl Into<String>,
+) -> DiagnosticParts {
+    DiagnosticParts::new(
+        code,
+        summary,
+        vec![DiagnosticLabel {
+            range: SourceRange { source, range },
+            message: None,
+            style: LabelStyle::Primary,
+        }],
+    )
 }
 
 pub(crate) fn parse_error<T: std::fmt::Display>(
     error: ParseError<usize, T, ParseActionError>,
     source_id: SourceId,
     source: &str,
-) -> (EngineError, EngineDiagnostic) {
-    let legacy_message = error.to_string();
+) -> EngineDiagnostic {
     let parts = match error {
         ParseError::UnrecognizedToken {
             token, expected, ..
@@ -309,7 +276,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
             let range = Range::from((token.0, token.2));
             let found = source.get(token.0..token.2).unwrap_or_default();
             if found == "=" && expected.iter().any(|item| item.contains(':')) {
-                ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.assignment_separator",
@@ -327,7 +294,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     .get(..token.0)
                     .is_some_and(|prefix| prefix.ends_with('='))
             {
-                ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.equality_operator",
@@ -341,24 +308,19 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     "Remove the second `=`",
                 ))
             } else {
-                let mut parts = ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.unexpected_token",
                     format!("Unexpected token `{found}`"),
-                );
-                parts.diagnostic.help = readable_expected(&expected);
-                parts.diagnostic.notes.push(
-                    "At the top level, expressions you want to show must start with `output`."
-                        .to_string(),
-                );
-                parts
+                )
+                .note("At the top level, expressions you want to show must start with `output`.")
             }
         }
         ParseError::UnrecognizedEof { location, expected } => {
             let range = Range::from((location, location));
-            if let Some((opener, closer)) = unmatched_delimiter(source) {
-                ParseDiagnosticParts::new(
+            if let Some(closer) = expected_closer(&expected) {
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.unclosed_delimiter",
@@ -374,29 +336,19 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     &closer.to_string(),
                     &format!("Insert `{closer}`"),
                 ))
-                .secondary(DiagnosticLabel {
-                    range: SourceRange {
-                        source: source_id,
-                        range: Range::from((opener, opener + 1)),
-                    },
-                    message: Some("opened here".to_string()),
-                    style: LabelStyle::Secondary,
-                })
             } else {
-                let mut parts = ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.unexpected_end",
                     "The program ends before this construct is complete",
                 )
-                .incomplete();
-                parts.diagnostic.help = readable_expected(&expected);
-                parts
+                .incomplete()
             }
         }
         ParseError::ExtraToken { token } => {
             let range = Range::from((token.0, token.2));
-            ParseDiagnosticParts::new(
+            syntax_parts(
                 source_id,
                 range,
                 "syntax.extra_token",
@@ -414,7 +366,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 end: source.len(),
             };
             if found == Some('"') && !has_unescaped_quote(&source[end..]) {
-                ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.unterminated_string",
@@ -429,7 +381,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     "Insert the closing quote",
                 ))
             } else if found == Some('\\') && !source[end..].contains('\\') {
-                ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.unterminated_comment",
@@ -444,7 +396,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     "Insert the closing backslash",
                 ))
             } else if found == Some(';') {
-                ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.semicolon",
@@ -457,27 +409,39 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     "",
                     "Remove the semicolon",
                 ))
-            } else if found.is_some_and(|character| character.is_ascii_lowercase()) {
-                let end = source[location..]
-                    .find(|character: char| !character.is_ascii_lowercase() && character != '_')
-                    .map_or(source.len(), |offset| location + offset);
-                let range = Range::from((location, end));
-                let replacement = source[location..end].to_ascii_uppercase();
-                ParseDiagnosticParts::new(
-                    source_id,
-                    range,
-                    "syntax.variable_case",
-                    "Variable names use uppercase letters",
-                )
-                .help("Lowercase words are reserved for function names.")
-                .fix(replacement_fix(
-                    source_id,
-                    range,
-                    &replacement,
-                    &format!("Change this variable to `{replacement}`"),
-                ))
+            } else if let Some(letter) = found.filter(char::is_ascii_lowercase) {
+                // Words lex as `[a-z][a-z_]+`, so a lowercase letter can only
+                // fail to lex when it stands alone. In a function-name position
+                // that makes the length the problem, not the case; uppercasing
+                // it there would not help.
+                if in_function_name_position(source, location) {
+                    syntax_parts(
+                        source_id,
+                        range,
+                        "syntax.short_function_name",
+                        "Function names must be at least two letters",
+                    )
+                    .help(format!(
+                        "Rename `{letter}` to a longer lowercase word, such as `{letter}{letter}`."
+                    ))
+                } else {
+                    let replacement = letter.to_ascii_uppercase().to_string();
+                    syntax_parts(
+                        source_id,
+                        range,
+                        "syntax.variable_case",
+                        "Variable names use uppercase letters",
+                    )
+                    .help("Lowercase words are reserved for function names.")
+                    .fix(replacement_fix(
+                        source_id,
+                        range,
+                        &replacement,
+                        &format!("Change this variable to `{replacement}`"),
+                    ))
+                }
             } else {
-                ParseDiagnosticParts::new(
+                syntax_parts(
                     source_id,
                     range,
                     "syntax.invalid_character",
@@ -489,14 +453,14 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
             }
         }
         ParseError::User { error } => match error {
-            ParseActionError::InvalidIntegerLiteral { range, .. } => ParseDiagnosticParts::new(
+            ParseActionError::InvalidIntegerLiteral { range, .. } => syntax_parts(
                 source_id,
                 range,
                 "syntax.integer_out_of_range",
                 "This integer is outside the supported range",
             )
             .help("Integers must fit between -2147483648 and 2147483647."),
-            ParseActionError::EmptyFunctionCall { range } => ParseDiagnosticParts::new(
+            ParseActionError::EmptyFunctionCall { range } => syntax_parts(
                 source_id,
                 range,
                 "syntax.empty_function_call",
@@ -506,15 +470,41 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
         },
     };
 
-    let legacy = EngineError::Parse {
-        message: legacy_message,
-        range: parts.range.into(),
-        incomplete: parts.diagnostic.incomplete,
-    };
-    let diagnostic = parts
-        .diagnostic
-        .finish(DiagnosticSeverity::Error, Vec::new());
-    (legacy, diagnostic)
+    parts.finish(DiagnosticSeverity::Error, Vec::new())
+}
+
+/// Whether the word at `location` names a function, either in a definition
+/// (`function: name`) or in a call (`[name ...]`).
+fn in_function_name_position(source: &str, location: usize) -> bool {
+    let prefix = source[..location].trim_end();
+    prefix.ends_with('[')
+        || prefix
+            .strip_suffix(':')
+            .is_some_and(|prefix| prefix.trim_end().ends_with("function"))
+}
+
+/// A warning the evaluator can raise.
+///
+/// Each variant owns its diagnostic code and doubles as the identity used to
+/// report a warning only once, so the two can never drift apart. Codes that
+/// differ need separate variants, or one would suppress the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum WarningKind {
+    IndependentPoolReuse,
+    ExplodeDepth,
+    MaximumFunctionDepth,
+    MissingResult,
+}
+
+impl WarningKind {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::IndependentPoolReuse => "evaluation.independent_pool_reuse",
+            Self::ExplodeDepth => "evaluation.explode_depth",
+            Self::MaximumFunctionDepth => "evaluation.maximum_function_depth",
+            Self::MissingResult => "control_flow.missing_result",
+        }
+    }
 }
 
 pub(crate) fn missing_return_warning(
@@ -527,7 +517,7 @@ pub(crate) fn missing_return_warning(
 
     let function = definition.name.value.replace("{}", "…");
     Some(EngineDiagnostic {
-        code: "control_flow.missing_result".to_string(),
+        code: WarningKind::MissingResult.code().to_string(),
         severity: DiagnosticSeverity::Warning,
         summary: format!("Function `[{function}]` may finish without a result"),
         labels: vec![DiagnosticLabel {
@@ -545,9 +535,6 @@ pub(crate) fn missing_return_warning(
         help: Some("Add `result:` on every path through this function.".to_string()),
         fixes: Vec::new(),
         trace: Vec::new(),
-        details: DiagnosticDetails::MissingReturn {
-            function: definition.name.value.clone(),
-        },
         incomplete: false,
     })
 }
@@ -560,6 +547,11 @@ fn block_always_returns(block: &[WithRange<Statement>]) -> bool {
             else_block: Some(else_block),
             ..
         } => block_always_returns(then_block) && block_always_returns(else_block),
+        // A loop body that always returns only returns when the sequence is
+        // non-empty, which cannot be known here. Counting it keeps "return the
+        // first element of S" — an ordinary idiom — from being warned about;
+        // missing the empty-sequence case costs less than crying wolf.
+        Statement::Loop { body, .. } => block_always_returns(body),
         _ => false,
     })
 }
@@ -588,38 +580,23 @@ fn next_char(source: &str, location: usize) -> (usize, Option<char>) {
     )
 }
 
-fn unmatched_delimiter(source: &str) -> Option<(usize, char)> {
-    let mut stack = Vec::new();
-    let mut quoted = false;
-    let mut escaped = false;
-    for (offset, character) in source.char_indices() {
-        if quoted {
-            if escaped {
-                escaped = false;
-            } else if character == '\\' {
-                escaped = true;
-            } else if character == '"' {
-                quoted = false;
-            }
-            continue;
-        }
-        if character == '"' {
-            quoted = true;
-            continue;
-        }
-        match character {
-            '(' => stack.push((offset, ')')),
-            '[' => stack.push((offset, ']')),
-            '{' => stack.push((offset, '}')),
-            ')' | ']' | '}' => {
-                if stack.last().is_some_and(|(_, close)| *close == character) {
-                    stack.pop();
-                }
-            }
-            _ => {}
-        }
-    }
-    stack.pop()
+/// The single delimiter that would let the program continue at end of input.
+///
+/// The parse tables already track open constructs, so the closer is read from
+/// what the parser expected rather than by rescanning the source — that keeps
+/// the grammar the only thing that tokenizes Eurydice, and it stays right about
+/// delimiters inside strings and comments for free. `None` when the input can
+/// continue in more ways than one closing delimiter, which is the ordinary
+/// "ran out of input" case rather than an unclosed bracket.
+fn expected_closer(expected: &[String]) -> Option<char> {
+    let mut closers = expected.iter().filter_map(|token| match token.as_str() {
+        r#"")""# => Some(')'),
+        r#""]""# => Some(']'),
+        r#""}""# => Some('}'),
+        _ => None,
+    });
+    let closer = closers.next()?;
+    closers.next().is_none().then_some(closer)
 }
 
 fn has_unescaped_quote(source: &str) -> bool {
@@ -636,28 +613,12 @@ fn has_unescaped_quote(source: &str) -> bool {
     false
 }
 
-fn readable_expected(expected: &[String]) -> Option<String> {
-    if expected.is_empty() {
-        return None;
-    }
-    let mut values = expected
-        .iter()
-        .map(|item| match item.as_str() {
-            "r#\"[0-9]+\"#" => "a number".to_string(),
-            "r#\"[A-Z_]+\"#" => "an uppercase variable".to_string(),
-            other => other.trim_matches('"').to_string(),
-        })
-        .collect::<Vec<_>>();
-    values.sort();
-    values.dedup();
-    Some(format!("Expected {}.", values.join(", ")))
-}
-
+/// Renders a runtime error. `suggestions` holds near-miss names from the
+/// namespace the error looked in, and is empty for errors that name nothing.
 pub(crate) fn runtime_diagnostic(
     error: &RuntimeError,
     source_id: SourceId,
-    variable_suggestions: &[String],
-    function_suggestions: &[String],
+    suggestions: &[String],
 ) -> EngineDiagnostic {
     let mut trace = Vec::new();
     let (error, source_id) = runtime_context(error, source_id, &mut trace);
@@ -678,96 +639,81 @@ pub(crate) fn runtime_diagnostic(
         style,
     };
 
-    let mut parts = match error {
+    let parts = match error {
         RuntimeError::UndefinedReference { range, name } => DiagnosticParts::new(
             "name.undefined_variable",
             format!("Variable `{name}` is not defined"),
             vec![unlabeled(range, LabelStyle::Primary)],
-            DiagnosticDetails::UndefinedName {
-                name: name.clone(),
-                namespace: "variable".to_string(),
-                suggestions: variable_suggestions.to_vec(),
-            },
         )
         .help(suggestion_help(
             "Variable names are uppercase and must be assigned before use.",
-            variable_suggestions,
+            suggestions,
         )),
         RuntimeError::UndefinedFunction {
-            range, name, help, ..
-        } => DiagnosticParts::new(
-            "name.undefined_function",
-            format!("Function `[{}]` is not defined", name.replace("{}", "…")),
-            vec![unlabeled(range, LabelStyle::Primary)],
-            DiagnosticDetails::UndefinedName {
-                name: name.clone(),
-                namespace: "function".to_string(),
-                suggestions: function_suggestions.to_vec(),
-            },
-        )
-        .help(help.clone().unwrap_or_else(|| {
-            suggestion_help(
-                "Check the function's words and argument positions.",
-                function_suggestions,
-            )
-        })),
-        RuntimeError::LoopOverNonSequence {
             range,
-            found,
-            value,
+            name,
+            arity_mismatch,
         } => {
+            let parts = DiagnosticParts::new(
+                "name.undefined_function",
+                format!("Function `[{}]` is not defined", name.replace("{}", "…")),
+                vec![unlabeled(range, LabelStyle::Primary)],
+            )
+            .help(arity_mismatch.as_ref().map_or_else(
+                || {
+                    suggestion_help(
+                        "Check the function's words and argument positions.",
+                        suggestions,
+                    )
+                },
+                arity_mismatch_help,
+            ));
+            match arity_mismatch.as_ref().and_then(|m| m.comma_insertion) {
+                Some(offset) => parts.fix(SuggestedFix {
+                    message: "Separate these dice arguments with a comma".to_string(),
+                    applicability: FixApplicability::Suggested,
+                    edits: vec![TextEdit {
+                        range: SourceRange {
+                            source: source_id,
+                            range: Range {
+                                start: offset,
+                                end: offset,
+                            },
+                        },
+                        replacement: ",".to_string(),
+                    }],
+                }),
+                None => parts,
+            }
+        }
+        RuntimeError::LoopOverNonSequence { range, value } => {
             let parts = DiagnosticParts::new(
                 "type.expected_sequence",
                 "A loop can only iterate over a sequence",
-                vec![primary(
-                    range,
-                    format!(
-                        "`{}` is {}; expected a sequence",
-                        summarize_value(value).preview,
-                        describe_value(value)
-                    ),
-                )],
-                DiagnosticDetails::TypeMismatch {
-                    expected: "sequence".to_string(),
-                    actual: Some(summarize_value(value)),
-                },
+                vec![type_mismatch_label(source_id, range, "a sequence", value)],
             );
-            match found {
-                crate::ast::StaticType::Pool => parts.help(
+            if matches!(value, RuntimeValue::Pool(_, _)) {
+                parts.help(
                     "A dice pool represents a distribution. Pass it through an `s` parameter to \
                      evaluate a function once for each possible roll.",
-                ),
-                _ => parts.help("Write a sequence between `{` and `}`, such as `{1, 2, 3}`."),
+                )
+            } else {
+                parts.help("Write a sequence between `{` and `}`, such as `{1, 2, 3}`.")
             }
         }
-        RuntimeError::InvalidCondition {
-            range,
-            found,
-            value,
-        } => {
+        RuntimeError::InvalidCondition { range, value } => {
             let parts = DiagnosticParts::new(
                 "type.expected_number",
                 "An `if` condition must be an integer",
-                vec![primary(
-                    range,
-                    format!(
-                        "`{}` is {}; expected an integer",
-                        summarize_value(value).preview,
-                        describe_value(value)
-                    ),
-                )],
-                DiagnosticDetails::TypeMismatch {
-                    expected: "integer".to_string(),
-                    actual: Some(summarize_value(value)),
-                },
+                vec![type_mismatch_label(source_id, range, "an integer", value)],
             );
-            match found {
-                crate::ast::StaticType::Pool => parts.help(
+            if matches!(value, RuntimeValue::Pool(_, _)) {
+                parts.help(
                     "To branch on each possible die result, put the condition in a function with \
                      an `n` parameter and pass the die to it.",
-                ),
-                _ => parts
-                    .help("Use a comparison such as `A = B` to produce `0` (false) or `1` (true)."),
+                )
+            } else {
+                parts.help("Use a comparison such as `A = B` to produce `0` (false) or `1` (true).")
             }
         }
         RuntimeError::InvalidArgumentToOperator {
@@ -775,7 +721,6 @@ pub(crate) fn runtime_diagnostic(
             op,
             expected,
             found_range,
-            found: _,
             value,
         } => DiagnosticParts::new(
             "type.operator_argument",
@@ -784,17 +729,9 @@ pub(crate) fn runtime_diagnostic(
                 unlabeled(operator_range, LabelStyle::Secondary),
                 primary(
                     found_range,
-                    format!(
-                        "`{}` is {}",
-                        summarize_value(value).preview,
-                        describe_value(value)
-                    ),
+                    format!("`{}` is {}", preview_value(value), describe_value(value)),
                 ),
             ],
-            DiagnosticDetails::TypeMismatch {
-                expected: (*expected).to_string(),
-                actual: Some(summarize_value(value)),
-            },
         ),
         RuntimeError::NegativeArgumentToFunction {
             range,
@@ -808,14 +745,10 @@ pub(crate) fn runtime_diagnostic(
                 unlabeled(range, LabelStyle::Secondary),
                 primary(found_range, format!("this evaluates to {value}")),
             ],
-            DiagnosticDetails::InvalidValue {
-                constraint: "nonnegative integer".to_string(),
-                actual: value.to_string(),
-            },
         ),
         RuntimeError::InvalidPrimitiveArguments(error) => {
-            let arguments = &error.arguments;
-            let labels = arguments
+            let labels = error
+                .arguments
                 .iter()
                 .enumerate()
                 .map(|(index, argument)| DiagnosticLabel {
@@ -823,12 +756,10 @@ pub(crate) fn runtime_diagnostic(
                         source: source_id,
                         range: (&argument.range).into(),
                     },
-                    message: Some(format!(
-                        "`{}` is {}: `{}`; expected {}",
+                    message: Some(argument_mismatch_message(
                         argument.name,
-                        describe_value(&argument.value),
-                        summarize_value(&argument.value).preview,
-                        argument.expected
+                        &argument.value,
+                        &argument.expected,
                     )),
                     style: if index == 0 {
                         LabelStyle::Primary
@@ -837,52 +768,30 @@ pub(crate) fn runtime_diagnostic(
                     },
                 })
                 .collect::<Vec<_>>();
-            let actual = (arguments.len() == 1).then(|| summarize_value(&arguments[0].value));
-            let expected = match arguments.as_slice() {
-                [argument] => argument.expected.clone(),
-                _ => error.requirement.clone(),
-            };
             let code = match error.kind {
                 PrimitiveArgumentErrorKind::Type => "type.function_argument",
                 PrimitiveArgumentErrorKind::OutcomeType => "type.outcome_mismatch",
             };
-            let mut parts = DiagnosticParts::new(
+            DiagnosticParts::new(
                 code,
                 format!("`{}` {}", primitive_call(error.function), error.requirement),
                 labels,
-                DiagnosticDetails::TypeMismatch { expected, actual },
-            );
-            parts.help = error.help.clone();
-            parts
+            )
+            .maybe_help(error.help.clone())
         }
-        RuntimeError::InvalidPrimitiveValue(error) => {
-            let summary = summarize_value(&error.value);
-            let mut parts = DiagnosticParts::new(
-                "value.out_of_range",
-                format!("`{}` {}", primitive_call(error.function), error.requirement),
-                vec![primary(
-                    &error.found_range,
-                    format!(
-                        "`{}` is {}: `{}`; expected {}",
-                        error.argument,
-                        describe_value(&error.value),
-                        summary.preview,
-                        error.constraint
-                    ),
-                )],
-                DiagnosticDetails::InvalidValue {
-                    constraint: error.constraint.clone(),
-                    actual: summary.preview,
-                },
-            );
-            parts.help = error.help.clone();
-            parts
-        }
+        RuntimeError::InvalidPrimitiveValue(error) => DiagnosticParts::new(
+            "value.out_of_range",
+            format!("`{}` {}", primitive_call(error.function), error.requirement),
+            vec![primary(
+                &error.found_range,
+                argument_mismatch_message(error.argument, &error.value, &error.constraint),
+            )],
+        )
+        .maybe_help(error.help.clone()),
         RuntimeError::MathError { range, message } => DiagnosticParts::new(
             "value.arithmetic",
             message,
             vec![unlabeled(range, LabelStyle::Primary)],
-            DiagnosticDetails::Evaluation,
         ),
         RuntimeError::OutputNotAtTopLevel { range } => placement_diagnostic(
             "output",
@@ -900,34 +809,19 @@ pub(crate) fn runtime_diagnostic(
             "placement.result_outside_function",
             "`result:` can only appear inside a function",
             vec![unlabeled(range, LabelStyle::Primary)],
-            DiagnosticDetails::Evaluation,
         ),
         RuntimeError::LabelsOnNonTupleOutput {
             range,
             value_range,
             value,
-        } => {
-            let actual = summarize_value(value);
-            DiagnosticParts::new(
-                "type.labels_require_tuple",
-                "Output labels require a tuple-valued output",
-                vec![
-                    unlabeled(range, LabelStyle::Secondary),
-                    primary(
-                        value_range,
-                        format!(
-                            "`{}` is {}; expected a tuple",
-                            actual.preview,
-                            describe_value(value)
-                        ),
-                    ),
-                ],
-                DiagnosticDetails::TypeMismatch {
-                    expected: "tuple".to_string(),
-                    actual: Some(actual),
-                },
-            )
-        }
+        } => DiagnosticParts::new(
+            "type.labels_require_tuple",
+            "Output labels require a tuple-valued output",
+            vec![
+                unlabeled(range, LabelStyle::Secondary),
+                type_mismatch_label(source_id, value_range, "a tuple", value),
+            ],
+        ),
         RuntimeError::OutputLabelCountMismatch {
             range,
             expected,
@@ -943,135 +837,68 @@ pub(crate) fn runtime_diagnostic(
                 }
             ),
             vec![unlabeled(range, LabelStyle::Primary)],
-            DiagnosticDetails::InvalidValue {
-                constraint: format!("{expected} labels"),
-                actual: found.to_string(),
-            },
         ),
-        RuntimeError::InvalidRepeatExpression {
-            range,
-            found: _,
-            value,
-        } => DiagnosticParts::new(
+        RuntimeError::InvalidRepeatExpression { range, value } => DiagnosticParts::new(
             "type.repeat_count",
             "A repetition count must be an integer",
-            vec![primary(
-                range,
-                format!(
-                    "`{}` is {}; expected an integer",
-                    summarize_value(value).preview,
-                    describe_value(value)
-                ),
-            )],
-            DiagnosticDetails::TypeMismatch {
-                expected: "integer".to_string(),
-                actual: Some(summarize_value(value)),
-            },
+            vec![type_mismatch_label(source_id, range, "an integer", value)],
         ),
-        RuntimeError::RangeHasNonSequenceEndpoints {
-            range,
-            found: _,
-            value,
-        } => DiagnosticParts::new(
+        RuntimeError::RangeHasNonSequenceEndpoints { range, value } => DiagnosticParts::new(
             "type.range_endpoint",
             "Both ends of a range must be integers",
-            vec![primary(
-                range,
-                format!(
-                    "`{}` is {}; expected an integer",
-                    summarize_value(value).preview,
-                    describe_value(value)
-                ),
-            )],
-            DiagnosticDetails::TypeMismatch {
-                expected: "integer".to_string(),
-                actual: Some(summarize_value(value)),
-            },
+            vec![type_mismatch_label(source_id, range, "an integer", value)],
         ),
-        RuntimeError::EnumTypeError { range, message } => {
-            classify_generic_runtime(range, message, &unlabeled)
-        }
+        RuntimeError::Semantic {
+            kind,
+            range,
+            message,
+        } => DiagnosticParts::new(
+            semantic_code(*kind),
+            message,
+            vec![unlabeled(range, LabelStyle::Primary)],
+        ),
         RuntimeError::InFunction { .. } => {
             unreachable!("function contexts were peeled before rendering")
         }
     };
 
-    parts
-        .labels
-        .extend(trace.iter().map(|frame| DiagnosticLabel {
-            range: frame.call,
-            message: Some(format!(
-                "while calling `{}`",
-                frame.function.replace("{}", "…")
-            )),
-            style: LabelStyle::Secondary,
-        }));
     parts.finish(DiagnosticSeverity::Error, trace)
 }
 
-fn classify_generic_runtime(
-    range: &SourceSpan,
-    message: &str,
-    unlabeled: &impl Fn(&SourceSpan, LabelStyle) -> DiagnosticLabel,
-) -> DiagnosticParts {
-    let normalized = message.to_ascii_lowercase();
-    let (code, details) = if normalized.contains("out of range")
-        || normalized.contains("index must be between")
-        || normalized.contains("too many")
-    {
-        (
-            "value.out_of_range",
-            DiagnosticDetails::InvalidValue {
-                constraint: message.to_string(),
-                actual: "out of range".to_string(),
-            },
-        )
-    } else if normalized.contains("operator ") {
-        (
-            "type.operator_operands",
-            DiagnosticDetails::TypeMismatch {
-                expected: message.to_string(),
-                actual: None,
-            },
-        )
-    } else if normalized.contains("mixed outcome types")
-        || normalized.contains("incompatible outcome types")
-        || normalized.contains("same outcome type")
-        || normalized.starts_with("expected ")
-    {
-        (
-            "type.outcome_mismatch",
-            DiagnosticDetails::TypeMismatch {
-                expected: message.to_string(),
-                actual: None,
-            },
-        )
-    } else if normalized.contains("top level") {
-        ("placement.top_level_only", DiagnosticDetails::Evaluation)
-    } else if normalized.contains("conflict")
-        || normalized.contains("already bound")
-        || normalized.contains("already defined")
-        || normalized.contains("immutable")
-        || normalized.contains("cannot be used as")
-    {
-        ("name.binding_conflict", DiagnosticDetails::Evaluation)
-    } else if normalized.contains("non-additive") || normalized.contains("cannot be summed") {
-        (
-            "type.non_additive_value",
-            DiagnosticDetails::TypeMismatch {
-                expected: "an additive value".to_string(),
-                actual: None,
-            },
-        )
-    } else {
-        ("type.incompatible_value", DiagnosticDetails::Evaluation)
-    };
+/// The stable diagnostic code for a semantic error.
+fn semantic_code(kind: SemanticErrorKind) -> &'static str {
+    match kind {
+        SemanticErrorKind::OperatorOperands => "type.operator_operands",
+        SemanticErrorKind::OutcomeMismatch => "type.outcome_mismatch",
+        SemanticErrorKind::NonAdditiveValue => "type.non_additive_value",
+        SemanticErrorKind::OutOfRange => "value.out_of_range",
+        SemanticErrorKind::BindingConflict => "name.binding_conflict",
+        SemanticErrorKind::TopLevelOnly => "placement.top_level_only",
+    }
+}
 
-    DiagnosticParts::new(
-        code,
-        message,
-        vec![unlabeled(range, LabelStyle::Primary)],
-        details,
+fn arity_mismatch_help(mismatch: &ArityMismatch) -> String {
+    let counts = match mismatch.available.as_slice() {
+        [only] => format!("{only} argument{}", if *only == 1 { "" } else { "s" }),
+        [rest @ .., last] => format!(
+            "{} or {last} arguments",
+            rest.iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        [] => unreachable!("an arity mismatch names at least one other arity"),
+    };
+    let described = if mismatch.words.is_empty() {
+        "a function with no words".to_string()
+    } else {
+        format!("[{}]", mismatch.words)
+    };
+    format!(
+        "{described} takes {counts}, but this call passes {}. If two arguments were joined into \
+         one expression, separate them with a comma: `d` binds tighter than argument separation, \
+         so `[f d6 d8]` passes one argument and `[f d6, d8]` passes two.",
+        mismatch.found
     )
 }
 
@@ -1083,10 +910,25 @@ fn suggestion_help(base: &str, suggestions: &[String]) -> String {
     }
 }
 
-pub(crate) fn undefined_name(error: &RuntimeError) -> Option<&str> {
+/// A name an error reports as undefined, and the namespace it was looked up in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UndefinedName<'a> {
+    Variable(&'a str),
+    Function(&'a str),
+}
+
+impl<'a> UndefinedName<'a> {
+    pub(crate) fn name(self) -> &'a str {
+        match self {
+            Self::Variable(name) | Self::Function(name) => name,
+        }
+    }
+}
+
+pub(crate) fn undefined_name(error: &RuntimeError) -> Option<UndefinedName<'_>> {
     match error {
-        RuntimeError::UndefinedReference { name, .. }
-        | RuntimeError::UndefinedFunction { name, .. } => Some(name),
+        RuntimeError::UndefinedReference { name, .. } => Some(UndefinedName::Variable(name)),
+        RuntimeError::UndefinedFunction { name, .. } => Some(UndefinedName::Function(name)),
         RuntimeError::InFunction { source, .. } => undefined_name(source),
         _ => None,
     }
@@ -1098,13 +940,11 @@ pub(crate) fn add_later_definition(
     later: &[crate::ast::WithRange<crate::ast::Statement>],
     source: SourceId,
 ) {
-    let Some(name) = undefined_name(error) else {
+    let Some(undefined) = undefined_name(error) else {
         return;
     };
-    let is_function = matches!(
-        peel_runtime_error(error),
-        RuntimeError::UndefinedFunction { .. }
-    );
+    let name = undefined.name();
+    let is_function = matches!(undefined, UndefinedName::Function(_));
     let definition = later.iter().find_map(|statement| match &statement.value {
         crate::ast::Statement::Assignment {
             name: candidate, ..
@@ -1125,60 +965,6 @@ pub(crate) fn add_later_definition(
         diagnostic.notes.push(
             "Statements execute in order, so this definition is not available yet.".to_string(),
         );
-    }
-}
-
-pub(crate) fn add_adjacent_dice_fix(
-    diagnostic: &mut EngineDiagnostic,
-    error: &RuntimeError,
-    sources: &[DiagnosticSource],
-) {
-    let RuntimeError::UndefinedFunction {
-        help: Some(help), ..
-    } = peel_runtime_error(error)
-    else {
-        return;
-    };
-    if !help.contains("separate them with a comma") {
-        return;
-    }
-    let Some(primary) = diagnostic.primary_range() else {
-        return;
-    };
-    let Some(source) = sources.iter().find(|source| source.id == primary.source) else {
-        return;
-    };
-    let Some(call) = source.text.get(primary.range.start..primary.range.end) else {
-        return;
-    };
-    let dice_starts = call
-        .match_indices(" d")
-        .map(|(offset, _)| offset)
-        .collect::<Vec<_>>();
-    let [_, second, ..] = dice_starts.as_slice() else {
-        return;
-    };
-    let insertion = primary.range.start + second;
-    diagnostic.fixes.push(SuggestedFix {
-        message: "Separate these dice arguments with a comma".to_string(),
-        applicability: FixApplicability::Suggested,
-        edits: vec![TextEdit {
-            range: SourceRange {
-                source: primary.source,
-                range: Range {
-                    start: insertion,
-                    end: insertion,
-                },
-            },
-            replacement: ",".to_string(),
-        }],
-    });
-}
-
-fn peel_runtime_error(error: &RuntimeError) -> &RuntimeError {
-    match error {
-        RuntimeError::InFunction { source, .. } => peel_runtime_error(source),
-        other => other,
     }
 }
 
@@ -1218,7 +1004,50 @@ fn placement_diagnostic(
             message: None,
             style: LabelStyle::Primary,
         }],
-        DiagnosticDetails::Evaluation,
     )
     .help(help)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SemanticErrorKind, expected_closer, semantic_code};
+
+    /// The codes are part of the diagnostic contract, so they are pinned here
+    /// rather than left to follow whatever a raise site's wording happens to be.
+    #[test]
+    fn every_semantic_kind_has_a_stable_code() {
+        let codes = [
+            (
+                SemanticErrorKind::OperatorOperands,
+                "type.operator_operands",
+            ),
+            (SemanticErrorKind::OutcomeMismatch, "type.outcome_mismatch"),
+            (
+                SemanticErrorKind::NonAdditiveValue,
+                "type.non_additive_value",
+            ),
+            (SemanticErrorKind::OutOfRange, "value.out_of_range"),
+            (SemanticErrorKind::BindingConflict, "name.binding_conflict"),
+            (SemanticErrorKind::TopLevelOnly, "placement.top_level_only"),
+        ];
+
+        for (kind, code) in codes {
+            assert_eq!(semantic_code(kind), code, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn expected_closer_names_a_delimiter_only_when_it_is_the_only_way_on() {
+        let closer = |tokens: &[&str]| {
+            expected_closer(&tokens.iter().map(|token| token.to_string()).collect::<Vec<_>>())
+        };
+
+        assert_eq!(closer(&[r#"")""#]), Some(')'));
+        // A closer among other continuations is still unambiguous.
+        assert_eq!(closer(&[r#"",""#, r#""..""#, r#"":""#, r#""}""#]), Some('}'));
+        // Two closers would be a guess, and no closer means the program simply
+        // ran out of input.
+        assert_eq!(closer(&[r#"")""#, r#""]""#]), None);
+        assert_eq!(closer(&[r#""d""#, r#""(""#]), None);
+    }
 }

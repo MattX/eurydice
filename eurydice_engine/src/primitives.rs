@@ -72,6 +72,57 @@ impl KeepMode {
     }
 }
 
+/// The argument names of a primitive, in order, read from the signature the
+/// registry displays to users.
+///
+/// Executors report arguments by name, and users see those names in the
+/// signature, so both read the same literal rather than repeating it. The
+/// registry consistency test checks that every primitive names every argument.
+fn argument_names(identifier: &str) -> impl Iterator<Item = &'static str> {
+    primitive_signature(identifier)
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|token| token.split_once(':'))
+        .map(|(name, _)| name)
+}
+
+fn argument_name(identifier: &str, index: usize) -> &'static str {
+    argument_names(identifier)
+        .nth(index)
+        .expect("registry signatures name every argument")
+}
+
+fn argument_error(
+    ctx: PrimitiveCtx,
+    index: usize,
+    expected: impl Into<String>,
+    value: &RuntimeValue,
+) -> PrimitiveArgumentError {
+    PrimitiveArgumentError {
+        name: argument_name(ctx.identifier, index),
+        range: ctx.arg_ranges[index].into(),
+        expected: expected.into(),
+        value: value.clone(),
+    }
+}
+
+fn invalid_arguments(
+    ctx: PrimitiveCtx,
+    requirement: impl Into<String>,
+    help: impl Into<String>,
+    kind: PrimitiveArgumentErrorKind,
+    arguments: Vec<PrimitiveArgumentError>,
+) -> RuntimeError {
+    RuntimeError::InvalidPrimitiveArguments(Box::new(PrimitiveArgumentsError {
+        range: ctx.function_range.into(),
+        function: ctx.identifier,
+        requirement: requirement.into(),
+        help: Some(help.into()),
+        kind,
+        arguments,
+    }))
+}
+
 fn absolute_execute(
     args: &[RuntimeValue],
     _ctx: PrimitiveCtx,
@@ -84,34 +135,20 @@ fn materialize_compatible_pair(
     left: &RuntimeValue,
     right: &RuntimeValue,
     ctx: PrimitiveCtx,
-    left_name: &'static str,
-    right_name: &'static str,
-    requirement: &'static str,
 ) -> Result<(RuntimeValue, RuntimeValue), RuntimeError> {
     let error = || {
-        RuntimeError::InvalidPrimitiveArguments(Box::new(PrimitiveArgumentsError {
-            range: ctx.function_range.into(),
-            function: ctx.identifier,
-            requirement: requirement.to_string(),
-            help: Some(
-                "Both arguments must use integers or members of the same enum type.".to_string(),
-            ),
-            kind: PrimitiveArgumentErrorKind::OutcomeType,
-            arguments: vec![
-                PrimitiveArgumentError {
-                    name: left_name,
-                    range: ctx.arg_ranges[0].into(),
-                    expected: format!("the same outcome type as `{right_name}`"),
-                    value: left.clone(),
-                },
-                PrimitiveArgumentError {
-                    name: right_name,
-                    range: ctx.arg_ranges[1].into(),
-                    expected: format!("the same outcome type as `{left_name}`"),
-                    value: right.clone(),
-                },
+        let left_name = argument_name(ctx.identifier, 0);
+        let right_name = argument_name(ctx.identifier, 1);
+        invalid_arguments(
+            ctx,
+            format!("requires `{left_name}` and `{right_name}` to have the same outcome type"),
+            "Both arguments must use integers or members of the same enum type.",
+            PrimitiveArgumentErrorKind::OutcomeType,
+            vec![
+                argument_error(ctx, 0, format!("the same outcome type as `{right_name}`"), left),
+                argument_error(ctx, 1, format!("the same outcome type as `{left_name}`"), right),
             ],
-        }))
+        )
     };
     let outcome_type = left
         .merged_outcome_type(right)
@@ -130,14 +167,7 @@ fn contains_execute(
     let (RuntimeValue::List(_, _), RuntimeValue::Element(_)) = (&args[0], &args[1]) else {
         unreachable!("contains argument shapes are enforced by the evaluator")
     };
-    let (haystack, needle) = materialize_compatible_pair(
-        &args[0],
-        &args[1],
-        ctx,
-        "SEQ",
-        "N",
-        "requires `SEQ` and `N` to have the same outcome type",
-    )?;
+    let (haystack, needle) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
     let (RuntimeValue::List(haystack, _), RuntimeValue::Element(needle)) = (haystack, needle)
     else {
         unreachable!("contains argument shapes were checked")
@@ -156,14 +186,7 @@ fn count_execute(
     ) {
         unreachable!("count argument shapes are enforced by the evaluator")
     }
-    let (needle, haystack) = materialize_compatible_pair(
-        &args[0],
-        &args[1],
-        ctx,
-        "NEEDLES",
-        "HAYSTACK",
-        "requires `NEEDLES` and `HAYSTACK` to have the same outcome type",
-    )?;
+    let (needle, haystack) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
     let (RuntimeValue::List(needle, _), RuntimeValue::List(haystack, _)) = (needle, haystack)
     else {
         unreachable!("count argument shapes were checked")
@@ -396,29 +419,20 @@ fn sort_execute(
 /// Builds a tuple from its arguments. Registered for each supported arity; the
 /// arity is enforced by function-name matching, not by this executor.
 fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
-    const ARGUMENT_NAMES: [&str; 4] = ["A", "B", "C", "D"];
-    let invalid_arguments = args
+    let invalid = args
         .iter()
         .enumerate()
         .filter(|(_, arg)| matches!(arg, RuntimeValue::Element(ElementValue::Tuple(_))))
-        .map(|(index, arg)| PrimitiveArgumentError {
-            name: ARGUMENT_NAMES[index],
-            range: ctx.arg_ranges[index].into(),
-            expected: "a non-tuple value".to_string(),
-            value: arg.clone(),
-        })
+        .map(|(index, arg)| argument_error(ctx, index, "a non-tuple value", arg))
         .collect::<Vec<_>>();
-    if !invalid_arguments.is_empty() {
-        return Err(RuntimeError::InvalidPrimitiveArguments(Box::new(
-            PrimitiveArgumentsError {
-                range: ctx.function_range.into(),
-                function: ctx.identifier,
-                requirement: "cannot contain another tuple".to_string(),
-                help: Some("Pass each inner field as its own tuple argument.".to_string()),
-                kind: PrimitiveArgumentErrorKind::Type,
-                arguments: invalid_arguments,
-            },
-        )));
+    if !invalid.is_empty() {
+        return Err(invalid_arguments(
+            ctx,
+            "cannot contain another tuple",
+            "Pass each inner field as its own tuple argument.",
+            PrimitiveArgumentErrorKind::Type,
+            invalid,
+        ));
     }
     let fields = args
         .iter()
@@ -439,38 +453,31 @@ fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
 }
 
 fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
-    let mut invalid_arguments = Vec::new();
-    if !matches!(args[0], RuntimeValue::Element(ElementValue::Int(_))) {
-        invalid_arguments.push(PrimitiveArgumentError {
-            name: "INDEX",
-            range: ctx.arg_ranges[0].into(),
-            expected: "an integer".to_string(),
-            value: args[0].clone(),
-        });
-    }
-    if !matches!(args[1], RuntimeValue::Element(ElementValue::Tuple(_))) {
-        invalid_arguments.push(PrimitiveArgumentError {
-            name: "TUPLE",
-            range: ctx.arg_ranges[1].into(),
-            expected: "a tuple".to_string(),
-            value: args[1].clone(),
-        });
-    }
-    if !invalid_arguments.is_empty() {
-        return Err(RuntimeError::InvalidPrimitiveArguments(Box::new(
-            PrimitiveArgumentsError {
-                range: ctx.function_range.into(),
-                function: ctx.identifier,
-                requirement: "requires `INDEX` to be an integer and `TUPLE` to be a tuple"
-                    .to_string(),
-                help: Some(
-                    "Build a tuple with `[tuple A B]`. Tuple field positions start at 1."
-                        .to_string(),
-                ),
-                kind: PrimitiveArgumentErrorKind::Type,
-                arguments: invalid_arguments,
-            },
-        )));
+    const EXPECTED: [&str; 2] = ["an integer", "a tuple"];
+    let satisfied = [
+        matches!(args[0], RuntimeValue::Element(ElementValue::Int(_))),
+        matches!(args[1], RuntimeValue::Element(ElementValue::Tuple(_))),
+    ];
+    let invalid = satisfied
+        .into_iter()
+        .enumerate()
+        .filter(|(_, satisfied)| !satisfied)
+        .map(|(index, _)| argument_error(ctx, index, EXPECTED[index], &args[index]))
+        .collect::<Vec<_>>();
+    if !invalid.is_empty() {
+        return Err(invalid_arguments(
+            ctx,
+            format!(
+                "requires `{}` to be {} and `{}` to be {}",
+                argument_name(ctx.identifier, 0),
+                EXPECTED[0],
+                argument_name(ctx.identifier, 1),
+                EXPECTED[1],
+            ),
+            "Build a tuple with `[tuple A B]`. Tuple field positions start at 1.",
+            PrimitiveArgumentErrorKind::Type,
+            invalid,
+        ));
     }
     let (
         RuntimeValue::Element(ElementValue::Int(index)),
@@ -1095,6 +1102,12 @@ mod tests {
             assert_eq!(
                 metadata.snippet.matches("${").count(),
                 primitive.arg_types.len()
+            );
+            // `argument_name` indexes into these, so every argument needs one.
+            assert_eq!(
+                argument_names(identifier).count(),
+                primitive.arg_types.len(),
+                "{identifier}"
             );
             assert!(metadata.signature.starts_with('['));
             assert!(metadata.signature.ends_with(']'));

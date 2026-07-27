@@ -102,7 +102,7 @@ fn run_fixture_directory(directory: &str) {
                     Ok(()) => {}
                     Err(e) => {
                         paths_with_errors.insert(path_string.clone());
-                        println!("Evaluation error in file {}: {}", path.display(), e);
+                        println!("Evaluation error in file {}: {:?}", path.display(), e);
                         continue;
                     }
                 }

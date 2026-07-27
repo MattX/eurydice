@@ -3,27 +3,13 @@ mod utils;
 use std::collections::HashMap;
 
 use eurydice_engine::{
-    Engine, RunReport, SourceRange, output::Distribution,
-    primitive_metadata as engine_primitive_metadata,
+    Engine, RunReport, SourceRange, primitive_metadata as engine_primitive_metadata,
 };
 use js_sys::Function;
-use serde::Serialize;
 use utils::set_panic_hook;
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen]
-pub fn run(input: &str, print_callback: Function) -> JsValue {
-    set_panic_hook();
-    let callback = move |value: String, name: String| {
-        print_callback
-            .call2(&JsValue::NULL, &value.into(), &name.into())
-            .unwrap();
-    };
-    serde_wasm_bindgen::to_value(&run_inner(input, callback)).unwrap()
-}
-
-/// Structured engine output for richer diagnostic frontends. The existing
-/// `run` export remains unchanged for compatibility with the current website.
+/// Runs a program, returning its outputs and structured diagnostics.
 #[wasm_bindgen(js_name = runWithDiagnostics)]
 pub fn run_with_diagnostics(input: &str, print_callback: Function) -> JsValue {
     set_panic_hook();
@@ -45,37 +31,6 @@ pub fn primitive_metadata() -> JsValue {
     serde_wasm_bindgen::to_value(engine_primitive_metadata()).unwrap()
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct Error {
-    message: String,
-    from: usize,
-    to: usize,
-}
-
-fn run_inner<F>(input: &str, print_callback: F) -> Result<Vec<(String, Distribution)>, Error>
-where
-    F: Fn(String, String) + 'static,
-{
-    let mut engine = Engine::new();
-    engine.set_print_callback(print_callback);
-    engine
-        .run(input)
-        .map_err(|error| {
-            let range = error.range();
-            Error {
-                message: error.to_string(),
-                from: byte_to_utf16(input, range.start),
-                to: byte_to_utf16(input, range.end),
-            }
-        })
-        .map(|outputs| {
-            outputs
-                .into_iter()
-                .map(|output| (output.name, output.distribution))
-                .collect()
-        })
-}
-
 fn byte_to_utf16(source: &str, byte_offset: usize) -> usize {
     let mut byte_offset = byte_offset.min(source.len());
     while !source.is_char_boundary(byte_offset) {
@@ -85,20 +40,24 @@ fn byte_to_utf16(source: &str, byte_offset: usize) -> usize {
 }
 
 fn convert_report_offsets(report: &mut RunReport) {
-    let sources = report
-        .sources
+    let RunReport {
+        diagnostics,
+        sources,
+        ..
+    } = report;
+    let texts = sources
         .iter()
-        .map(|source| (source.id, source.text.clone()))
+        .map(|source| (source.id, source.text.as_str()))
         .collect::<HashMap<_, _>>();
     let convert = |range: &mut SourceRange| {
-        let Some(source) = sources.get(&range.source) else {
+        let Some(text) = texts.get(&range.source) else {
             return;
         };
-        range.range.start = byte_to_utf16(source, range.range.start);
-        range.range.end = byte_to_utf16(source, range.range.end);
+        range.range.start = byte_to_utf16(text, range.range.start);
+        range.range.end = byte_to_utf16(text, range.range.end);
     };
 
-    for diagnostic in &mut report.diagnostics {
+    for diagnostic in diagnostics {
         for label in &mut diagnostic.labels {
             convert(&mut label.range);
         }
@@ -118,14 +77,14 @@ fn convert_report_offsets(report: &mut RunReport) {
 
 #[cfg(test)]
 mod tests {
-    use super::{byte_to_utf16, convert_report_offsets, run_inner};
+    use super::{byte_to_utf16, convert_report_offsets};
     use eurydice_engine::Engine;
 
     #[test]
     fn labeled_tuple_metadata_reaches_wasm_output() {
-        let outputs =
-            run_inner("output [tuple 1 2] labeled \"Left\", \"Right\"", |_, _| {}).unwrap();
-        let distribution = &outputs[0].1;
+        let report =
+            Engine::new().run_with_diagnostics("output [tuple 1 2] labeled \"Left\", \"Right\"");
+        let distribution = &report.outputs[0].distribution;
         assert_eq!(
             distribution.field_names.as_ref().unwrap(),
             &["Left".to_string(), "Right".to_string()]

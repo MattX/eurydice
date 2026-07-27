@@ -1,10 +1,14 @@
-//! Runtime diagnostics.
+//! Errors raised during evaluation.
+//!
+//! These carry the facts a diagnostic needs — spans, offending values, and the
+//! reason a rule was broken — but no user-facing prose. Wording lives in
+//! [`crate::diagnostic`], so there is exactly one place where an error's
+//! presentation can change.
 
-use miette::{Diagnostic, SourceSpan};
-use thiserror::Error;
+use miette::SourceSpan;
 
 use crate::{
-    ast::{self, BinaryOp, StaticType},
+    ast::{self, BinaryOp},
     diagnostic::{EvaluationFrame, SourceId},
     value::RuntimeValue,
 };
@@ -23,23 +27,38 @@ pub enum PrimitiveArgumentErrorKind {
     OutcomeType,
 }
 
-#[derive(Debug, Error, Diagnostic)]
-#[error("Invalid arguments to primitive function [{function}]: {requirement}")]
+/// Why a [`RuntimeError::Semantic`] was raised.
+///
+/// This determines the diagnostic code, so each raise site states it outright
+/// rather than leaving it to be inferred from the message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticErrorKind {
+    /// An operator does not accept the types it was given.
+    OperatorOperands,
+    /// Values whose outcome types cannot be combined were used together.
+    OutcomeMismatch,
+    /// A value that cannot be summed was used where a sum is required.
+    NonAdditiveValue,
+    /// A value falls outside the range the operation allows.
+    OutOfRange,
+    /// A name is already taken, or cannot be bound in this position.
+    BindingConflict,
+    /// A statement appeared somewhere it is not allowed.
+    TopLevelOnly,
+}
+
+#[derive(Debug)]
 pub struct PrimitiveArgumentsError {
-    #[label = "{requirement}"]
     pub range: SourceSpan,
     pub function: &'static str,
     pub requirement: String,
-    #[help]
     pub help: Option<String>,
     pub kind: PrimitiveArgumentErrorKind,
     pub arguments: Vec<PrimitiveArgumentError>,
 }
 
-#[derive(Debug, Error, Diagnostic)]
-#[error("Invalid value passed to primitive function [{function}]: {requirement}")]
+#[derive(Debug)]
 pub struct PrimitiveValueError {
-    #[label = "{requirement}"]
     pub range: SourceSpan,
     pub function: &'static str,
     pub requirement: String,
@@ -47,8 +66,25 @@ pub struct PrimitiveValueError {
     pub found_range: SourceSpan,
     pub value: RuntimeValue,
     pub constraint: String,
-    #[help]
     pub help: Option<String>,
+}
+
+/// A call that named no function, but whose words match a function taking a
+/// different number of arguments.
+///
+/// This usually means adjacent arguments were parsed as a single expression,
+/// so the diagnostic can both explain the arity and offer a comma.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArityMismatch {
+    /// The function's words, without argument slots.
+    pub words: String,
+    /// The argument counts the words are defined for, ascending.
+    pub available: Vec<usize>,
+    /// The number of arguments the call passed.
+    pub found: usize,
+    /// Where a comma would separate two arguments that were parsed as one,
+    /// when the call's expression shows that is what happened.
+    pub comma_insertion: Option<usize>,
 }
 
 impl From<ast::Range> for SourceSpan {
@@ -57,148 +93,98 @@ impl From<ast::Range> for SourceSpan {
     }
 }
 
-#[derive(Debug, Error, Diagnostic)]
-#[error("Runtime error")]
+#[derive(Debug)]
 pub enum RuntimeError {
-    #[error("{source}")]
+    /// An error raised inside a function body, wrapped with the call that
+    /// reached it. Nested calls nest these.
     InFunction {
-        #[label = "error occurred here"]
         range: SourceSpan,
         source: Box<RuntimeError>,
         body_source: SourceId,
         frame: Box<EvaluationFrame>,
     },
 
-    #[error("Enum type error: {message}")]
-    EnumTypeError {
-        #[label = "{message}"]
+    Semantic {
+        kind: SemanticErrorKind,
         range: SourceSpan,
         message: String,
     },
 
-    #[error("Tuple labels on a non-tuple output")]
     LabelsOnNonTupleOutput {
-        #[label = "Labels can only be specified for tuple-valued outputs"]
         range: SourceSpan,
         value_range: SourceSpan,
         value: RuntimeValue,
     },
 
-    #[error("Wrong number of tuple output labels: expected {expected}, found {found}")]
     OutputLabelCountMismatch {
-        #[label = "Expected {expected} labels, found {found}"]
         range: SourceSpan,
         expected: usize,
         found: usize,
     },
 
-    #[error("Output statement inside a function")]
-    #[diagnostic(help("Output statements can only appear outside functions."))]
     OutputNotAtTopLevel {
-        #[label = "Output statement inside a function"]
         range: SourceSpan,
     },
 
-    #[error("Set statement inside a function")]
-    #[diagnostic(help("Set statements can only appear outside functions."))]
     SetNotAtTopLevel {
-        #[label = "Set statement inside a function"]
         range: SourceSpan,
     },
 
-    #[error("Return statement outside a function")]
     ReturnOutsideFunction {
-        #[label = "Return statement outside a function"]
         range: SourceSpan,
     },
 
-    #[error("Loops must iterate over sequences")]
     LoopOverNonSequence {
-        #[label = "This is a {found}."]
         range: SourceSpan,
-        found: StaticType,
         value: RuntimeValue,
     },
 
-    #[error("Reference to undefined variable [{name}]")]
     UndefinedReference {
-        #[label = "Variable not defined"]
         range: SourceSpan,
         name: String,
     },
 
-    #[error("Reference to undefined function [{name}]")]
     UndefinedFunction {
-        #[label = "No function named [{name}]"]
         range: SourceSpan,
         name: String,
-        /// Set when a function with the same words but a different number of
-        /// arguments exists, which usually means adjacent arguments were
-        /// accidentally parsed as a single expression.
-        #[help]
-        help: Option<String>,
+        arity_mismatch: Option<ArityMismatch>,
     },
 
-    #[error("Conditions to `if` statements must be numbers.")]
     InvalidCondition {
-        #[label = "This is a {found} with value {value}."]
         range: SourceSpan,
-        found: StaticType,
         value: RuntimeValue,
     },
 
-    #[error("Both sides of a range constructor must evaluate to numbers.")]
     RangeHasNonSequenceEndpoints {
-        #[label = "This is a {found}."]
         range: SourceSpan,
-        found: StaticType,
         value: RuntimeValue,
     },
 
-    #[error("Invalid argument to operator")]
     InvalidArgumentToOperator {
-        #[label = "Operator {op} expects {expected}."]
         operator_range: SourceSpan,
         op: BinaryOp,
         expected: &'static str,
-
-        #[label = "This is a {found} with value {value}."]
         found_range: SourceSpan,
-        found: StaticType,
         value: RuntimeValue,
     },
 
-    #[error("Invalid argument to function")]
     NegativeArgumentToFunction {
-        #[label = "Function [{name}] expects a nonnegative integer."]
         range: SourceSpan,
         name: String,
-
-        #[label = "This evaluates to {value}."]
         found_range: SourceSpan,
         value: i32,
     },
 
-    #[error(transparent)]
-    #[diagnostic(transparent)]
     InvalidPrimitiveArguments(Box<PrimitiveArgumentsError>),
 
-    #[error(transparent)]
-    #[diagnostic(transparent)]
     InvalidPrimitiveValue(Box<PrimitiveValueError>),
 
-    #[error("Invalid repeat expression")]
-    #[diagnostic(help("The expression inside the repeat operator must evaluate to an int."))]
     InvalidRepeatExpression {
-        #[label = "This is a {found}: {value}."]
         range: SourceSpan,
-        found: StaticType,
         value: RuntimeValue,
     },
 
-    #[error("A mathematical error occurred.")]
     MathError {
-        #[label = "{message}"]
         range: SourceSpan,
         message: String,
     },
@@ -208,7 +194,7 @@ impl RuntimeError {
     pub fn range(&self) -> ast::Range {
         match self {
             RuntimeError::InFunction { range, .. } => range.into(),
-            RuntimeError::EnumTypeError { range, .. } => range.into(),
+            RuntimeError::Semantic { range, .. } => range.into(),
             RuntimeError::LabelsOnNonTupleOutput { range, .. } => range.into(),
             RuntimeError::OutputLabelCountMismatch { range, .. } => range.into(),
             RuntimeError::OutputNotAtTopLevel { range } => range.into(),

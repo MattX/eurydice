@@ -1,10 +1,5 @@
-import {
-  CompletionContext,
-  autocompletion,
-  nextSnippetField,
-  snippet,
-} from "@codemirror/autocomplete";
-import { Compartment, EditorState, Transaction } from "@codemirror/state";
+import { CompletionContext } from "@codemirror/autocomplete";
+import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -26,7 +21,7 @@ function complete(source: string, explicit = false) {
   const state = EditorState.create({
     doc: source,
   });
-  return primitiveCompletionSource([primitive])(
+  return primitiveCompletionSource(() => [primitive])(
     new CompletionContext(state, source.length, explicit),
   );
 }
@@ -52,30 +47,17 @@ describe("primitive autocomplete", () => {
     );
   });
 
-  it("keeps snippet parameters active while editor features are reconfigured", () => {
-    const completionCompartment = new Compartment();
-    let state = EditorState.create({
-      extensions: [completionCompartment.of(autocompletion())],
-    });
-    const editor = {
-      get state() {
-        return state;
-      },
-      dispatch(transaction: Transaction) {
-        state = transaction.state;
-      },
-    };
-    snippet("[highest ${COUNT} of ${POOL}]")(editor, null, 0, 0);
-    expect(state.sliceDoc(state.selection.main.from, state.selection.main.to)).toBe("COUNT");
+  // The primitives arrive from the worker after the editor is built, so the
+  // source has to read them when it runs rather than when it is created.
+  it("reads the primitives available when the completion runs", async () => {
+    let available: PrimitiveMetadata[] = [];
+    const state = EditorState.create({ doc: "[" });
+    const source = primitiveCompletionSource(() => available);
 
-    editor.dispatch(
-      state.update({
-        effects: completionCompartment.reconfigure(autocompletion()),
-      }),
-    );
-    editor.dispatch(state.update(state.replaceSelection("2")));
-    expect(nextSnippetField(editor)).toBe(true);
-    expect(state.sliceDoc(state.selection.main.from, state.selection.main.to)).toBe("POOL");
+    expect((await source(new CompletionContext(state, 1, false)))?.options).toHaveLength(0);
+
+    available = [primitive];
+    expect((await source(new CompletionContext(state, 1, false)))?.options).toHaveLength(1);
   });
 
   it("does not complete inside strings or comments", async () => {

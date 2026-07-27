@@ -11,11 +11,10 @@ pub mod value;
 mod operators;
 
 pub use diagnostic::{
-    DiagnosticDetails, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic,
-    EvaluationFrame, FixApplicability, LabelStyle, SourceId, SourceRange, SuggestedFix, TextEdit,
-    TraceBinding, ValueSummary,
+    DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, EvaluationFrame,
+    FixApplicability, LabelStyle, SourceId, SourceRange, SuggestedFix, TextEdit, TraceBinding,
 };
-pub use engine::{Engine, EngineError, EngineOutput, RunReport};
+pub use engine::{Engine, EngineOutput, RunReport};
 pub use primitives::{PrimitiveMetadata, primitive_metadata};
 
 use lalrpop_util::lalrpop_mod;

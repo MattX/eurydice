@@ -7,7 +7,7 @@ import {
   nextSnippetField,
   prevSnippetField,
 } from "@codemirror/autocomplete";
-import { Compartment, Prec } from "@codemirror/state";
+import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { styleTags, tags as t } from "@lezer/highlight";
 import { parser } from "../grammar/eurydice";
@@ -21,37 +21,17 @@ import {
 import WithTooltip from "./Tooltip";
 import { DarkModeContext } from "./DarkModeContext";
 import React from "react";
-import Markdown from "react-markdown";
 import { toast } from "react-hot-toast";
 import {
   applyTextEdits,
+  DiagnosticSource,
   editorDiagnostics,
   EurydiceDiagnostic,
+  isApplicableFix,
   SuggestedFix,
 } from "../diagnostics";
-import {
-  PrimitiveMetadata,
-  primitiveCompletionSource,
-} from "../autocomplete";
-
-function diagnosticLinter(
-  diagnostics: readonly EurydiceDiagnostic[],
-  diagnosticSourceId: number | null,
-) {
-  return linter((view) =>
-    editorDiagnostics(
-      diagnostics,
-      diagnosticSourceId,
-      view.state.doc.length,
-    ),
-  );
-}
-
-function primitiveAutocompletion(primitives: readonly PrimitiveMetadata[]) {
-  return autocompletion({
-    override: [primitiveCompletionSource(primitives)],
-  });
-}
+import { PrimitiveMetadata, primitiveCompletionSource } from "../autocomplete";
+import { carriesEditorData, editorData, setEditorData } from "./editorData";
 
 // @uiw/react-codemirror uses this prop's identity as a signal to reconfigure
 // the entire editor. Keep it stable across React renders so accepting a
@@ -71,74 +51,59 @@ const snippetTabKeymap = Prec.highest(
 export default function EditorPane(props: EditorPaneProps) {
   const isDarkMode = React.useContext(DarkModeContext);
   const editorViewRef = React.useRef<EditorView | null>(null);
-  const [editorConfiguration] = React.useState(() => {
-    const diagnostics = new Compartment();
-    const completions = new Compartment();
-    return {
-      diagnostics,
-      completions,
-      extensions: [
-        languageSupport,
-        snippetTabKeymap,
-        diagnostics.of(
-          diagnosticLinter(props.diagnostics, props.diagnosticSourceId),
-        ),
-        completions.of(primitiveAutocompletion(props.primitives)),
-      ],
-    };
-  });
   const captureEditorView = React.useCallback((view: EditorView) => {
     editorViewRef.current = view;
   }, []);
-  React.useEffect(() => {
-    if (editorViewRef.current !== null) {
-      editorViewRef.current.dispatch({
-        effects: editorConfiguration.diagnostics.reconfigure(
-          diagnosticLinter(props.diagnostics, props.diagnosticSourceId),
-        ),
-      });
-      forceLinting(editorViewRef.current);
-    }
-  }, [editorConfiguration, props.diagnostics, props.diagnosticSourceId]);
   React.useEffect(() => {
     const view = editorViewRef.current;
     if (view === null) {
       return;
     }
     view.dispatch({
-      effects: editorConfiguration.completions.reconfigure(
-        primitiveAutocompletion(props.primitives),
-      ),
+      effects: setEditorData.of({
+        diagnostics: props.diagnostics,
+        sourceId: props.diagnosticSource?.id ?? null,
+        primitives: props.primitives,
+      }),
     });
-  }, [editorConfiguration, props.primitives]);
+    // Run the linter now rather than after its debounce; the diagnostics are
+    // already computed, so there is nothing to wait for.
+    forceLinting(view);
+  }, [props.diagnostics, props.diagnosticSource, props.primitives]);
 
   const errorCount = props.diagnostics.filter(
     (diagnostic) => diagnostic.severity === "error",
   ).length;
   const warningCount = props.diagnostics.length - errorCount;
+  const plural = (count: number, noun: string) =>
+    `${count} ${noun}${count === 1 ? "" : "s"}`;
   let diagnosticIcon = null;
   if (errorCount > 0) {
     diagnosticIcon = (
-      <WithTooltip text={`${errorCount} error${errorCount === 1 ? "" : "s"}. See the diagnostics below the editor.`}>
+      <WithTooltip
+        text={`${plural(errorCount, "error")}. See the diagnostics below the editor.`}
+      >
         <Warning color="var(--danger)" />
       </WithTooltip>
     );
   } else if (warningCount > 0) {
     diagnosticIcon = (
-      <WithTooltip text={`${warningCount} warning${warningCount === 1 ? "" : "s"}. See the diagnostics below the editor.`}>
+      <WithTooltip
+        text={`${plural(warningCount, "warning")}. See the diagnostics below the editor.`}
+      >
         <Warning color="var(--warning)" />
       </WithTooltip>
     );
   }
 
+  function canApplyFix(fix: SuggestedFix) {
+    return isApplicableFix(fix, props.diagnosticSource, props.editorText);
+  }
+
   function applyFix(fix: SuggestedFix) {
-    if (
-      props.diagnosticSourceId === null ||
-      fix.edits.some((edit) => edit.range.source !== props.diagnosticSourceId)
-    ) {
-      return;
+    if (canApplyFix(fix)) {
+      props.onChange(applyTextEdits(props.editorText, fix.edits));
     }
-    props.onChange(applyTextEdits(props.editorText, fix.edits));
   }
 
   let outputs = null;
@@ -212,7 +177,7 @@ export default function EditorPane(props: EditorPaneProps) {
           value={props.editorText}
           onChange={props.onChange}
           onCreateEditor={captureEditorView}
-          extensions={editorConfiguration.extensions}
+          extensions={extensions}
           basicSetup={editorBasicSetup}
           theme={isDarkMode ? githubDark : githubLight}
         />
@@ -223,12 +188,7 @@ export default function EditorPane(props: EditorPaneProps) {
             <DiagnosticCard
               key={`${diagnostic.code}-${diagnosticIndex}`}
               diagnostic={diagnostic}
-              canApplyFix={(fix) =>
-                props.diagnosticSourceId !== null &&
-                fix.edits.every(
-                  (edit) => edit.range.source === props.diagnosticSourceId,
-                )
-              }
+              canApplyFix={canApplyFix}
               applyFix={applyFix}
             />
           ))}
@@ -250,7 +210,7 @@ export interface EditorPaneProps {
   run: () => void;
 
   diagnostics: EurydiceDiagnostic[];
-  diagnosticSourceId: number | null;
+  diagnosticSource: DiagnosticSource | null;
   primitives: PrimitiveMetadata[];
   printOutputs: [string, string][];
 
@@ -275,8 +235,7 @@ export function DiagnosticCard({
           (message) =>
             message.length > 0 &&
             message !== diagnostic.summary &&
-            message !== diagnostic.help &&
-            !message.startsWith("while calling `"),
+            message !== diagnostic.help,
         ),
     ),
   );
@@ -289,7 +248,7 @@ export function DiagnosticCard({
         <Warning color={color} className="mt-0.5 size-5" />
         <div className="min-w-0 grow">
           <div className="text-sm font-medium leading-5">
-            <InlineMarkdown>{diagnostic.summary}</InlineMarkdown>
+            <DiagnosticText>{diagnostic.summary}</DiagnosticText>
           </div>
           {(supportingMessages.length > 0 ||
             diagnostic.help ||
@@ -298,22 +257,22 @@ export function DiagnosticCard({
             <div className="mt-1 space-y-0.5 text-xs leading-5 text-(--text-muted)">
               {supportingMessages.map((message, index) => (
                 <p key={`label-${index}`}>
-                  <InlineMarkdown>{message}</InlineMarkdown>
+                  <DiagnosticText>{message}</DiagnosticText>
                 </p>
               ))}
               {diagnostic.help && (
                 <p>
-                  <InlineMarkdown>{diagnostic.help}</InlineMarkdown>
+                  <DiagnosticText>{diagnostic.help}</DiagnosticText>
                 </p>
               )}
               {diagnostic.notes.map((note, index) => (
                 <p key={`note-${index}`}>
-                  <InlineMarkdown>{note}</InlineMarkdown>
+                  <DiagnosticText>{note}</DiagnosticText>
                 </p>
               ))}
               {diagnostic.trace.map((frame, index) => {
                 const bindings = frame.bindings
-                  .map((binding) => `${binding.name} = ${binding.value.preview}`)
+                  .map((binding) => `${binding.name} = ${binding.value}`)
                   .join(", ");
                 return (
                   <div className="font-mono" key={index}>
@@ -331,7 +290,7 @@ export function DiagnosticCard({
               onClick={() => applyFix(fix)}
               key={index}
             >
-              <InlineMarkdown>{fix.message}</InlineMarkdown>
+              <DiagnosticText>{fix.message}</DiagnosticText>
             </button>
           ))}
         </div>
@@ -340,31 +299,28 @@ export function DiagnosticCard({
   );
 }
 
-function InlineMarkdown({ children }: { children: string }) {
+/**
+ * Renders a diagnostic string, showing its backtick spans as code.
+ *
+ * Backticks are the only markup the engine emits, so this deliberately does
+ * not pull in a markdown parser. An unpaired backtick stays literal text.
+ */
+function DiagnosticText({ children }: { children: string }) {
   return (
-    <Markdown
-      disallowedElements={["p"]}
-      unwrapDisallowed
-      components={{
-        code: ({ children: code }) => (
-          <code className="rounded bg-(--surface-3) px-1 py-0.5 font-mono text-[0.9em] text-[var(--text)]">
-            {code}
+    <>
+      {children.split(/`([^`]*)`/).map((part, index) =>
+        index % 2 === 0 ? (
+          part
+        ) : (
+          <code
+            className="rounded bg-(--surface-3) px-1 py-0.5 font-mono text-[0.9em] text-[var(--text)]"
+            key={index}
+          >
+            {part}
           </code>
         ),
-        a: ({ children: link, href }) => (
-          <a
-            className="text-(--accent) underline underline-offset-2"
-            href={href}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {link}
-          </a>
-        ),
-      }}
-    >
-      {children}
-    </Markdown>
+      )}
+    </>
   );
 }
 
@@ -405,3 +361,27 @@ const language = LRLanguage.define({
 });
 
 const languageSupport = new LanguageSupport(language);
+
+const extensions = [
+  languageSupport,
+  snippetTabKeymap,
+  editorData,
+  linter(
+    (view) => {
+      const { diagnostics, sourceId } = view.state.field(editorData);
+      return editorDiagnostics(diagnostics, sourceId, view.state.doc.length);
+    },
+    {
+      // The lint plugin only schedules a run when the document or its own
+      // configuration changes, and `forceLinting` can only force a run that is
+      // already scheduled. Diagnostics reach us as an effect on an unchanged
+      // document, so without this the linter would never run for them.
+      needsRefresh: carriesEditorData,
+    },
+  ),
+  autocompletion({
+    override: [
+      primitiveCompletionSource((state) => state.field(editorData).primitives),
+    ],
+  }),
+];

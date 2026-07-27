@@ -4,7 +4,7 @@ use std::{fmt::Write, rc::Rc};
 
 use malachite::{Natural, base::num::basic::traits::One};
 
-use crate::{ast::StaticType, dice::Pool};
+use crate::dice::Pool;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EnumType {
@@ -343,14 +343,6 @@ impl RuntimeValue {
             Rc::new(Pool::from_list(1, Vec::new())),
             ElementType::Uninhabited,
         )
-    }
-
-    pub(crate) fn runtime_type(&self) -> StaticType {
-        match self {
-            RuntimeValue::Element(_) => StaticType::Int,
-            RuntimeValue::List(_, _) => StaticType::List,
-            RuntimeValue::Pool(_, _) => StaticType::Pool,
-        }
     }
 
     pub(crate) fn outcome_type(&self) -> ElementType {

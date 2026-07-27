@@ -1,10 +1,9 @@
 import {
   Completion,
-  CompletionContext,
   CompletionSource,
   snippet,
 } from "@codemirror/autocomplete";
-import { syntaxTree } from "@codemirror/language";
+import type { EditorState } from "@codemirror/state";
 
 export interface PrimitiveMetadata {
   identifier: string;
@@ -14,13 +13,19 @@ export interface PrimitiveMetadata {
   documentation_url: string;
 }
 
-const ignoredSyntaxNodes = new Set(["String", "Comment", "LineComment"]);
-
+/**
+ * Completions for the built-in functions.
+ *
+ * The primitives are looked up from editor state when the completion runs,
+ * because they arrive from the worker after the editor is created. Reading
+ * them here keeps the extension itself constant, so a late arrival cannot
+ * reconfigure the editor out from under an open completion.
+ */
 export function primitiveCompletionSource(
-  primitives: readonly PrimitiveMetadata[],
+  getPrimitives: (state: EditorState) => readonly PrimitiveMetadata[],
 ): CompletionSource {
   return (context) => {
-    if (insideIgnoredSyntax(context)) {
+    if (insideStringOrComment(context.state.doc.sliceString(0, context.pos))) {
       return null;
     }
 
@@ -39,7 +44,7 @@ export function primitiveCompletionSource(
 
     return {
       from,
-      options: primitives.map((primitive) =>
+      options: getPrimitives(context.state).map((primitive) =>
         primitiveCompletion(
           primitive,
           completionTemplate(primitive, insideBracket, closingBracket),
@@ -75,25 +80,13 @@ export function completionTemplate(
   return primitive.snippet + (closingBracket ? "" : "]");
 }
 
-function insideIgnoredSyntax(context: CompletionContext): boolean {
-  if (insideStringOrComment(context.state.doc.sliceString(0, context.pos))) {
-    return true;
-  }
-
-  const node = syntaxTree(context.state).resolveInner(context.pos, -1);
-  if (ignoredSyntaxNodes.has(node.name)) {
-    return true;
-  }
-  let parent = node.parent;
-  while (parent !== null) {
-    if (ignoredSyntaxNodes.has(parent.name)) {
-      return true;
-    }
-    parent = parent.parent;
-  }
-  return false;
-}
-
+/**
+ * Whether the cursor sits inside a string or a comment.
+ *
+ * This scans rather than consulting the syntax tree, because the tree cannot
+ * help in the case that matters most: a string or comment the user has not
+ * finished typing does not parse as one.
+ */
 function insideStringOrComment(source: string): boolean {
   let state: "code" | "string" | "block_comment" | "line_comment" = "code";
   for (let index = 0; index < source.length; index += 1) {

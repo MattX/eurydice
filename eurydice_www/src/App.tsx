@@ -14,7 +14,8 @@ import { Toaster } from "react-hot-toast";
 import { numericOutcomeRange } from "./utils/chartData";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
-  currentSourceId,
+  currentSource,
+  DiagnosticSource,
   EurydiceDiagnostic,
   RunReport,
 } from "./diagnostics";
@@ -37,7 +38,10 @@ function AppInner() {
   });
   const [output, setOutput] = React.useState<NamedDistribution[]>([]);
   const [diagnostics, setDiagnostics] = React.useState<EurydiceDiagnostic[]>([]);
-  const [diagnosticSourceId, setDiagnosticSourceId] = React.useState<number | null>(null);
+  // The submission the diagnostics describe, kept whole so a suggested fix can
+  // check that the editor still holds the text its offsets were measured in.
+  const [diagnosticSource, setDiagnosticSource] =
+    React.useState<DiagnosticSource | null>(null);
   const [primitives, setPrimitives] = React.useState<PrimitiveMetadata[]>([]);
   const [runLive, setRunLiveInner] = React.useState(
     () => localStorage.getItem("eurydice0_run_live") !== "false"
@@ -78,14 +82,20 @@ function AppInner() {
   const attachOnMessage = useCallback((worker: WorkerWrapper) => {
     worker.setOnMessage((event: MessageEvent<EurydiceMessage>) => {
       if ("Ready" in event.data) {
-        setPrimitives(event.data.Ready.primitives);
+        // Every worker sends the same static metadata, and a run that is
+        // interrupted starts a fresh one. Keeping the first array means the
+        // editor is not reconfigured — closing any open completion — on each
+        // restart.
+        const { primitives } = event.data.Ready;
+        setPrimitives((current) => (current.length > 0 ? current : primitives));
       } else if ("Report" in event.data) {
         runningRef.current = false;
         setRunning(false);
         const report = event.data.Report;
-        const sourceId = currentSourceId(report);
+        const source = currentSource(report);
+        const sourceId = source?.id ?? null;
         const nextDiagnostics = [...report.diagnostics];
-        setDiagnosticSourceId(sourceId);
+        setDiagnosticSource(source);
 
         const distributions: NamedDistribution[] = report.outputs.map(
           ({ name, distribution }) => [name, normalizeDistribution(distribution)]
@@ -113,6 +123,7 @@ function AppInner() {
       } else if ("InternalError" in event.data) {
         runningRef.current = false;
         setRunning(false);
+        setDiagnosticSource(null);
         setDiagnostics([
           frontendDiagnostic(event.data.InternalError, null),
         ]);
@@ -201,7 +212,7 @@ function AppInner() {
         running={running}
         run={() => run(editorText)}
         diagnostics={diagnostics}
-        diagnosticSourceId={diagnosticSourceId}
+        diagnosticSource={diagnosticSource}
         primitives={primitives}
         printOutputs={printOutputs}
         exportButton={exportButton}
@@ -284,7 +295,6 @@ function frontendDiagnostic(
     help: null,
     fixes: [],
     trace: [],
-    details: { kind: "evaluation" },
     incomplete: false,
   };
 }

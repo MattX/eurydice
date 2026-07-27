@@ -11,18 +11,21 @@ use crate::{
         PositionOrder, SetParam, Statement, StaticType, WithRange,
     },
     diagnostic::{
-        DiagnosticDetails, DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame,
-        LabelStyle, SourceId, SourceRange, TraceBinding, missing_return_warning, summarize_value,
+        DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame, LabelStyle,
+        SourceId, SourceRange, TraceBinding, WarningKind, missing_return_warning, preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
     operators::{apply_binary_op, apply_unary_op},
-    primitives::{Primitive, register_primitives},
+    primitives::{
+        EXPLODE_ON_PRIMITIVE, EXPLODE_PRIMITIVE, Primitive, REROLL_ON_PRIMITIVE, REROLL_PRIMITIVE,
+        register_primitives,
+    },
     value::sum_elements,
 };
 
 pub(crate) use crate::value::sum_pool;
 pub use crate::{
-    error::RuntimeError,
+    error::{ArityMismatch, RuntimeError, SemanticErrorKind},
     value::{ElementType, ElementValue, EnumType, RuntimeValue},
 };
 
@@ -176,6 +179,9 @@ pub struct Evaluator {
     print_callback: Option<Box<dyn Fn(RuntimeValue, String)>>,
     source_id: SourceId,
     diagnostics: Vec<EngineDiagnostic>,
+    /// Warnings already reported, so repeated evaluations of the same
+    /// expression do not build a diagnostic only to discard it.
+    warned: HashSet<(WarningKind, SourceRange)>,
 }
 
 /// A top-level output and its presentation metadata.
@@ -208,16 +214,33 @@ impl Evaluator {
             print_callback: None,
             source_id: SourceId(0),
             diagnostics: Vec::new(),
+            warned: HashSet::new(),
         }
     }
 
     pub fn begin_submission(&mut self, source_id: SourceId) {
         self.source_id = source_id;
         self.diagnostics.clear();
+        self.warned.clear();
     }
 
     pub fn take_diagnostics(&mut self) -> Vec<EngineDiagnostic> {
         std::mem::take(&mut self.diagnostics)
+    }
+
+    /// The sources a diagnostic can still be asked to point into.
+    ///
+    /// Only function bodies outlive their submission: a diagnostic raised
+    /// inside one is rendered against the source that defined it, however long
+    /// ago that was. Everything else is unreachable once the submission ends.
+    pub(crate) fn live_source_ids(&self) -> HashSet<SourceId> {
+        self.functions
+            .values()
+            .filter_map(|function| match function {
+                Function::UserDefined(function) => Some(function.source_id),
+                Function::Primitive(_) => None,
+            })
+            .collect()
     }
 
     pub(crate) fn variable_suggestions(&self, name: &str) -> Vec<String> {
@@ -228,26 +251,29 @@ impl Evaluator {
         closest_names(name, self.functions.keys().map(String::as_str))
     }
 
-    fn push_warning(&mut self, diagnostic: EngineDiagnostic) {
-        let primary = diagnostic.primary_range();
-        if self
-            .diagnostics
-            .iter()
-            .any(|existing| existing.code == diagnostic.code && existing.primary_range() == primary)
-        {
-            return;
-        }
-        self.diagnostics.push(diagnostic);
+    /// Whether this warning has not been reported for this span yet.
+    ///
+    /// Callers check this before building a diagnostic: warnings are raised
+    /// from inside evaluation loops, where the same expression can be visited
+    /// once per outcome of a pool.
+    fn should_warn(&mut self, kind: WarningKind, source: SourceId, range: ast::Range) -> bool {
+        self.warned.insert((kind, SourceRange { source, range }))
     }
 
-    fn warn_pool_reuse(&mut self, source: SourceId, range: ast::Range, description: String) {
-        self.push_warning(EngineDiagnostic {
-            code: "evaluation.independent_pool_reuse".to_string(),
+    /// `subject` is a plural phrase naming the two uses; it is always followed
+    /// by "refer to the same pool".
+    fn warn_pool_reuse(&mut self, source: SourceId, range: ast::Range, subject: &str) {
+        const KIND: WarningKind = WarningKind::IndependentPoolReuse;
+        if !self.should_warn(KIND, source, range) {
+            return;
+        }
+        self.diagnostics.push(EngineDiagnostic {
+            code: KIND.code().to_string(),
             severity: DiagnosticSeverity::Warning,
             summary: "The same dice pool is sampled independently more than once".to_string(),
             labels: vec![DiagnosticLabel {
                 range: SourceRange { source, range },
-                message: Some(format!("{description} refers to the same pool")),
+                message: Some(format!("{subject} refer to the same pool")),
                 style: LabelStyle::Primary,
             }],
             notes: vec![
@@ -262,7 +288,6 @@ impl Evaluator {
             ),
             fixes: Vec::new(),
             trace: Vec::new(),
-            details: DiagnosticDetails::PoolReuse { name: description },
             incomplete: false,
         });
     }
@@ -271,13 +296,16 @@ impl Evaluator {
         &mut self,
         source: SourceId,
         range: ast::Range,
-        code: &str,
+        kind: WarningKind,
         setting: &str,
         value: usize,
         summary: &str,
     ) {
-        self.push_warning(EngineDiagnostic {
-            code: code.to_string(),
+        if !self.should_warn(kind, source, range) {
+            return;
+        }
+        self.diagnostics.push(EngineDiagnostic {
+            code: kind.code().to_string(),
             severity: DiagnosticSeverity::Warning,
             summary: summary.to_string(),
             labels: vec![DiagnosticLabel {
@@ -291,10 +319,6 @@ impl Evaluator {
             )),
             fixes: Vec::new(),
             trace: Vec::new(),
-            details: DiagnosticDetails::Limit {
-                setting: setting.to_string(),
-                value,
-            },
             incomplete: false,
         });
     }
@@ -347,7 +371,8 @@ impl Evaluator {
                 format!("enum {identifier_kind} {name} cannot be used as a loop variable")
             }
         };
-        Err(RuntimeError::EnumTypeError {
+        Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::BindingConflict,
             range: range.into(),
             message,
         })
@@ -360,13 +385,15 @@ impl Evaluator {
         statement_range: ast::Range,
     ) -> Result<(), RuntimeError> {
         if eval_context.recursion_depth != 0 || eval_context.block_depth != 0 {
-            return Err(RuntimeError::EnumTypeError {
+            return Err(RuntimeError::Semantic {
+                kind: SemanticErrorKind::TopLevelOnly,
                 range: statement_range.into(),
                 message: "enum declarations are only allowed at the top level".to_string(),
             });
         }
         if let Some(kind) = self.enum_identifier_kind(&definition.name.value) {
-            return Err(RuntimeError::EnumTypeError {
+            return Err(RuntimeError::Semantic {
+                kind: SemanticErrorKind::BindingConflict,
                 range: definition.name.range.into(),
                 message: format!(
                     "enum {} conflicts with an existing enum {kind}",
@@ -375,7 +402,8 @@ impl Evaluator {
             });
         }
         if self.env.contains(&definition.name.value) {
-            return Err(RuntimeError::EnumTypeError {
+            return Err(RuntimeError::Semantic {
+                kind: SemanticErrorKind::BindingConflict,
                 range: definition.name.range.into(),
                 message: format!("{} is already bound as a variable", definition.name.value),
             });
@@ -384,19 +412,22 @@ impl Evaluator {
         let mut seen = HashSet::new();
         for member in &definition.members {
             if !seen.insert(member.value.as_str()) {
-                return Err(RuntimeError::EnumTypeError {
+                return Err(RuntimeError::Semantic {
+                    kind: SemanticErrorKind::BindingConflict,
                     range: member.range.into(),
                     message: format!("enum member {} is already defined", member.value),
                 });
             }
             if member.value == definition.name.value {
-                return Err(RuntimeError::EnumTypeError {
+                return Err(RuntimeError::Semantic {
+                    kind: SemanticErrorKind::BindingConflict,
                     range: member.range.into(),
                     message: format!("enum member {} conflicts with its enum type", member.value),
                 });
             }
             if let Some(kind) = self.enum_identifier_kind(&member.value) {
-                return Err(RuntimeError::EnumTypeError {
+                return Err(RuntimeError::Semantic {
+                    kind: SemanticErrorKind::BindingConflict,
                     range: member.range.into(),
                     message: format!(
                         "enum member {} conflicts with an existing enum {kind}",
@@ -405,7 +436,8 @@ impl Evaluator {
                 });
             }
             if self.env.contains(&member.value) {
-                return Err(RuntimeError::EnumTypeError {
+                return Err(RuntimeError::Semantic {
+                    kind: SemanticErrorKind::BindingConflict,
                     range: member.range.into(),
                     message: format!("{} is already bound as a variable", member.value),
                 });
@@ -417,7 +449,8 @@ impl Evaluator {
             members: definition.members.iter().map(|m| m.value.clone()).collect(),
         });
         for (index, member) in definition.members.iter().enumerate() {
-            let value = i32::try_from(index).map_err(|_| RuntimeError::EnumTypeError {
+            let value = i32::try_from(index).map_err(|_| RuntimeError::Semantic {
+                kind: SemanticErrorKind::OutOfRange,
                 range: member.range.into(),
                 message: "enum has too many members".to_string(),
             })?;
@@ -447,8 +480,13 @@ impl Evaluator {
                 self.env.insert(name.value.clone(), value);
             }
             Statement::FunctionDefinition(fd) => {
-                if let Some(warning) = missing_return_warning(eval_context.source_id, fd) {
-                    self.push_warning(warning);
+                if self.should_warn(
+                    WarningKind::MissingResult,
+                    eval_context.source_id,
+                    fd.name.range,
+                ) && let Some(warning) = missing_return_warning(eval_context.source_id, fd)
+                {
+                    self.diagnostics.push(warning);
                 }
                 for arg in &fd.args {
                     self.validate_binding_name(
@@ -556,7 +594,6 @@ impl Evaluator {
                     _ => {
                         return Err(RuntimeError::InvalidCondition {
                             range: condition.range.into(),
-                            found: condition_value.runtime_type(),
                             value: condition_value,
                         });
                     }
@@ -592,7 +629,6 @@ impl Evaluator {
                     _ => {
                         return Err(RuntimeError::LoopOverNonSequence {
                             range: range_expression.range.into(),
-                            found: range.runtime_type(),
                             value: range,
                         });
                     }
@@ -641,7 +677,7 @@ impl Evaluator {
                 let left_value = self.evaluate(eval_context, left)?;
                 let right_value = self.evaluate(eval_context, right)?;
                 if same_pool(&left_value, &right_value) {
-                    let description = match (&left.value, &right.value) {
+                    let subject = match (&left.value, &right.value) {
                         (Expression::Reference(left), Expression::Reference(right))
                             if left == right =>
                         {
@@ -652,7 +688,7 @@ impl Evaluator {
                         }
                         _ => "Both operands".to_string(),
                     };
-                    self.warn_pool_reuse(eval_context.source_id, op.range, description);
+                    self.warn_pool_reuse(eval_context.source_id, op.range, &subject);
                 }
                 Ok(apply_binary_op(
                     op,
@@ -702,7 +738,7 @@ impl Evaluator {
                     .ok_or_else(|| RuntimeError::UndefinedFunction {
                         range: expression.range.into(),
                         name: name.value.clone(),
-                        help: arity_mismatch_help(&self.functions, &name.value),
+                        arity_mismatch: arity_mismatch(&self.functions, &name.value, args),
                     })?
                     .clone();
                 let ranges = args.iter().map(|arg| arg.range).collect::<Vec<_>>();
@@ -753,7 +789,6 @@ impl Evaluator {
                 repeat_value => {
                     return Err(RuntimeError::InvalidRepeatExpression {
                         range: repeat.range.into(),
-                        found: repeat_value.runtime_type(),
                         value: repeat_value,
                     });
                 }
@@ -770,7 +805,6 @@ impl Evaluator {
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: start_expr.range.into(),
-                            found: start.runtime_type(),
                             value: start,
                         });
                     }
@@ -782,7 +816,6 @@ impl Evaluator {
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
                             range: end_expr.range.into(),
-                            found: end.runtime_type(),
                             value: end,
                         });
                     }
@@ -810,7 +843,7 @@ impl Evaluator {
             self.warn_limit(
                 eval_context.source_id,
                 function.range,
-                "evaluation.maximum_function_depth",
+                WarningKind::MaximumFunctionDepth,
                 "maximum function depth",
                 self.recursion_depth,
                 "Maximum function depth stopped this call",
@@ -840,7 +873,7 @@ impl Evaluator {
                     self.warn_pool_reuse(
                         eval_context.source_id,
                         function.range,
-                        format!("Arguments {} and {}", left_index + 1, right_index + 1),
+                        &format!("Arguments {} and {}", left_index + 1, right_index + 1),
                     );
                 }
             }
@@ -920,7 +953,8 @@ impl Evaluator {
             )?;
             match &result {
                 RuntimeValue::List(values, _) if !result.is_additive() && values.len() != 1 => {
-                    return Err(RuntimeError::EnumTypeError {
+                    return Err(RuntimeError::Semantic {
+                        kind: SemanticErrorKind::NonAdditiveValue,
                         range: function.range.into(),
                         message:
                             "a non-additive sequence returned during pool evaluation cannot be summed"
@@ -953,7 +987,7 @@ impl Evaluator {
                     self.warn_limit(
                         eval_context.source_id,
                         function.range,
-                        "evaluation.explode_depth",
+                        WarningKind::ExplodeDepth,
                         "explode depth",
                         self.explode_depth,
                         "Explode depth bounds this distribution",
@@ -1015,7 +1049,7 @@ impl Evaluator {
                                 .zip(args)
                                 .map(|(formal, value)| TraceBinding {
                                     name: formal.value.name.clone(),
-                                    value: summarize_value(value),
+                                    value: preview_value(value),
                                 })
                                 .collect(),
                         }),
@@ -1041,14 +1075,18 @@ fn identifier_shape(identifier: &str) -> (String, usize) {
     (words.join(" "), arity)
 }
 
-/// Builds a hint for a call that did not resolve, when a function with the same
-/// words but a different number of arguments does exist.
+/// Detects a call that did not resolve, but whose words name a function taking
+/// a different number of arguments.
 ///
 /// This is overwhelmingly caused by two adjacent arguments being parsed as one
 /// expression: `d` binds tighter than argument separation, so `[tuple d6 d8]`
-/// reads as the single argument `d(6d8)`. Suggesting a comma turns a confusing
-/// "no such function" into an actionable fix.
-fn arity_mismatch_help(functions: &HashMap<String, Function>, name: &str) -> Option<String> {
+/// reads as the single argument `(d6)d8`. Reporting the mismatch turns a
+/// confusing "no such function" into an actionable fix.
+fn arity_mismatch(
+    functions: &HashMap<String, Function>,
+    name: &str,
+    args: &[WithRange<Expression>],
+) -> Option<ArityMismatch> {
     let (words, arity) = identifier_shape(name);
     let mut available = functions
         .keys()
@@ -1062,27 +1100,55 @@ fn arity_mismatch_help(functions: &HashMap<String, Function>, name: &str) -> Opt
     }
     available.sort_unstable();
     available.dedup();
-    let counts = match available.as_slice() {
-        [only] => format!("{only} argument{}", if *only == 1 { "" } else { "s" }),
-        [rest @ .., last] => format!(
-            "{} or {last} arguments",
-            rest.iter()
-                .map(usize::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        [] => unreachable!("checked non-empty above"),
+    // A comma can only be missing if the call passed too few arguments; if
+    // every known arity is smaller, the caller passed too many instead.
+    let comma_insertion = available
+        .iter()
+        .any(|other| *other > arity)
+        .then(|| comma_insertion(args))
+        .flatten();
+    Some(ArityMismatch {
+        words,
+        available,
+        found: arity,
+        comma_insertion,
+    })
+}
+
+/// Where a comma would split a single argument that is really two dice.
+///
+/// `d` binds tighter than argument separation, so `[tuple d6 d8]` parses as the
+/// one argument `(d6)d8`. Wherever the left side of a `d` is itself a dice
+/// roll, the two sides were written as separate arguments, and the leftmost
+/// such `d` is where the first comma belongs. Reading this off the parse tree
+/// rather than the source text means the fix cannot disagree with how the call
+/// was actually parsed.
+fn comma_insertion(args: &[WithRange<Expression>]) -> Option<usize> {
+    let [only] = args else {
+        return None;
     };
-    let described = if words.is_empty() {
-        "a function with no words".to_string()
-    } else {
-        format!("[{words}]")
-    };
-    Some(format!(
-        "{described} takes {counts}, but this call passes {arity}. If two arguments were \
-         joined into one expression, separate them with a comma: `d` binds tighter than \
-         argument separation, so `[f d6 d8]` passes one argument and `[f d6, d8]` passes two."
-    ))
+    let mut expression = &only.value;
+    let mut insertion = None;
+    while let Expression::BinaryOp { op, left, .. } = expression {
+        if op.value != ast::BinaryOp::D || !rolls_dice(&left.value) {
+            break;
+        }
+        insertion = Some(left.range.end);
+        expression = &left.value;
+    }
+    insertion
+}
+
+/// Whether an expression rolls dice at its outermost level, so that a `d` to
+/// its right cannot have been reading it as a die count.
+fn rolls_dice(expression: &Expression) -> bool {
+    match expression {
+        Expression::UnaryOp { op, .. } => op.value == ast::UnaryOp::D,
+        Expression::BinaryOp { op, left, .. } => {
+            op.value == ast::BinaryOp::D || rolls_dice(&left.value)
+        }
+        _ => false,
+    }
 }
 
 fn merge_outcome_type(
@@ -1095,7 +1161,8 @@ fn merge_outcome_type(
         None => next,
         Some(current) => current
             .merged_with(&next)
-            .ok_or_else(|| RuntimeError::EnumTypeError {
+            .ok_or_else(|| RuntimeError::Semantic {
+                kind: SemanticErrorKind::OutcomeMismatch,
                 range: range.into(),
                 message: error_message.to_string(),
             })?,
@@ -1115,7 +1182,8 @@ fn coerce_arg(
     let mut actual_outcome = arg.outcome_type();
     if let Some(required) = &expected.outcome {
         if actual_outcome.merged_with(required).is_none() {
-            return Err(RuntimeError::EnumTypeError {
+            return Err(RuntimeError::Semantic {
+                kind: SemanticErrorKind::OutcomeMismatch,
                 range: range.into(),
                 message: format!(
                     "expected {}, found {}",
@@ -1127,7 +1195,7 @@ fn coerce_arg(
         arg = arg.materialize_identities(required);
         actual_outcome = required.clone();
     }
-    match (arg, expected.shape) {
+    let coerced = match (arg, expected.shape) {
         (value @ RuntimeValue::Element(_), StaticType::Int) => Ok(value),
         (RuntimeValue::Element(value), StaticType::List) => {
             let outcome_type = value.element_type();
@@ -1145,7 +1213,8 @@ fn coerce_arg(
         {
             Ok(RuntimeValue::Element(sum_elements(&list, &outcome_type)))
         }
-        (RuntimeValue::List(_, _), StaticType::Int) => Err(RuntimeError::EnumTypeError {
+        (RuntimeValue::List(_, _), StaticType::Int) => Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::NonAdditiveValue,
             range: range.into(),
             message: "a non-additive sequence cannot be summed into a element".to_string(),
         }),
@@ -1159,8 +1228,20 @@ fn coerce_arg(
             Ok(RuntimeValue::Pool(Rc::new(summed), outcome_type))
         }
         (value @ RuntimeValue::Pool(_, _), _) => Ok(value),
+    }?;
+    // Where an int is required and the empty sum is still unconstrained, it
+    // becomes the integer 0.
+    if expected.shape == StaticType::Int
+        && matches!(
+            coerced,
+            RuntimeValue::Element(ElementValue::AdditiveIdentity)
+        )
+    {
+        return Ok(RuntimeValue::Element(ElementValue::Int(0)));
     }
+    Ok(coerced)
 }
+
 fn interpolate_variable_names(
     template: &WithRange<String>,
     vars: &ValEnv,
@@ -1222,7 +1303,15 @@ fn same_pool(left: &RuntimeValue, right: &RuntimeValue) -> bool {
 }
 
 fn transform_depth_affects_result(identifier: &str, args: &[RuntimeValue]) -> bool {
-    if !identifier.starts_with("explode ") && !identifier.starts_with("reroll ") {
+    // Taken from the registry rather than matched by prefix, so renaming or
+    // adding a primitive cannot silently change which calls are bounded.
+    let bounded_by_depth = [
+        EXPLODE_PRIMITIVE.identifier,
+        EXPLODE_ON_PRIMITIVE.identifier,
+        REROLL_PRIMITIVE.identifier,
+        REROLL_ON_PRIMITIVE.identifier,
+    ];
+    if !bounded_by_depth.contains(&identifier) {
         return false;
     }
     let Some(RuntimeValue::Pool(pool, _)) = args.first() else {
@@ -1320,6 +1409,27 @@ mod tests {
             interpolate_variable_names(&ranged("[_MY_VAR], [IDENTITY]"), &env).unwrap(),
             "4, 0"
         );
+    }
+
+    #[test]
+    fn additive_identity_becomes_zero_where_an_argument_must_be_an_int() {
+        let expected = ResolvedArgType {
+            shape: StaticType::Int,
+            outcome: None,
+        };
+        let range = ast::Range { start: 0, end: 0 };
+
+        for argument in [
+            RuntimeValue::Element(ElementValue::AdditiveIdentity),
+            // An empty sequence sums to the empty sum on its way to an int.
+            RuntimeValue::empty_list(),
+        ] {
+            assert_eq!(
+                coerce_arg(argument.clone(), Some(&expected), range).unwrap(),
+                RuntimeValue::Element(ElementValue::Int(0)),
+                "{argument}"
+            );
+        }
     }
 
     #[test]

@@ -1,44 +1,40 @@
-use eurydice_engine::{eval::Evaluator, grammar};
+use eurydice_engine::{Engine, EngineDiagnostic};
 
-fn run(program: &str) -> Result<(), String> {
-    let statements = grammar::BodyParser::new()
-        .parse(program)
-        .map_err(|error| error.to_string())?;
-    let mut evaluator = Evaluator::new();
-    for statement in statements {
-        evaluator
-            .execute(&statement)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+/// The diagnostic a failing program produces, or `None` if it succeeded.
+///
+/// Assertions here use the diagnostic's stable code rather than its wording,
+/// which is free to change without breaking anyone.
+fn diagnostic(program: &str) -> Option<EngineDiagnostic> {
+    Engine::new().run_with_diagnostics(program).error().cloned()
 }
 
 #[test]
 fn tuple_output_labels_require_tuple_outcomes_and_matching_arity() {
-    for (program, expected) in [
-        ("output 1 labeled \"A\", \"B\"", "non-tuple"),
-        ("enum: RESULT { A } output A labeled \"Value\"", "non-tuple"),
+    for (program, expected_code) in [
+        ("output 1 labeled \"A\", \"B\"", "type.labels_require_tuple"),
+        (
+            "enum: RESULT { A } output A labeled \"Value\"",
+            "type.labels_require_tuple",
+        ),
         (
             "output [tuple 1 2] labeled \"Only one\"",
-            "expected 2, found 1",
+            "value.output_label_count",
         ),
         (
             "output [tuple 1 2] labeled \"A\", \"B\", \"C\"",
-            "expected 2, found 3",
+            "value.output_label_count",
         ),
         (
             "output [tuple 1 2] labeled \"[MISSING]\", \"B\"",
-            "undefined",
+            "name.undefined_variable",
         ),
     ] {
-        let error = run(program).unwrap_err();
-        assert!(
-            error.to_lowercase().contains(&expected.to_lowercase()),
-            "{error}"
-        );
+        let error =
+            diagnostic(program).unwrap_or_else(|| panic!("expected an error for {program}"));
+        assert_eq!(error.code, expected_code, "{program}");
     }
 
-    assert!(run("output [tuple 1 2] labeled \"A\", \"B\" labeled \"C\", \"D\"").is_err());
+    assert!(diagnostic("output [tuple 1 2] labeled \"A\", \"B\" labeled \"C\", \"D\"").is_some());
 }
 
 #[test]
@@ -59,6 +55,9 @@ fn rejects_invalid_tuple_operations() {
         "output 2d{1:0} + [tuple 1 2]",
         "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]}",
     ] {
-        assert!(run(program).is_err(), "expected error for {program}");
+        assert!(
+            diagnostic(program).is_some(),
+            "expected error for {program}"
+        );
     }
 }

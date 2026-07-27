@@ -35,20 +35,9 @@ describe("DiagnosticCard", () => {
           function: "pick {}",
           call: { source: 0, range: { start: 0, end: 1 } },
           definition: null,
-          bindings: [
-            {
-              name: "I",
-              value: {
-                shape: "number",
-                outcome_type: "int",
-                collection_size: null,
-                preview: "1",
-              },
-            },
-          ],
+          bindings: [{ name: "I", value: "1" }],
         },
       ],
-      details: { kind: "type_mismatch" },
       incomplete: false,
     };
 
@@ -68,17 +57,20 @@ describe("DiagnosticCard", () => {
     expect(markup).not.toContain(">here<");
     expect(markup).toContain("Build a tuple with <code");
     expect(markup).toContain(diagnostic.notes[0]);
-    expect(markup).toContain("while calling [pick …] with I = 1");
     expect(markup).toContain("Wrap in a tuple");
     expect(markup).not.toContain(diagnostic.code);
-    expect(markup).toContain("p-2");
-    expect(markup).toContain("size-5");
-    expect(markup).toContain("btn-compact");
 
+    expect(markup).toContain("while calling [pick …] with I = 1");
+    expect(markup.match(/while calling/g)).toHaveLength(1);
+
+    // Two labels plus a hover mark built from the trace frame's call site.
     const hoverDiagnostics = editorDiagnostics([diagnostic], 0, 100);
-    expect(hoverDiagnostics).toHaveLength(2);
-    expect(hoverDiagnostics.every(({ message }) => message ===
-      "[field INDEX:n of TUPLE:n] requires a tuple")).toBe(true);
+    expect(hoverDiagnostics).toHaveLength(3);
+    expect(hoverDiagnostics[2].message).toBe("while calling pick …");
+    expect(hoverDiagnostics[2].severity).toBe("info");
+    expect(hoverDiagnostics[0].message).toBe(
+      "[field INDEX:n of TUPLE:n] requires a tuple",
+    );
     expect(hoverDiagnostics[0].message).not.toContain(diagnostic.help);
     expect(hoverDiagnostics[0].message).not.toContain("expected a tuple");
   });
@@ -98,12 +90,6 @@ describe("DiagnosticCard", () => {
       help: "Variable names are uppercase and must be assigned before use.",
       fixes: [],
       trace: [],
-      details: {
-        kind: "undefined_name",
-        name: "POOL",
-        namespace: "variable",
-        suggestions: [],
-      },
       incomplete: false,
     };
 
