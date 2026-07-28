@@ -1,4 +1,5 @@
 use eurydice_engine::{
+    Engine,
     eval::{EvaluatedOutput, Evaluator},
     grammar,
     output::{Distribution, FieldSchema},
@@ -7,23 +8,34 @@ use eurydice_engine::{
 fn run(program: &str) -> Result<Vec<EvaluatedOutput>, String> {
     let statements = grammar::BodyParser::new()
         .parse(program)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("{error:?}"))?;
     let mut evaluator = Evaluator::new();
     for statement in statements {
         evaluator
             .execute(&statement)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("{error:?}"))?;
     }
     Ok(evaluator.take_outputs())
 }
 
+/// The message a failing program shows the user.
+fn error_summary(program: &str) -> String {
+    Engine::new()
+        .run_with_diagnostics(program)
+        .error()
+        .unwrap_or_else(|| panic!("expected an error for {program}"))
+        .summary
+        .clone()
+}
+
 #[test]
 fn rejects_mixed_enum_list() {
-    let error = run(r#"
+    let error = error_summary(
+        r#"
         enum: RESULT { MISS, HIT }
         output {MISS, 1}
-        "#)
-    .unwrap_err();
+        "#,
+    );
     assert!(error.contains("mixed outcome types"), "{error}");
 }
 
@@ -33,7 +45,7 @@ fn enum_names_and_members_are_immutable() {
         "enum: RESULT { MISS, HIT } MISS: 3",
         "enum: RESULT { MISS, HIT } RESULT: 3",
     ] {
-        let error = run(program).unwrap_err();
+        let error = error_summary(program);
         assert!(error.contains("immutable"), "{error}");
     }
 }
@@ -58,17 +70,17 @@ fn rejects_enum_arithmetic_ordering_and_multidimensional_output() {
         ("enum: R { A, B } output A < B", "not defined"),
         ("enum: R { A, B } output 2d{A, B}", "dimension one"),
     ] {
-        let error = run(program).unwrap_err();
+        let error = error_summary(program);
         assert!(error.contains(expected), "{error}");
     }
 }
 
 #[test]
 fn rejects_different_enum_types_and_nested_declarations() {
-    let mixed = run("enum: A_TYPE { A } enum: B_TYPE { B } output {A, B}").unwrap_err();
+    let mixed = error_summary("enum: A_TYPE { A } enum: B_TYPE { B } output {A, B}");
     assert!(mixed.contains("mixed outcome types"), "{mixed}");
 
-    let nested = run("if 1 { enum: RESULT { A } }").unwrap_err();
+    let nested = error_summary("if 1 { enum: RESULT { A } }");
     assert!(nested.contains("top level"), "{nested}");
 }
 
@@ -79,7 +91,7 @@ fn equality_aware_operations_require_the_same_enum_type() {
         "enum: A_TYPE { A } enum: B_TYPE { B } output [{A} contains B]",
         "enum: A_TYPE { A } enum: B_TYPE { B } output [count {A} in {B}]",
     ] {
-        let error = run(program).unwrap_err();
+        let error = error_summary(program);
         assert!(error.contains("same outcome type"), "{error}");
     }
 }

@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod diagnostic;
 pub mod dice;
 pub mod engine;
 pub mod error;
@@ -9,7 +10,12 @@ pub mod value;
 
 mod operators;
 
-pub use engine::{Engine, EngineError, EngineOutput};
+pub use diagnostic::{
+    DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, EvaluationFrame,
+    FixApplicability, LabelStyle, SourceId, SourceRange, SuggestedFix, TextEdit, TraceBinding,
+};
+pub use engine::{Engine, EngineOutput, RunReport};
+pub use primitives::{PrimitiveMetadata, primitive_metadata};
 
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(

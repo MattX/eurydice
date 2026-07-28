@@ -59,7 +59,13 @@ export function Spinner() {
   );
 }
 
-export function Warning() {
+export function Warning({
+  color = "var(--danger)",
+  className = "size-6",
+}: {
+  color?: string;
+  className?: string;
+}) {
   return (
     <span className="grid place-content-center">
       <svg
@@ -68,8 +74,8 @@ export function Warning() {
         viewBox="0 0 24 24"
         strokeWidth={1.5}
         stroke="currentColor"
-        className="size-6"
-        style={{ color: "var(--danger)" }}
+        className={className}
+        style={{ color }}
       >
         <path
           strokeLinecap="round"

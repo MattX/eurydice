@@ -1,18 +1,17 @@
-import { run } from "eurydice_wasm";
+import { primitiveMetadata, runWithDiagnostics } from "eurydice_wasm";
 
 self.onmessage = (event) => {
   try {
-    const result = run(event.data, (value, name) => {
+    const report = runWithDiagnostics(event.data, (value, name) => {
       self.postMessage({ Print: [value, name] });
     });
-    self.postMessage(result);
+    self.postMessage({ Report: report });
   } catch (e) {
     console.error(e);
     self.postMessage({
-      Err: { message: "Internal error", from: 0, to: 0 },
+      InternalError: "The evaluation worker encountered an internal error.",
     });
   }
 };
-// Signal to the main thread's WorkerWrapper that the onmessage handler
-// has been attached, and the worker is ready.
-self.postMessage("ready");
+// Signal readiness and provide editor metadata before evaluating any program.
+self.postMessage({ Ready: { primitives: primitiveMetadata() } });

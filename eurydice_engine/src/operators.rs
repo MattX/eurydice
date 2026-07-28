@@ -5,7 +5,7 @@ use std::rc::Rc;
 use crate::{
     ast::{self, BinaryOp, UnaryOp, WithRange},
     dice::Pool,
-    error::RuntimeError,
+    error::{RuntimeError, SemanticErrorKind},
     value::{ElementType, ElementValue, RuntimeValue, expect_int, sum_elements, sum_pool},
 };
 
@@ -15,11 +15,13 @@ pub(crate) fn apply_unary_op(
 ) -> Result<RuntimeValue, RuntimeError> {
     match op.value {
         UnaryOp::D => make_d(None, operand, op.range),
-        UnaryOp::Negate if !operand.is_additive() => Err(RuntimeError::EnumTypeError {
+        UnaryOp::Negate if !operand.is_additive() => Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::OperatorOperands,
             range: op.range.into(),
             message: format!("operator {} is not defined for this element type", op.value),
         }),
-        UnaryOp::Invert if !operand.is_numeric_compatible() => Err(RuntimeError::EnumTypeError {
+        UnaryOp::Invert if !operand.is_numeric_compatible() => Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::OperatorOperands,
             range: op.range.into(),
             message: format!("operator {} is not defined for this element type", op.value),
         }),
@@ -215,7 +217,8 @@ fn apply_math_op(
     right: &RuntimeValue,
 ) -> Result<RuntimeValue, RuntimeError> {
     let result_type = math_result_type(op.value, &left.outcome_type(), &right.outcome_type())
-        .ok_or_else(|| RuntimeError::EnumTypeError {
+        .ok_or_else(|| RuntimeError::Semantic {
+            kind: SemanticErrorKind::OperatorOperands,
             range: op.range.into(),
             message: format!(
                 "operator {} is not defined for these element types",
@@ -255,7 +258,8 @@ pub(crate) fn apply_binary_op(
         BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
     ) && (!left.is_numeric_compatible() || !right.is_numeric_compatible())
     {
-        return Err(RuntimeError::EnumTypeError {
+        return Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::OperatorOperands,
             range: op.range.into(),
             message: format!(
                 "operator {} is not defined for these element types",
@@ -265,7 +269,8 @@ pub(crate) fn apply_binary_op(
     }
     if matches!(op.value, BinaryOp::Eq | BinaryOp::Ne) && left.merged_outcome_type(right).is_none()
     {
-        return Err(RuntimeError::EnumTypeError {
+        return Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::OutcomeMismatch,
             range: op.range.into(),
             message: "equality requires operands with the same outcome type".to_string(),
         });
@@ -274,7 +279,8 @@ pub(crate) fn apply_binary_op(
         BinaryOp::D => make_d(Some(left), right, op.range),
         BinaryOp::At => {
             if !left.is_numeric_compatible() {
-                return Err(RuntimeError::EnumTypeError {
+                return Err(RuntimeError::Semantic {
+                    kind: SemanticErrorKind::OperatorOperands,
                     range: op.range.into(),
                     message: "only integers can be used as positions".to_string(),
                 });
@@ -289,9 +295,8 @@ pub(crate) fn apply_binary_op(
                     return Err(RuntimeError::InvalidArgumentToOperator {
                         operator_range: op.range.into(),
                         op: op.value,
-                        expected: "an int or a list",
+                        expected: "an integer or a sequence",
                         found_range: left_range.into(),
-                        found: left.runtime_type(),
                         value: left.clone(),
                     });
                 }
@@ -339,11 +344,19 @@ pub(crate) fn apply_binary_op(
                 }
                 RuntimeValue::List(lst, _) => {
                     if left.len() != 1 {
-                        return Err(RuntimeError::EnumTypeError { range: op.range.into(), message: "selecting multiple non-additive positions would require summing their values".to_string() });
+                        return Err(RuntimeError::Semantic {
+                            kind: SemanticErrorKind::NonAdditiveValue,
+                            range: op.range.into(),
+                            message:
+                                "selecting multiple non-additive positions would require summing \
+                                 their values"
+                                    .to_string(),
+                        });
                     }
                     let index = left[0];
                     if index < 1 || index > i32::try_from(lst.len()).unwrap_or(i32::MAX) {
-                        return Err(RuntimeError::EnumTypeError {
+                        return Err(RuntimeError::Semantic {
+                            kind: SemanticErrorKind::OutOfRange,
                             range: op.range.into(),
                             message: "position is out of range".to_string(),
                         });
@@ -353,7 +366,8 @@ pub(crate) fn apply_binary_op(
                     ))
                 }
                 RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_))
-                | RuntimeValue::Pool(_, _) => Err(RuntimeError::EnumTypeError {
+                | RuntimeValue::Pool(_, _) => Err(RuntimeError::Semantic {
+                    kind: SemanticErrorKind::OperatorOperands,
                     range: op.range.into(),
                     message: "positional selection is not defined for this value".to_string(),
                 }),
@@ -587,7 +601,8 @@ fn make_d(
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
     if left.is_some_and(|value| !value.is_numeric_compatible()) {
-        return Err(RuntimeError::EnumTypeError {
+        return Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::OperatorOperands,
             range: range.into(),
             message: "only numeric values can be used as dice counts".to_string(),
         });
@@ -610,7 +625,8 @@ fn make_d(
         RuntimeValue::List(list, _) => DRightSide::List((**list).clone()),
         RuntimeValue::Pool(d, _) => DRightSide::Pool(Rc::clone(d)),
         RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
-            return Err(RuntimeError::EnumTypeError {
+            return Err(RuntimeError::Semantic {
+                kind: SemanticErrorKind::OperatorOperands,
                 range: range.into(),
                 message: "a non-numeric element cannot specify die sides; use a sequence"
                     .to_string(),
@@ -618,7 +634,8 @@ fn make_d(
         }
     };
     if !outcome_type.is_additive() && !matches!(&repeat, DiceCount::Int(1)) {
-        return Err(RuntimeError::EnumTypeError {
+        return Err(RuntimeError::Semantic {
+            kind: SemanticErrorKind::NonAdditiveValue,
             range: range.into(),
             message: "non-additive pools must have dimension one".to_string(),
         });

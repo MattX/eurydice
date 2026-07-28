@@ -1,10 +1,15 @@
 use std::collections::HashMap;
 
 use malachite::Natural;
+use serde::Serialize;
 
 use crate::{
     ast::{self, StaticType},
     dice::{Pool, explode, reroll},
+    error::{
+        PrimitiveArgumentError, PrimitiveArgumentErrorKind, PrimitiveArgumentsError,
+        PrimitiveValueError,
+    },
     eval::{ElementValue, Function, RuntimeError, RuntimeValue},
 };
 
@@ -20,6 +25,8 @@ pub struct PrimitiveCtx<'a> {
     pub lowest_first: bool,
     /// Source range of the whole function call, used for error reporting.
     pub function_range: ast::Range,
+    /// Canonical function identifier from the primitive registry.
+    pub identifier: &'static str,
 }
 
 type PrimitiveExecutor =
@@ -27,9 +34,25 @@ type PrimitiveExecutor =
 
 #[derive(Debug)]
 pub struct Primitive {
+    pub identifier: &'static str,
     pub arg_types: &'static [Option<StaticType>],
     pub accepts_non_numeric: bool,
     pub execute: PrimitiveExecutor,
+}
+
+/// Presentation metadata for a built-in function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct PrimitiveMetadata {
+    /// The evaluator's canonical function identifier, with `{}` argument slots.
+    pub identifier: &'static str,
+    /// A typed signature intended for display to users.
+    pub signature: &'static str,
+    /// A CodeMirror-compatible snippet body, without surrounding brackets.
+    pub snippet: &'static str,
+    /// A concise description suitable for completion UI.
+    pub documentation: &'static str,
+    /// A stable link to the detailed language specification.
+    pub documentation_url: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +72,57 @@ impl KeepMode {
     }
 }
 
+/// The argument names of a primitive, in order, read from the signature the
+/// registry displays to users.
+///
+/// Executors report arguments by name, and users see those names in the
+/// signature, so both read the same literal rather than repeating it. The
+/// registry consistency test checks that every primitive names every argument.
+fn argument_names(identifier: &str) -> impl Iterator<Item = &'static str> {
+    primitive_signature(identifier)
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|token| token.split_once(':'))
+        .map(|(name, _)| name)
+}
+
+fn argument_name(identifier: &str, index: usize) -> &'static str {
+    argument_names(identifier)
+        .nth(index)
+        .expect("registry signatures name every argument")
+}
+
+fn argument_error(
+    ctx: PrimitiveCtx,
+    index: usize,
+    expected: impl Into<String>,
+    value: &RuntimeValue,
+) -> PrimitiveArgumentError {
+    PrimitiveArgumentError {
+        name: argument_name(ctx.identifier, index),
+        range: ctx.arg_ranges[index].into(),
+        expected: expected.into(),
+        value: value.clone(),
+    }
+}
+
+fn invalid_arguments(
+    ctx: PrimitiveCtx,
+    requirement: impl Into<String>,
+    help: impl Into<String>,
+    kind: PrimitiveArgumentErrorKind,
+    arguments: Vec<PrimitiveArgumentError>,
+) -> RuntimeError {
+    RuntimeError::InvalidPrimitiveArguments(Box::new(PrimitiveArgumentsError {
+        range: ctx.function_range.into(),
+        function: ctx.identifier,
+        requirement: requirement.into(),
+        help: Some(help.into()),
+        kind,
+        arguments,
+    }))
+}
+
 fn absolute_execute(
     args: &[RuntimeValue],
     _ctx: PrimitiveCtx,
@@ -61,11 +135,20 @@ fn materialize_compatible_pair(
     left: &RuntimeValue,
     right: &RuntimeValue,
     ctx: PrimitiveCtx,
-    message: &'static str,
 ) -> Result<(RuntimeValue, RuntimeValue), RuntimeError> {
-    let error = || RuntimeError::EnumTypeError {
-        range: ctx.function_range.into(),
-        message: message.to_string(),
+    let error = || {
+        let left_name = argument_name(ctx.identifier, 0);
+        let right_name = argument_name(ctx.identifier, 1);
+        invalid_arguments(
+            ctx,
+            format!("requires `{left_name}` and `{right_name}` to have the same outcome type"),
+            "Both arguments must use integers or members of the same enum type.",
+            PrimitiveArgumentErrorKind::OutcomeType,
+            vec![
+                argument_error(ctx, 0, format!("the same outcome type as `{right_name}`"), left),
+                argument_error(ctx, 1, format!("the same outcome type as `{left_name}`"), right),
+            ],
+        )
     };
     let outcome_type = left
         .merged_outcome_type(right)
@@ -81,20 +164,10 @@ fn contains_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let error = || crate::eval::RuntimeError::EnumTypeError {
-        range: ctx.function_range.into(),
-        message: "[contains] requires a sequence and element with the same outcome type"
-            .to_string(),
-    };
     let (RuntimeValue::List(_, _), RuntimeValue::Element(_)) = (&args[0], &args[1]) else {
-        return Err(error());
+        unreachable!("contains argument shapes are enforced by the evaluator")
     };
-    let (haystack, needle) = materialize_compatible_pair(
-        &args[0],
-        &args[1],
-        ctx,
-        "[contains] requires a sequence and element with the same outcome type",
-    )?;
+    let (haystack, needle) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
     let (RuntimeValue::List(haystack, _), RuntimeValue::Element(needle)) = (haystack, needle)
     else {
         unreachable!("contains argument shapes were checked")
@@ -107,22 +180,13 @@ fn count_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let error = || crate::eval::RuntimeError::EnumTypeError {
-        range: ctx.function_range.into(),
-        message: "[count] requires sequences with the same outcome type".to_string(),
-    };
     if !matches!(
         (&args[0], &args[1]),
         (RuntimeValue::List(_, _), RuntimeValue::List(_, _))
     ) {
-        return Err(error());
+        unreachable!("count argument shapes are enforced by the evaluator")
     }
-    let (needle, haystack) = materialize_compatible_pair(
-        &args[0],
-        &args[1],
-        ctx,
-        "[count] requires sequences with the same outcome type",
-    )?;
+    let (needle, haystack) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
     let (RuntimeValue::List(needle, _), RuntimeValue::List(haystack, _)) = (needle, haystack)
     else {
         unreachable!("count argument shapes were checked")
@@ -208,6 +272,7 @@ fn keep_execute(
     };
     let keep_list = keep_list_for_primitive(
         mode,
+        ctx.identifier,
         *i,
         ctx.arg_ranges[0],
         d.dimension() as usize,
@@ -354,44 +419,89 @@ fn sort_execute(
 /// Builds a tuple from its arguments. Registered for each supported arity; the
 /// arity is enforced by function-name matching, not by this executor.
 fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
+    let invalid = args
+        .iter()
+        .enumerate()
+        .filter(|(_, arg)| matches!(arg, RuntimeValue::Element(ElementValue::Tuple(_))))
+        .map(|(index, arg)| argument_error(ctx, index, "a non-tuple value", arg))
+        .collect::<Vec<_>>();
+    if !invalid.is_empty() {
+        return Err(invalid_arguments(
+            ctx,
+            "cannot contain another tuple",
+            "Pass each inner field as its own tuple argument.",
+            PrimitiveArgumentErrorKind::Type,
+            invalid,
+        ));
+    }
     let fields = args
         .iter()
         .map(|arg| match arg {
-            RuntimeValue::Element(ElementValue::AdditiveIdentity) => Ok(ElementValue::Int(0)),
+            RuntimeValue::Element(ElementValue::AdditiveIdentity) => ElementValue::Int(0),
             RuntimeValue::Element(value @ (ElementValue::Int(_) | ElementValue::Enum { .. })) => {
-                Ok(value.clone())
+                value.clone()
             }
-            RuntimeValue::Element(ElementValue::Tuple(_)) => Err(RuntimeError::EnumTypeError {
-                range: ctx.function_range.into(),
-                message: "nested tuples are not supported".to_string(),
-            }),
+            RuntimeValue::Element(ElementValue::Tuple(_)) => {
+                unreachable!("nested tuple arguments were rejected above")
+            }
             RuntimeValue::List(_, _) | RuntimeValue::Pool(_, _) => {
                 unreachable!("tuple arguments are coerced to elements")
             }
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     Ok(RuntimeValue::Element(ElementValue::Tuple(fields.into())))
 }
 
 fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValue, RuntimeError> {
+    const EXPECTED: [&str; 2] = ["an integer", "a tuple"];
+    let satisfied = [
+        matches!(args[0], RuntimeValue::Element(ElementValue::Int(_))),
+        matches!(args[1], RuntimeValue::Element(ElementValue::Tuple(_))),
+    ];
+    let invalid = satisfied
+        .into_iter()
+        .enumerate()
+        .filter(|(_, satisfied)| !satisfied)
+        .map(|(index, _)| argument_error(ctx, index, EXPECTED[index], &args[index]))
+        .collect::<Vec<_>>();
+    if !invalid.is_empty() {
+        return Err(invalid_arguments(
+            ctx,
+            format!(
+                "requires `{}` to be {} and `{}` to be {}",
+                argument_name(ctx.identifier, 0),
+                EXPECTED[0],
+                argument_name(ctx.identifier, 1),
+                EXPECTED[1],
+            ),
+            "Build a tuple with `[tuple A B]`. Tuple field positions start at 1.",
+            PrimitiveArgumentErrorKind::Type,
+            invalid,
+        ));
+    }
     let (
         RuntimeValue::Element(ElementValue::Int(index)),
         RuntimeValue::Element(ElementValue::Tuple(fields)),
     ) = (&args[0], &args[1])
     else {
-        return Err(RuntimeError::EnumTypeError {
-            range: ctx.function_range.into(),
-            message: "[field I of T] requires an integer index and a tuple".to_string(),
-        });
+        unreachable!("field argument types were checked above")
     };
     let index = index
         .checked_sub(1)
         .and_then(|index| usize::try_from(index).ok());
     let Some(value) = index.and_then(|index| fields.get(index)) else {
-        return Err(RuntimeError::EnumTypeError {
-            range: ctx.function_range.into(),
-            message: format!("tuple index must be between 1 and {}", fields.len()),
-        });
+        return Err(RuntimeError::InvalidPrimitiveValue(Box::new(
+            PrimitiveValueError {
+                range: ctx.function_range.into(),
+                function: ctx.identifier,
+                requirement: format!("cannot select field `{}`", args[0]),
+                argument: "INDEX",
+                found_range: ctx.arg_ranges[0].into(),
+                value: args[0].clone(),
+                constraint: format!("an index from 1 through {}", fields.len()),
+                help: Some("Tuple field positions start at 1.".to_string()),
+            },
+        )));
     };
     Ok(RuntimeValue::Element(value.clone()))
 }
@@ -421,11 +531,16 @@ macro_rules! define_primitives {
             $name:literal,
             $arg_types:expr,
             $accepts_non_numeric:literal,
-            $execute:path;
+            $execute:path,
+            $signature:literal,
+            $snippet:literal,
+            $documentation:literal,
+            $documentation_url:literal;
         )+
     ) => {
         $(
             pub static $constant: Primitive = Primitive {
+                identifier: $name,
                 arg_types: $arg_types,
                 accepts_non_numeric: $accepts_non_numeric,
                 execute: $execute,
@@ -435,51 +550,81 @@ macro_rules! define_primitives {
         static PRIMITIVES: &[(&str, &Primitive)] = &[
             $(($name, &$constant),)+
         ];
+
+        static PRIMITIVE_METADATA: &[PrimitiveMetadata] = &[
+            $(PrimitiveMetadata {
+                identifier: $name,
+                signature: $signature,
+                snippet: $snippet,
+                documentation: $documentation,
+                documentation_url: $documentation_url,
+            },)+
+        ];
     };
 }
 
 define_primitives! {
     ABSOLUTE_PRIMITIVE:
-        "absolute {}", &[Some(StaticType::Int)], false, absolute_execute;
+        "absolute {}", &[Some(StaticType::Int)], false, absolute_execute,
+        "[absolute N:n]", "absolute ${N}",
+        "Returns the absolute value of N.", "/help/spec/#absolute-nn";
     CONTAINS_PRIMITIVE:
         "{} contains {}",
         &[Some(StaticType::List), Some(StaticType::Int)],
         true,
-        contains_execute;
+        contains_execute,
+        "[SEQ:s contains N:n]", "${SEQ} contains ${N}",
+        "Returns 1 when SEQ contains N, or 0 otherwise.", "/help/spec/#seqs-contains-nn";
     COUNT_PRIMITIVE:
         "count {} in {}",
         &[Some(StaticType::List), Some(StaticType::List)],
         true,
-        count_execute;
+        count_execute,
+        "[count NEEDLES:s in HAYSTACK:s]", "count ${NEEDLES} in ${HAYSTACK}",
+        "Counts occurrences of every element of NEEDLES in HAYSTACK.", "/help/spec/#count-needless-in-haystacks";
     EXPLODE_PRIMITIVE:
-        "explode {}", &[Some(StaticType::Pool)], false, explode_execute;
+        "explode {}", &[Some(StaticType::Pool)], false, explode_execute,
+        "[explode POOL:d]", "explode ${POOL}",
+        "Rerolls the highest outcome and adds it to the original roll.", "/help/spec/#explode-poold";
     HIGHEST_PRIMITIVE:
         "highest {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
         false,
-        highest_execute;
+        highest_execute,
+        "[highest COUNT:n of POOL:d]", "highest ${COUNT} of ${POOL}",
+        "Sums the highest COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     LOWEST_PRIMITIVE:
         "lowest {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
         false,
-        lowest_execute;
+        lowest_execute,
+        "[lowest COUNT:n of POOL:d]", "lowest ${COUNT} of ${POOL}",
+        "Sums the lowest COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     MIDDLE_PRIMITIVE:
         "middle {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
         false,
-        middle_execute;
+        middle_execute,
+        "[middle COUNT:n of POOL:d]", "middle ${COUNT} of ${POOL}",
+        "Sums the middle COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     HIGHEST_OF_PRIMITIVE:
         "highest of {} and {}",
         &[Some(StaticType::Int), Some(StaticType::Int)],
         false,
-        highest_of_execute;
+        highest_of_execute,
+        "[highest of FIRST:n and SECOND:n]", "highest of ${FIRST} and ${SECOND}",
+        "Returns the greater of FIRST and SECOND.", "/help/spec/#highest-of-firstn-and-secondn-lowest-of-firstn-and-secondn";
     LOWEST_OF_PRIMITIVE:
         "lowest of {} and {}",
         &[Some(StaticType::Int), Some(StaticType::Int)],
         false,
-        lowest_of_execute;
+        lowest_of_execute,
+        "[lowest of FIRST:n and SECOND:n]", "lowest of ${FIRST} and ${SECOND}",
+        "Returns the lesser of FIRST and SECOND.", "/help/spec/#highest-of-firstn-and-secondn-lowest-of-firstn-and-secondn";
     MAXIMUM_PRIMITIVE:
-        "maximum of {}", &[Some(StaticType::Pool)], false, maximum_execute;
+        "maximum of {}", &[Some(StaticType::Pool)], false, maximum_execute,
+        "[maximum of POOL:d]", "maximum of ${POOL}",
+        "Returns the largest possible outcome of the summed POOL.", "/help/spec/#maximum-of-poold";
     CHOOSE_PRIMITIVE:
         "choose {} if {} else {}",
         &[
@@ -488,35 +633,56 @@ define_primitives! {
             Some(StaticType::Pool),
         ],
         true,
-        choose_execute;
+        choose_execute,
+        "[choose FIRST:d if CONDITION:n else SECOND:d]", "choose ${FIRST} if ${CONDITION} else ${SECOND}",
+        "Returns FIRST when CONDITION is nonzero, and SECOND otherwise.", "/help/spec/#-choose-firstd-if-conditionn-else-secondd";
     REVERSE_PRIMITIVE:
-        "reverse {}", &[Some(StaticType::List)], true, reverse_execute;
+        "reverse {}", &[Some(StaticType::List)], true, reverse_execute,
+        "[reverse SEQUENCE:s]", "reverse ${SEQUENCE}",
+        "Returns SEQUENCE in reverse order.", "/help/spec/#reverse-sequences";
     SORT_PRIMITIVE:
-        "sort {}", &[Some(StaticType::List)], false, sort_execute;
+        "sort {}", &[Some(StaticType::List)], false, sort_execute,
+        "[sort SEQUENCE:s]", "sort ${SEQUENCE}",
+        "Sorts SEQUENCE according to the position-order setting.", "/help/spec/#sort-sequences";
     EXPLODE_ON_PRIMITIVE:
         "explode {} on {}",
         &[Some(StaticType::Pool), Some(StaticType::List)],
         false,
-        explode_on_execute;
+        explode_on_execute,
+        "[explode POOL:d on COND:s]", "explode ${POOL} on ${COND}",
+        "Rerolls and adds outcomes of POOL that are contained in COND.", "/help/spec/#explode-poold-on-conds";
     REROLL_PRIMITIVE:
-        "reroll {}", &[Some(StaticType::Pool)], false, reroll_execute;
+        "reroll {}", &[Some(StaticType::Pool)], false, reroll_execute,
+        "[reroll POOL:d]", "reroll ${POOL}",
+        "Replaces the highest outcome of POOL with a new roll.", "/help/spec/#-reroll-poold";
     REROLL_ON_PRIMITIVE:
         "reroll {} on {}",
         &[Some(StaticType::Pool), Some(StaticType::List)],
         false,
-        reroll_on_execute;
+        reroll_on_execute,
+        "[reroll POOL:d on COND:s]", "reroll ${POOL} on ${COND}",
+        "Replaces outcomes of POOL that are contained in COND with a new roll.", "/help/spec/#-reroll-poold-on-conds";
     TUPLE_2_PRIMITIVE:
-        "tuple {} {}", &[Some(StaticType::Int); 2], true, tuple_execute;
+        "tuple {} {}", &[Some(StaticType::Int); 2], true, tuple_execute,
+        "[tuple A:n B:n]", "tuple ${A} ${B}",
+        "Constructs a two-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     TUPLE_3_PRIMITIVE:
-        "tuple {} {} {}", &[Some(StaticType::Int); 3], true, tuple_execute;
+        "tuple {} {} {}", &[Some(StaticType::Int); 3], true, tuple_execute,
+        "[tuple A:n B:n C:n]", "tuple ${A} ${B} ${C}",
+        "Constructs a three-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     TUPLE_4_PRIMITIVE:
-        "tuple {} {} {} {}", &[Some(StaticType::Int); 4], true, tuple_execute;
+        "tuple {} {} {} {}", &[Some(StaticType::Int); 4], true, tuple_execute,
+        "[tuple A:n B:n C:n D:n]", "tuple ${A} ${B} ${C} ${D}",
+        "Constructs a four-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     FIELD_PRIMITIVE:
-        "field {} of {}", &[Some(StaticType::Int); 2], true, field_execute;
+        "field {} of {}", &[Some(StaticType::Int); 2], true, field_execute,
+        "[field INDEX:n of TUPLE:n]", "field ${INDEX} of ${TUPLE}",
+        "Returns the one-based INDEX field of TUPLE.", "/help/spec/#-field-indexn-of-tuplen";
 }
 
 fn keep_list_for_primitive(
     mode: KeepMode,
+    identifier: &'static str,
     keep: i32,
     keep_range: ast::Range,
     pool_size: usize,
@@ -527,7 +693,7 @@ fn keep_list_for_primitive(
     if keep < 0 {
         return Err(RuntimeError::NegativeArgumentToFunction {
             range: function_range.into(),
-            name: mode.name().to_string(),
+            name: identifier.to_string(),
             found_range: keep_range.into(),
             value: keep,
         });
@@ -564,6 +730,18 @@ pub fn register_primitives(functions: &mut HashMap<String, Function>) {
     );
 }
 
+/// Returns completion and documentation metadata for every built-in function.
+pub fn primitive_metadata() -> &'static [PrimitiveMetadata] {
+    PRIMITIVE_METADATA
+}
+
+pub(crate) fn primitive_signature(identifier: &str) -> Option<&'static str> {
+    PRIMITIVE_METADATA
+        .iter()
+        .find(|primitive| primitive.identifier == identifier)
+        .map(|primitive| primitive.signature)
+}
+
 #[cfg(test)]
 mod tests {
     use malachite::Natural;
@@ -581,6 +759,7 @@ mod tests {
             explode_depth,
             lowest_first,
             function_range: dummy_range(),
+            identifier: "test {}",
         }
     }
 
@@ -911,5 +1090,29 @@ mod tests {
         let mut expected = PRIMITIVES.iter().map(|(name, _)| *name).collect::<Vec<_>>();
         expected.sort_unstable();
         assert_eq!(registered, expected);
+    }
+
+    #[test]
+    fn primitive_metadata_matches_the_runtime_registry() {
+        assert_eq!(PRIMITIVE_METADATA.len(), PRIMITIVES.len());
+
+        for ((identifier, primitive), metadata) in PRIMITIVES.iter().zip(PRIMITIVE_METADATA) {
+            assert_eq!(metadata.identifier, *identifier);
+            assert_eq!(metadata.identifier, primitive.identifier);
+            assert_eq!(
+                metadata.snippet.matches("${").count(),
+                primitive.arg_types.len()
+            );
+            // `argument_name` indexes into these, so every argument needs one.
+            assert_eq!(
+                argument_names(identifier).count(),
+                primitive.arg_types.len(),
+                "{identifier}"
+            );
+            assert!(metadata.signature.starts_with('['));
+            assert!(metadata.signature.ends_with(']'));
+            assert!(!metadata.documentation.is_empty());
+            assert!(metadata.documentation_url.starts_with("/help/spec/#"));
+        }
     }
 }

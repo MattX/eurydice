@@ -3,7 +3,7 @@ use miette::{Diagnostic, SourceSpan};
 use serde::Serialize;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct Range {
     pub start: usize,
     pub end: usize,

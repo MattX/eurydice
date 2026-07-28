@@ -1,4 +1,4 @@
-use eurydice_cli::{format_output_probabilities, print_diagnostic};
+use eurydice_cli::{format_output_probabilities, print_engine_diagnostics};
 use eurydice_engine::Engine;
 
 fn main() {
@@ -10,18 +10,17 @@ fn main() {
     let mut code = String::new();
     while let Ok(line) = rl.readline(if code.is_empty() { "> " } else { ". " }) {
         code.push_str(&line);
-        let outputs = match engine.run(&code) {
-            Ok(outputs) => outputs,
-            Err(error) if error.is_incomplete() => {
-                code.push('\n');
-                continue;
-            }
-            Err(error) => {
-                print_diagnostic(error, &code);
-                code.clear();
-                continue;
-            }
-        };
+        let report = engine.run_with_diagnostics(&code);
+        if report.error().is_some_and(|error| error.incomplete) {
+            code.push('\n');
+            continue;
+        }
+        print_engine_diagnostics(&report.diagnostics, &report.sources);
+        if report.error().is_some() {
+            code.clear();
+            continue;
+        }
+        let outputs = report.outputs;
         code.clear();
 
         for output in outputs {
