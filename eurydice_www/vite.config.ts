@@ -61,7 +61,7 @@ function prerenderHelp() {
         `${open}${markup}${close}`,
       );
     },
-    async closeBundle() {
+    async writeBundle() {
       const { routes } = await loadRenderer();
       const missingRoutes = routes.filter((route) => !renderedRoutes.has(route));
       if (missingRoutes.length > 0) {

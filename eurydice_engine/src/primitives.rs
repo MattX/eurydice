@@ -145,8 +145,18 @@ fn materialize_compatible_pair(
             "Both arguments must use integers or members of the same enum type.",
             PrimitiveArgumentErrorKind::OutcomeType,
             vec![
-                argument_error(ctx, 0, format!("the same outcome type as `{right_name}`"), left),
-                argument_error(ctx, 1, format!("the same outcome type as `{left_name}`"), right),
+                argument_error(
+                    ctx,
+                    0,
+                    format!("the same outcome type as `{right_name}`"),
+                    left,
+                ),
+                argument_error(
+                    ctx,
+                    1,
+                    format!("the same outcome type as `{left_name}`"),
+                    right,
+                ),
             ],
         )
     };

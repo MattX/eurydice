@@ -307,6 +307,24 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     "",
                     "Remove the second `=`",
                 ))
+            } else if is_plain_word(found) && expected.iter().any(|item| item.contains("[A-Z_]")) {
+                // A lowercase word where a value was expected: lowercase words
+                // only ever name functions, so this reads as a variable whose
+                // case is wrong.
+                let replacement = found.to_ascii_uppercase();
+                syntax_parts(
+                    source_id,
+                    range,
+                    "syntax.variable_case",
+                    "Variable names use uppercase letters",
+                )
+                .help("Lowercase words are reserved for function names.")
+                .fix(replacement_fix(
+                    source_id,
+                    range,
+                    &replacement,
+                    &format!("Change this variable to `{replacement}`"),
+                ))
             } else {
                 syntax_parts(
                     source_id,
@@ -409,37 +427,6 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     "",
                     "Remove the semicolon",
                 ))
-            } else if let Some(letter) = found.filter(char::is_ascii_lowercase) {
-                // Words lex as `[a-z][a-z_]+`, so a lowercase letter can only
-                // fail to lex when it stands alone. In a function-name position
-                // that makes the length the problem, not the case; uppercasing
-                // it there would not help.
-                if in_function_name_position(source, location) {
-                    syntax_parts(
-                        source_id,
-                        range,
-                        "syntax.short_function_name",
-                        "Function names must be at least two letters",
-                    )
-                    .help(format!(
-                        "Rename `{letter}` to a longer lowercase word, such as `{letter}{letter}`."
-                    ))
-                } else {
-                    let replacement = letter.to_ascii_uppercase().to_string();
-                    syntax_parts(
-                        source_id,
-                        range,
-                        "syntax.variable_case",
-                        "Variable names use uppercase letters",
-                    )
-                    .help("Lowercase words are reserved for function names.")
-                    .fix(replacement_fix(
-                        source_id,
-                        range,
-                        &replacement,
-                        &format!("Change this variable to `{replacement}`"),
-                    ))
-                }
             } else {
                 syntax_parts(
                     source_id,
@@ -473,14 +460,19 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
     parts.finish(DiagnosticSeverity::Error, Vec::new())
 }
 
-/// Whether the word at `location` names a function, either in a definition
-/// (`function: name`) or in a call (`[name ...]`).
-fn in_function_name_position(source: &str, location: usize) -> bool {
-    let prefix = source[..location].trim_end();
-    prefix.ends_with('[')
-        || prefix
-            .strip_suffix(':')
-            .is_some_and(|prefix| prefix.trim_end().ends_with("function"))
+/// Whether `word` is a lowercase word that carries no meaning of its own, and
+/// so can only be a name. Keywords are excluded: misplacing one is its own
+/// mistake, and uppercasing it would not be the fix.
+fn is_plain_word(word: &str) -> bool {
+    const KEYWORDS: [&str; 17] = [
+        "d", "if", "set", "else", "to", "function", "result", "over", "loop", "output", "print",
+        "named", "labeled", "n", "s", "int", "enum",
+    ];
+
+    !word.is_empty()
+        && word.starts_with(|c: char| c.is_ascii_lowercase())
+        && word.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        && !KEYWORDS.contains(&word)
 }
 
 /// A warning the evaluator can raise.
@@ -1039,12 +1031,20 @@ mod tests {
     #[test]
     fn expected_closer_names_a_delimiter_only_when_it_is_the_only_way_on() {
         let closer = |tokens: &[&str]| {
-            expected_closer(&tokens.iter().map(|token| token.to_string()).collect::<Vec<_>>())
+            expected_closer(
+                &tokens
+                    .iter()
+                    .map(|token| token.to_string())
+                    .collect::<Vec<_>>(),
+            )
         };
 
         assert_eq!(closer(&[r#"")""#]), Some(')'));
         // A closer among other continuations is still unambiguous.
-        assert_eq!(closer(&[r#"",""#, r#""..""#, r#"":""#, r#""}""#]), Some('}'));
+        assert_eq!(
+            closer(&[r#"",""#, r#""..""#, r#"":""#, r#""}""#]),
+            Some('}')
+        );
         // Two closers would be a guess, and no closer means the program simply
         // ran out of input.
         assert_eq!(closer(&[r#"")""#, r#""]""#]), None);

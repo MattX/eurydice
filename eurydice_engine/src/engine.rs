@@ -258,6 +258,7 @@ mod tests {
             ("output 1 == 1", "syntax.equality_operator", ""),
             ("output d6;", "syntax.semicolon", ""),
             ("output x", "syntax.variable_case", "X"),
+            ("output total", "syntax.variable_case", "TOTAL"),
             ("output (1", "syntax.unclosed_delimiter", ")"),
         ];
 
@@ -270,19 +271,22 @@ mod tests {
     }
 
     #[test]
-    fn single_letter_function_names_report_their_length_not_their_case() {
-        for source in [
-            "function: f X:n { result: X }",
-            "function : f X:n { result: X }",
-            "output [f 3]",
-        ] {
-            let report = Engine::new().run_with_diagnostics(source);
-            let error = report.error().unwrap();
+    fn single_letter_function_names_are_accepted() {
+        let mut engine = Engine::new();
+        run(&mut engine, "function: f X:n { result: X }");
 
-            assert_eq!(error.code, "syntax.short_function_name", "{source}");
-            // Uppercasing a function name would not make the program valid.
-            assert!(error.fixes.is_empty(), "{source}");
-        }
+        let outputs = run(&mut engine, "output [f 3]");
+
+        assert_eq!(outputs[0].distribution.probabilities, vec![(vec![3], 1.0)]);
+    }
+
+    #[test]
+    fn misplaced_keywords_are_not_mistaken_for_lowercase_variables() {
+        let report = Engine::new().run_with_diagnostics("output result");
+        let error = report.error().unwrap();
+
+        assert_eq!(error.code, "syntax.unexpected_token");
+        assert!(error.fixes.is_empty());
     }
 
     #[test]
