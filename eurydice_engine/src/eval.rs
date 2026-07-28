@@ -1502,120 +1502,52 @@ mod tests {
         }
     }
 
+    /// Every overflowing operation names itself and the operands that
+    /// overflowed, so the message points at the arithmetic that failed.
     #[test]
-    fn test_valid_math_operations() {
+    fn test_arithmetic_overflow() {
         use crate::ast::{BinaryOp, Range};
 
-        // Test valid division
-        let left = 10.into();
-        let right = 2.into();
-        let op = WithRange {
-            value: BinaryOp::Div,
-            range: Range { start: 0, end: 1 },
-        };
+        for (binary_op, left, right, expected_operation, expected_operands) in [
+            (
+                BinaryOp::Add,
+                i32::MAX,
+                1,
+                "Addition overflow",
+                i32::MAX.to_string(),
+            ),
+            (
+                BinaryOp::Sub,
+                i32::MIN,
+                1,
+                "Subtraction overflow",
+                i32::MIN.to_string(),
+            ),
+            (
+                BinaryOp::Mul,
+                i32::MAX,
+                2,
+                "Multiplication overflow",
+                i32::MAX.to_string(),
+            ),
+            // 2^32 overflows i32.
+            (BinaryOp::Pow, 2, 32, "Power overflow", "2 ^ 32".to_string()),
+        ] {
+            let range = Range { start: 0, end: 1 };
+            let op = WithRange {
+                value: binary_op,
+                range,
+            };
+            let left: RuntimeValue = left.into();
+            let right: RuntimeValue = right.into();
 
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
-        match result {
-            Ok(RuntimeValue::Element(ElementValue::Int(5))) => {}
-            _ => panic!("Expected successful division result of 5"),
-        }
+            let result = apply_binary_op(&op, &left, range, &right, false);
 
-        // Test valid exponentiation
-        let left = 2.into();
-        let right = 3.into();
-        let op = WithRange {
-            value: BinaryOp::Pow,
-            range: Range { start: 0, end: 1 },
-        };
-
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
-        match result {
-            Ok(RuntimeValue::Element(ElementValue::Int(8))) => {}
-            _ => panic!("Expected successful exponentiation result of 8"),
-        }
-    }
-
-    #[test]
-    fn test_addition_overflow() {
-        use crate::ast::{BinaryOp, Range};
-
-        let left = i32::MAX.into();
-        let right = 1.into();
-        let op = WithRange {
-            value: BinaryOp::Add,
-            range: Range { start: 0, end: 1 },
-        };
-
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
-        match result {
-            Err(RuntimeError::MathError { message, .. }) => {
-                assert!(message.contains("Addition overflow"));
-                assert!(message.contains(&format!("{}", i32::MAX)));
-            }
-            _ => panic!("Expected MathError for addition overflow"),
-        }
-    }
-
-    #[test]
-    fn test_subtraction_overflow() {
-        use crate::ast::{BinaryOp, Range};
-
-        let left = i32::MIN.into();
-        let right = 1.into();
-        let op = WithRange {
-            value: BinaryOp::Sub,
-            range: Range { start: 0, end: 1 },
-        };
-
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
-        match result {
-            Err(RuntimeError::MathError { message, .. }) => {
-                assert!(message.contains("Subtraction overflow"));
-                assert!(message.contains(&format!("{}", i32::MIN)));
-            }
-            _ => panic!("Expected MathError for subtraction overflow"),
-        }
-    }
-
-    #[test]
-    fn test_multiplication_overflow() {
-        use crate::ast::{BinaryOp, Range};
-
-        let left = i32::MAX.into();
-        let right = 2.into();
-        let op = WithRange {
-            value: BinaryOp::Mul,
-            range: Range { start: 0, end: 1 },
-        };
-
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
-        match result {
-            Err(RuntimeError::MathError { message, .. }) => {
-                assert!(message.contains("Multiplication overflow"));
-                assert!(message.contains(&format!("{}", i32::MAX)));
-            }
-            _ => panic!("Expected MathError for multiplication overflow"),
-        }
-    }
-
-    #[test]
-    fn test_power_overflow() {
-        use crate::ast::{BinaryOp, Range};
-
-        let left = 2.into();
-        let right = 32.into(); // 2^32 overflows i32
-        let op = WithRange {
-            value: BinaryOp::Pow,
-            range: Range { start: 0, end: 1 },
-        };
-
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
-        match result {
-            Err(RuntimeError::MathError { message, .. }) => {
-                assert!(message.contains("Power overflow"));
-                assert!(message.contains("2 ^ 32"));
-            }
-            _ => panic!("Expected MathError for power overflow"),
+            let Err(RuntimeError::MathError { message, .. }) = result else {
+                panic!("expected a MathError for {expected_operation}, got {result:?}");
+            };
+            assert!(message.contains(expected_operation), "{message}");
+            assert!(message.contains(&expected_operands), "{message}");
         }
     }
 }

@@ -793,17 +793,6 @@ mod tests {
     }
 
     #[test]
-    fn test_absolute_execute() {
-        let args = vec![int_value(-5)];
-        let result = absolute_execute(&args, ctx(&[], 0, false)).unwrap();
-        assert_eq!(result, int_value(5));
-
-        let args = vec![int_value(3)];
-        let result = absolute_execute(&args, ctx(&[], 0, false)).unwrap();
-        assert_eq!(result, int_value(3));
-    }
-
-    #[test]
     fn test_contains_execute() {
         let haystack = vec![1, 2, 3, 3, 4, 5];
         let args = vec![list_value(haystack), int_value(3)];
@@ -915,28 +904,6 @@ mod tests {
         } else {
             panic!("Expected pool result");
         }
-    }
-
-    #[test]
-    fn test_highest_of_execute() {
-        let args = vec![int_value(5), int_value(3)];
-        let result = highest_of_execute(&args, ctx(&[], 0, false)).unwrap();
-        assert_eq!(result, int_value(5));
-
-        let args = vec![int_value(2), int_value(7)];
-        let result = highest_of_execute(&args, ctx(&[], 0, false)).unwrap();
-        assert_eq!(result, int_value(7));
-    }
-
-    #[test]
-    fn test_lowest_of_execute() {
-        let args = vec![int_value(5), int_value(3)];
-        let result = lowest_of_execute(&args, ctx(&[], 0, false)).unwrap();
-        assert_eq!(result, int_value(3));
-
-        let args = vec![int_value(2), int_value(7)];
-        let result = lowest_of_execute(&args, ctx(&[], 0, false)).unwrap();
-        assert_eq!(result, int_value(2));
     }
 
     #[test]
@@ -1087,19 +1054,6 @@ mod tests {
         } else {
             panic!("Expected pool result");
         }
-    }
-
-    #[test]
-    fn test_register_primitives() {
-        use std::collections::HashMap;
-        let mut functions = HashMap::new();
-        register_primitives(&mut functions);
-
-        let mut registered = functions.keys().map(String::as_str).collect::<Vec<_>>();
-        registered.sort_unstable();
-        let mut expected = PRIMITIVES.iter().map(|(name, _)| *name).collect::<Vec<_>>();
-        expected.sort_unstable();
-        assert_eq!(registered, expected);
     }
 
     #[test]

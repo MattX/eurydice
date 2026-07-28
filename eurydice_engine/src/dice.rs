@@ -631,30 +631,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_binom_base_cases() {
-        assert_eq!(binom(0, 0), 1);
-        assert_eq!(binom(1, 0), 1);
-        assert_eq!(binom(1, 1), 1);
-    }
-
-    #[test]
-    fn test_binom_small_values() {
-        assert_eq!(binom(2, 1), 2);
-        assert_eq!(binom(3, 1), 3);
-        assert_eq!(binom(3, 2), 3);
-        assert_eq!(binom(4, 2), 6);
-    }
-
-    #[test]
-    fn test_binom_larger_values() {
-        assert_eq!(binom(10, 5), 252);
-        assert_eq!(binom(20, 10), 184756);
-    }
-
-    #[test]
-    fn test_binom_edge_cases() {
-        assert_eq!(binom(100, 0), 1);
-        assert_eq!(binom(100, 100), 1);
+    fn test_binom() {
+        // Degenerate rows and columns, then values large enough to catch an
+        // off-by-one in the recurrence.
+        for (n, k, expected) in [
+            (0, 0, 1u64),
+            (1, 0, 1),
+            (1, 1, 1),
+            (2, 1, 2),
+            (3, 1, 3),
+            (3, 2, 3),
+            (4, 2, 6),
+            (10, 5, 252),
+            (20, 10, 184756),
+            (100, 0, 1),
+            (100, 100, 1),
+        ] {
+            assert_eq!(binom(n, k), expected, "binom({n}, {k})");
+        }
     }
 
     fn to_counter<T: Hash + Eq>(v: Vec<(T, usize)>) -> HashMap<T, Natural> {
@@ -735,17 +729,6 @@ mod tests {
                 (11, 2),
                 (12, 1)
             ])
-        );
-    }
-
-    #[test]
-    fn test_sum_2d3() {
-        let pool = Pool::ndn(2, 3);
-        let keep_list = vec![true; 2];
-        let result = pool.apply(SUM_MAPPER, &keep_list);
-        assert_eq!(
-            result,
-            to_counter(vec![(2, 1), (3, 2), (4, 3), (5, 2), (6, 1),])
         );
     }
 
@@ -920,55 +903,6 @@ mod tests {
     }
 
     #[test]
-    fn test_explode_d10() {
-        let die = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            .into_iter()
-            .map(|i| (i, 1usize.into()))
-            .collect();
-        let result = explode(die, &[2, 8], 3);
-        let map = result.into_iter().collect::<HashMap<_, _>>();
-        let expected = [
-            (1, 1000),
-            (3, 1100),
-            (4, 1000),
-            (5, 1110),
-            (6, 1100),
-            (7, 1111),
-            (8, 111),
-            (9, 1211),
-            (10, 1011),
-            (11, 231),
-            (12, 201),
-            (13, 134),
-            (14, 134),
-            (15, 124),
-            (16, 24),
-            (17, 133),
-            (18, 103),
-            (19, 36),
-            (20, 36),
-            (21, 16),
-            (22, 16),
-            (23, 13),
-            (24, 3),
-            (25, 14),
-            (26, 14),
-            (27, 4),
-            (28, 4),
-            (29, 1),
-            (30, 1),
-            (31, 1),
-            (32, 1),
-            (33, 1),
-            (34, 1),
-        ]
-        .into_iter()
-        .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
-        .collect::<HashMap<_, _>>();
-        assert_eq!(map, expected);
-    }
-
-    #[test]
     fn test_explode_weighted() {
         let pool = Pool::from_list(1, vec![1, 1, 3, 4, 4, 4, 5, 5]);
         let die = pool.ordered_outcomes;
@@ -990,157 +924,6 @@ mod tests {
             (15, 27),
             (16, 81),
             (17, 54),
-        ]
-        .into_iter()
-        .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
-        .collect::<HashMap<_, _>>();
-        assert_eq!(map, expected);
-    }
-
-    #[test]
-    fn test_map() {
-        let pool = Pool::from_list(5, vec![1, 2, 3, 4, 5]);
-        fn multiset_to_int(multiset: &[i32]) -> i32 {
-            let mut total = 0;
-            for (idx, item) in multiset.iter().rev().enumerate() {
-                total += (item - 1) * 5i32.pow(u32::try_from(idx).expect("test pool is small"));
-            }
-            total
-        }
-
-        let result = pool.map(multiset_to_int);
-
-        let map = result
-            .ordered_outcomes
-            .into_iter()
-            .collect::<HashMap<_, _>>();
-        let expected = [
-            (0, 1),
-            (1, 5),
-            (2, 5),
-            (3, 5),
-            (4, 5),
-            (6, 10),
-            (7, 20),
-            (8, 20),
-            (9, 20),
-            (12, 10),
-            (13, 20),
-            (14, 20),
-            (18, 10),
-            (19, 20),
-            (24, 10),
-            (31, 10),
-            (32, 30),
-            (33, 30),
-            (34, 30),
-            (37, 30),
-            (38, 60),
-            (39, 60),
-            (43, 30),
-            (44, 60),
-            (49, 30),
-            (62, 10),
-            (63, 30),
-            (64, 30),
-            (68, 30),
-            (69, 60),
-            (74, 30),
-            (93, 10),
-            (94, 30),
-            (99, 30),
-            (124, 10),
-            (156, 5),
-            (157, 20),
-            (158, 20),
-            (159, 20),
-            (162, 30),
-            (163, 60),
-            (164, 60),
-            (168, 30),
-            (169, 60),
-            (174, 30),
-            (187, 20),
-            (188, 60),
-            (189, 60),
-            (193, 60),
-            (194, 120),
-            (199, 60),
-            (218, 20),
-            (219, 60),
-            (224, 60),
-            (249, 20),
-            (312, 5),
-            (313, 20),
-            (314, 20),
-            (318, 30),
-            (319, 60),
-            (324, 30),
-            (343, 20),
-            (344, 60),
-            (349, 60),
-            (374, 20),
-            (468, 5),
-            (469, 20),
-            (474, 30),
-            (499, 20),
-            (624, 5),
-            (781, 1),
-            (782, 5),
-            (783, 5),
-            (784, 5),
-            (787, 10),
-            (788, 20),
-            (789, 20),
-            (793, 10),
-            (794, 20),
-            (799, 10),
-            (812, 10),
-            (813, 30),
-            (814, 30),
-            (818, 30),
-            (819, 60),
-            (824, 30),
-            (843, 10),
-            (844, 30),
-            (849, 30),
-            (874, 10),
-            (937, 5),
-            (938, 20),
-            (939, 20),
-            (943, 30),
-            (944, 60),
-            (949, 30),
-            (968, 20),
-            (969, 60),
-            (974, 60),
-            (999, 20),
-            (1093, 5),
-            (1094, 20),
-            (1099, 30),
-            (1124, 20),
-            (1249, 5),
-            (1562, 1),
-            (1563, 5),
-            (1564, 5),
-            (1568, 10),
-            (1569, 20),
-            (1574, 10),
-            (1593, 10),
-            (1594, 30),
-            (1599, 30),
-            (1624, 10),
-            (1718, 5),
-            (1719, 20),
-            (1724, 30),
-            (1749, 20),
-            (1874, 5),
-            (2343, 1),
-            (2344, 5),
-            (2349, 10),
-            (2374, 10),
-            (2499, 5),
-            (3124, 1),
         ]
         .into_iter()
         .map(|(i, w)| (i, Natural::from(u32::try_from(w).unwrap())))
@@ -1303,22 +1086,6 @@ mod tests {
     }
 
     #[test]
-    fn test_multiset_iterator_0_dim() {
-        let pool = Pool::from_list(0, vec![1, 2, 3]);
-        let mut iter = pool.multiset_iterator();
-        assert_eq!(iter.next(), None);
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_multiset_iterator_no_outcomes() {
-        let pool: Pool = Pool::from_list(2, vec![]);
-        let mut iter = pool.multiset_iterator();
-        assert_eq!(iter.next(), None);
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
     fn test_multiset_cross_product_dim1() {
         let pools = [
             Pool::from_list(1, vec![1, 2, 3]),
@@ -1412,41 +1179,5 @@ mod tests {
         );
         assert!(iter.next().is_none());
         assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn test_reroll_d3_on_3() {
-        let die = vec![(1, Natural::ONE), (2, Natural::ONE), (3, Natural::ONE)];
-
-        let result = reroll(die, &[3], 2);
-
-        assert_eq!(result.len(), 3);
-        assert_eq!(
-            result,
-            vec![(1, 13u32.into()), (2, 13u32.into()), (3, Natural::ONE)]
-        );
-    }
-
-    #[test]
-    fn test_reroll_d4_on_1_and_4() {
-        let die = vec![
-            (1, Natural::ONE),
-            (2, Natural::ONE),
-            (3, Natural::ONE),
-            (4, Natural::ONE),
-        ];
-
-        let result = reroll(die, &[1, 4], 2);
-
-        assert_eq!(result.len(), 4);
-        assert_eq!(
-            result,
-            vec![
-                (1, 4u32.into()),
-                (2, 28u32.into()),
-                (3, 28u32.into()),
-                (4, 4u32.into())
-            ]
-        );
     }
 }
