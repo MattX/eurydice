@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://eurydice.pages.dev/sitemap.xml
+Sitemap: https://eurydice.terbium.io/sitemap.xml
