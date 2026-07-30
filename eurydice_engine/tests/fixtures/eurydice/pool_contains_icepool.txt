@@ -1,0 +1,8 @@
+output [8d49 contains 1] named "icepool contains"
+
+\\\ Result \\\
+
+"icepool contains"
+#,%
+0,84.79324557320952
+1,15.206754426790482

@@ -249,6 +249,25 @@ where
         &self.ordered_outcomes
     }
 
+    /// Tests whether any die has the given outcome using the Icepool algorithm.
+    ///
+    /// The resulting pool contains only zero and one and is guaranteed to have
+    /// dimension 1.
+    pub fn contains(&self, needle: &T) -> Pool<i32> {
+        let keep_list = vec![true; self.dimension as usize];
+        self.apply(
+            StateMapper {
+                initial_state: 0,
+                f: |found: &i32, outcome: &T, count| {
+                    found | i32::from(count > 0 && outcome == needle)
+                },
+            },
+            &keep_list,
+        )
+        .into_iter()
+        .collect()
+    }
+
     /// Counts dice whose outcomes occur in `needles` using the Icepool algorithm.
     ///
     /// Repeated needles count repeatedly. The resulting pool is guaranteed to

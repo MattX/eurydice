@@ -830,31 +830,25 @@ output [choose FIRST if d{0:SECOND_WEIGHT, 1:FIRST_WEIGHT} else SECOND]
 
 Returns `1` if `SEQ` contains `N`, or `0` otherwise. `SEQ` and `N` must have the same outcome type.
 
+> ![IMPORTANT]
+>
+> If `SEQ` is a pool, Eurydice does not perform multiset enumeration and uses a Icepool instead. AnyDice performs multiset enumeration, and can be much slower.
+
 ### `[count NEEDLES:s in HAYSTACK:s]`
 
 Counts the number of occurrences of each element of `NEEDLES` in `HAYSTACK`. Returns the sum of these counts. Both lists must have the same outcome type.
+
+> ![IMPORTANT]
+>
+> If `HAYSTACK` is a pool, Eurydice does not perform multiset enumeration and uses Icepool instead. AnyDice performs multiset enumeration, and can be much slower.
 
 Examples:
 
 ```
 output [count {1, 2} in {3, 4}]  \ Outputs 0 \
 output [count {1, 1, 2} in {1, 2, 2, 3}]  \ Outputs 4 \
-```
-
-### ⊕ `[count NEEDLES:s in pool HAYSTACK:d]`
-
-Counts, for every outcome of `HAYSTACK`, the dice whose values occur in
-`NEEDLES`. Repeated values in `NEEDLES` count repeatedly. The result is a
-dimension-one integer pool, and both arguments must have the same outcome type.
-
-This form operates directly on the pool using the Icepool algorithm, without
-first expanding each possible pool outcome into a list.
-
-Examples:
-
-```
-output [count {2, 4, 6} in pool 2d6]  \ Outputs d{0:9, 1:18, 2:9} \
-output [count {4..6, 6} in pool d6]  \ Outputs d{0:3, 1:2, 2} \
+output [count {2, 4, 6} in 2d6]  \ Outputs d{0:9, 1:18, 2:9} \
+output [count {4..6, 6} in d6]  \ Outputs d{0:3, 1:2, 2} \
 ```
 
 ### `[explode POOL:d]`

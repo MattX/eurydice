@@ -174,15 +174,18 @@ fn contains_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let (RuntimeValue::List(_, _), RuntimeValue::Element(_)) = (&args[0], &args[1]) else {
-        unreachable!("contains argument shapes are enforced by the evaluator")
-    };
     let (haystack, needle) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
-    let (RuntimeValue::List(haystack, _), RuntimeValue::Element(needle)) = (haystack, needle)
-    else {
-        unreachable!("contains argument shapes were checked")
+    let RuntimeValue::Element(needle) = needle else {
+        unreachable!("contains needle shape is enforced by the evaluator")
     };
-    let result = haystack.iter().any(|value| value == &needle);
+    if let RuntimeValue::Pool(haystack, _) = haystack {
+        return Ok(haystack.contains(&needle).into());
+    }
+    let result = match haystack {
+        RuntimeValue::Element(haystack) => haystack == needle,
+        RuntimeValue::List(haystack, _) => haystack.iter().any(|value| value == &needle),
+        RuntimeValue::Pool(_, _) => unreachable!("pool haystack returned above"),
+    };
     Ok(if result { 1.into() } else { 0.into() })
 }
 
@@ -190,45 +193,26 @@ fn count_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if !matches!(
-        (&args[0], &args[1]),
-        (RuntimeValue::List(_, _), RuntimeValue::List(_, _))
-    ) {
-        unreachable!("count argument shapes are enforced by the evaluator")
-    }
-    let (needle, haystack) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
-    let (RuntimeValue::List(needle, _), RuntimeValue::List(haystack, _)) = (needle, haystack)
-    else {
-        unreachable!("count argument shapes were checked")
-    };
-    let (needle, haystack) = (needle.as_slice(), haystack.as_slice());
-    let mut needle_map = HashMap::new();
-    for n in needle.iter() {
-        *needle_map.entry(n).or_insert(0) += 1;
-    }
-    Ok(haystack
-        .iter()
-        .map(|item| needle_map.get(item).copied().unwrap_or(0))
-        .sum::<i32>()
-        .into())
-}
-
-fn count_in_pool_execute(
-    args: &[RuntimeValue],
-    ctx: PrimitiveCtx,
-) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if !matches!(
-        (&args[0], &args[1]),
-        (RuntimeValue::List(_, _), RuntimeValue::Pool(_, _))
-    ) {
-        unreachable!("pool count argument shapes are enforced by the evaluator")
-    }
     let (needles, haystack) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
-    let (RuntimeValue::List(needles, _), RuntimeValue::Pool(haystack, _)) = (needles, haystack)
-    else {
-        unreachable!("pool count argument shapes were checked")
+    let RuntimeValue::List(needles, _) = needles else {
+        unreachable!("count needle shape is enforced by the evaluator")
     };
-    Ok(haystack.count(&needles).into())
+    if let RuntimeValue::Pool(haystack, _) = haystack {
+        return Ok(haystack.count(&needles).into());
+    }
+    let mut needle_map = HashMap::new();
+    for needle in needles.iter() {
+        *needle_map.entry(needle).or_insert(0) += 1;
+    }
+    let count = match haystack {
+        RuntimeValue::Element(haystack) => needle_map.get(&haystack).copied().unwrap_or(0),
+        RuntimeValue::List(haystack, _) => haystack
+            .iter()
+            .map(|item| needle_map.get(item).copied().unwrap_or(0))
+            .sum(),
+        RuntimeValue::Pool(_, _) => unreachable!("pool haystack returned above"),
+    };
+    Ok(count.into())
 }
 
 type DieTransform = fn(Vec<(i32, Natural)>, &[i32], usize) -> Vec<(i32, Natural)>;
@@ -596,27 +580,24 @@ define_primitives! {
         "absolute {}", &[Some(StaticType::Int)], false, absolute_execute,
         "[absolute N:n]", "absolute ${N}",
         "Returns the absolute value of N.", "/help/spec/#absolute-nn";
+    // Keep SEQ uncoerced so the executor can distinguish a deterministic
+    // sequence from a pool and route the latter through Icepool directly.
     CONTAINS_PRIMITIVE:
         "{} contains {}",
-        &[Some(StaticType::List), Some(StaticType::Int)],
+        &[None, Some(StaticType::Int)],
         true,
         contains_execute,
         "[SEQ:s contains N:n]", "${SEQ} contains ${N}",
         "Returns 1 when SEQ contains N, or 0 otherwise.", "/help/spec/#seqs-contains-nn";
+    // Keep HAYSTACK uncoerced so the executor can distinguish a deterministic
+    // sequence from a pool and route the latter through Icepool directly.
     COUNT_PRIMITIVE:
         "count {} in {}",
-        &[Some(StaticType::List), Some(StaticType::List)],
+        &[Some(StaticType::List), None],
         true,
         count_execute,
         "[count NEEDLES:s in HAYSTACK:s]", "count ${NEEDLES} in ${HAYSTACK}",
         "Counts occurrences of every element of NEEDLES in HAYSTACK.", "/help/spec/#count-needless-in-haystacks";
-    COUNT_IN_POOL_PRIMITIVE:
-        "count {} in pool {}",
-        &[Some(StaticType::List), Some(StaticType::Pool)],
-        true,
-        count_in_pool_execute,
-        "[count NEEDLES:s in pool HAYSTACK:d]", "count ${NEEDLES} in pool ${HAYSTACK}",
-        "Counts dice in HAYSTACK whose outcomes occur in NEEDLES.", "/help/spec/#-count-needless-in-pool-haystackd";
     EXPLODE_PRIMITIVE:
         "explode {}", &[Some(StaticType::Pool)], false, explode_execute,
         "[explode POOL:d]", "explode ${POOL}",
@@ -828,6 +809,19 @@ mod tests {
         let args = vec![list_value(haystack), int_value(3)];
         let result = contains_execute(&args, ctx(&[], 0, false)).unwrap();
         assert_eq!(result, int_value(0));
+
+        let args = vec![int_value(3), int_value(3)];
+        assert_eq!(
+            contains_execute(&args, ctx(&[], 0, false)).unwrap(),
+            int_value(1)
+        );
+
+        let args = vec![pool_value(Pool::ndn(3, 6)), int_value(6)];
+        let result = contains_execute(&args, ctx(&[], 0, false)).unwrap();
+        let RuntimeValue::Pool(result, _) = result else {
+            panic!("Expected pool result");
+        };
+        assert_eq!(to_nat_list(result.ordered_outcomes()), [(0, 125), (1, 91)]);
     }
 
     #[test]
@@ -838,20 +832,23 @@ mod tests {
         let result = count_execute(&args, ctx(&[], 0, false)).unwrap();
         // Should count: 1 appears 2 times, 2 appears 3 times -> 1*2 + 2*3 = 8
         assert_eq!(result, int_value(8));
-    }
 
-    #[test]
-    fn test_count_in_pool_execute() {
         let needles = vec![2, 4, 6];
         let haystack = Pool::from_list(3, (1..=6).collect());
         let args = vec![list_value(needles), pool_value(haystack)];
-        let result = count_in_pool_execute(&args, ctx(&[], 0, false)).unwrap();
+        let result = count_execute(&args, ctx(&[], 0, false)).unwrap();
         let RuntimeValue::Pool(result, _) = result else {
             panic!("Expected pool result");
         };
         assert_eq!(
             to_nat_list(result.ordered_outcomes()),
             [(0, 27), (1, 81), (2, 81), (3, 27)]
+        );
+
+        let args = vec![list_value(vec![1, 2, 2]), int_value(2)];
+        assert_eq!(
+            count_execute(&args, ctx(&[], 0, false)).unwrap(),
+            int_value(2)
         );
     }
 

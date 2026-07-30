@@ -1,4 +1,4 @@
-output [count {1..4} in pool 8d49] named "icepool count"
+output [count {1..4} in 8d49] named "icepool count"
 
 \\\ Result \\\
 

@@ -89,8 +89,9 @@ fn equality_aware_operations_require_the_same_enum_type() {
     for program in [
         "enum: A_TYPE { A } enum: B_TYPE { B } output A = B",
         "enum: A_TYPE { A } enum: B_TYPE { B } output [{A} contains B]",
+        "enum: A_TYPE { A } enum: B_TYPE { B } output [d{A} contains B]",
         "enum: A_TYPE { A } enum: B_TYPE { B } output [count {A} in {B}]",
-        "enum: A_TYPE { A } enum: B_TYPE { B } output [count {A} in pool d{B}]",
+        "enum: A_TYPE { A } enum: B_TYPE { B } output [count {A} in d{B}]",
     ] {
         let error = error_summary(program);
         assert!(error.contains("same outcome type"), "{error}");
