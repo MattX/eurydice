@@ -23,6 +23,7 @@ output [pool d{MISS, HIT}] named "pool constraint"
 output [generic element d{MISS, HIT}] named "element constraint"
 output [[sequence {MISS, HIT}] contains MISS] named "contains"
 output [count {HIT} in [sequence {MISS, HIT, HIT}]] named "count"
+output [count {HIT, HIT} in pool d{MISS, HIT, HIT}] named "pool count"
 output 1@{MISS, HIT} named "first member"
 output #{MISS, HIT} named "enum list length"
 
@@ -62,6 +63,11 @@ HIT,50
 "count"
 #,%
 2,100
+
+"pool count"
+#,%
+0,33.33333333333333
+2,66.66666666666666
 
 "first member"
 ATTACK_RESULT,%

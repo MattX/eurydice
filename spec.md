@@ -841,6 +841,22 @@ output [count {1, 2} in {3, 4}]  \ Outputs 0 \
 output [count {1, 1, 2} in {1, 2, 2, 3}]  \ Outputs 4 \
 ```
 
+### ⊕ `[count NEEDLES:s in pool HAYSTACK:d]`
+
+Counts, for every outcome of `HAYSTACK`, the dice whose values occur in
+`NEEDLES`. Repeated values in `NEEDLES` count repeatedly. The result is a
+dimension-one integer pool, and both arguments must have the same outcome type.
+
+This form operates directly on the pool using the Icepool algorithm, without
+first expanding each possible pool outcome into a list.
+
+Examples:
+
+```
+output [count {2, 4, 6} in pool 2d6]  \ Outputs d{0:9, 1:18, 2:9} \
+output [count {4..6, 6} in pool d6]  \ Outputs d{0:3, 1:2, 2} \
+```
+
 ### `[explode POOL:d]`
 
 This transforms a die to match an [explosion rule](https://nethackwiki.com/wiki/Exploding_die): if the die rolls its highest face value, that value is kept and the die is rerolled.

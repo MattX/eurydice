@@ -249,6 +249,30 @@ where
         &self.ordered_outcomes
     }
 
+    /// Counts dice whose outcomes occur in `needles` using the Icepool algorithm.
+    ///
+    /// Repeated needles count repeatedly. The resulting pool is guaranteed to
+    /// have dimension 1.
+    pub fn count(&self, needles: &[T]) -> Pool<i32> {
+        let mut needle_counts = BTreeMap::new();
+        for needle in needles {
+            *needle_counts.entry(needle.clone()).or_insert(0i32) += 1;
+        }
+        let keep_list = vec![true; self.dimension as usize];
+        self.apply(
+            StateMapper {
+                initial_state: 0,
+                f: move |state: &i32, outcome: &T, count| {
+                    let count = i32::try_from(count).expect("pool dimension fits in i32");
+                    state + needle_counts.get(outcome).copied().unwrap_or(0) * count
+                },
+            },
+            &keep_list,
+        )
+        .into_iter()
+        .collect()
+    }
+
     /// Sums every die in this pool using an arbitrary additive state.
     ///
     /// `add_scaled` receives the current state, one face, and the number of
@@ -964,6 +988,38 @@ mod tests {
                 (2, Natural::from(4u32)),
             ]
             .into()
+        );
+    }
+
+    #[test]
+    fn test_pool_count_uses_needle_multiplicity() {
+        let pool = Pool::from_list(
+            2,
+            vec![
+                SymbolicOutcome::Miss,
+                SymbolicOutcome::Hit,
+                SymbolicOutcome::Hit,
+            ],
+        );
+
+        assert_eq!(
+            pool.count(&[SymbolicOutcome::Hit, SymbolicOutcome::Hit])
+                .ordered_outcomes(),
+            &[
+                (0, Natural::from(1u32)),
+                (2, Natural::from(4u32)),
+                (4, Natural::from(4u32)),
+            ]
+        );
+        assert_eq!(
+            pool.count(&[]).ordered_outcomes(),
+            &[(0, Natural::from(9u32))]
+        );
+        assert_eq!(
+            Pool::from_list(0, vec![SymbolicOutcome::Hit])
+                .count(&[SymbolicOutcome::Hit])
+                .ordered_outcomes(),
+            &[(0, Natural::ONE)]
         );
     }
 

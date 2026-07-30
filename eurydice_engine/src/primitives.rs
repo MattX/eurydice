@@ -213,6 +213,24 @@ fn count_execute(
         .into())
 }
 
+fn count_in_pool_execute(
+    args: &[RuntimeValue],
+    ctx: PrimitiveCtx,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    if !matches!(
+        (&args[0], &args[1]),
+        (RuntimeValue::List(_, _), RuntimeValue::Pool(_, _))
+    ) {
+        unreachable!("pool count argument shapes are enforced by the evaluator")
+    }
+    let (needles, haystack) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
+    let (RuntimeValue::List(needles, _), RuntimeValue::Pool(haystack, _)) = (needles, haystack)
+    else {
+        unreachable!("pool count argument shapes were checked")
+    };
+    Ok(haystack.count(&needles).into())
+}
+
 type DieTransform = fn(Vec<(i32, Natural)>, &[i32], usize) -> Vec<(i32, Natural)>;
 
 /// Shared body of the explode/reroll primitives. `on` is the sequence argument
@@ -592,6 +610,13 @@ define_primitives! {
         count_execute,
         "[count NEEDLES:s in HAYSTACK:s]", "count ${NEEDLES} in ${HAYSTACK}",
         "Counts occurrences of every element of NEEDLES in HAYSTACK.", "/help/spec/#count-needless-in-haystacks";
+    COUNT_IN_POOL_PRIMITIVE:
+        "count {} in pool {}",
+        &[Some(StaticType::List), Some(StaticType::Pool)],
+        true,
+        count_in_pool_execute,
+        "[count NEEDLES:s in pool HAYSTACK:d]", "count ${NEEDLES} in pool ${HAYSTACK}",
+        "Counts dice in HAYSTACK whose outcomes occur in NEEDLES.", "/help/spec/#-count-needless-in-pool-haystackd";
     EXPLODE_PRIMITIVE:
         "explode {}", &[Some(StaticType::Pool)], false, explode_execute,
         "[explode POOL:d]", "explode ${POOL}",
@@ -813,6 +838,21 @@ mod tests {
         let result = count_execute(&args, ctx(&[], 0, false)).unwrap();
         // Should count: 1 appears 2 times, 2 appears 3 times -> 1*2 + 2*3 = 8
         assert_eq!(result, int_value(8));
+    }
+
+    #[test]
+    fn test_count_in_pool_execute() {
+        let needles = vec![2, 4, 6];
+        let haystack = Pool::from_list(3, (1..=6).collect());
+        let args = vec![list_value(needles), pool_value(haystack)];
+        let result = count_in_pool_execute(&args, ctx(&[], 0, false)).unwrap();
+        let RuntimeValue::Pool(result, _) = result else {
+            panic!("Expected pool result");
+        };
+        assert_eq!(
+            to_nat_list(result.ordered_outcomes()),
+            [(0, 27), (1, 81), (2, 81), (3, 27)]
+        );
     }
 
     #[test]
