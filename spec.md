@@ -831,7 +831,6 @@ output [choose FIRST if d{0:SECOND_WEIGHT, 1:FIRST_WEIGHT} else SECOND]
 Returns `1` if `SEQ` contains `N`, or `0` otherwise. `SEQ` and `N` must have the same outcome type.
 
 > ![IMPORTANT]
->
 > If `SEQ` is a pool, Eurydice does not perform multiset enumeration and uses a Icepool instead. AnyDice performs multiset enumeration, and can be much slower.
 
 ### `[count NEEDLES:s in HAYSTACK:s]`
@@ -839,7 +838,6 @@ Returns `1` if `SEQ` contains `N`, or `0` otherwise. `SEQ` and `N` must have the
 Counts the number of occurrences of each element of `NEEDLES` in `HAYSTACK`. Returns the sum of these counts. Both lists must have the same outcome type.
 
 > ![IMPORTANT]
->
 > If `HAYSTACK` is a pool, Eurydice does not perform multiset enumeration and uses Icepool instead. AnyDice performs multiset enumeration, and can be much slower.
 
 Examples:
