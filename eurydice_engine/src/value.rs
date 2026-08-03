@@ -4,7 +4,9 @@ use std::{fmt::Write, rc::Rc};
 
 use malachite::{Natural, base::num::basic::traits::One};
 
+use crate::ast;
 use crate::dice::Pool;
+use crate::error::{RuntimeError, SemanticErrorKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EnumType {
@@ -186,7 +188,9 @@ impl ElementValue {
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             )),
-            ElementValue::Enum { .. } => unreachable!("enum values are not additive"),
+            // Reachable through `checked_neg`, which a negative dice count applies to
+            // every face. `make_d` rejects that case first; this keeps the branch total.
+            ElementValue::Enum { .. } => Err(format!("Cannot negate {self}")),
         }
     }
 
@@ -407,18 +411,20 @@ impl RuntimeValue {
         }
     }
 
-    pub(crate) fn to_list(&self, repeat: usize) -> Vec<ElementValue> {
+    pub(crate) fn to_list(&self, repeat: usize) -> Result<Vec<ElementValue>, NonAdditiveSum> {
         match self {
-            RuntimeValue::Element(value) => vec![value.clone(); repeat],
-            RuntimeValue::List(list, _) => (0..repeat).flat_map(|_| list.iter().cloned()).collect(),
+            RuntimeValue::Element(value) => Ok(vec![value.clone(); repeat]),
+            RuntimeValue::List(list, _) => {
+                Ok((0..repeat).flat_map(|_| list.iter().cloned()).collect())
+            }
             RuntimeValue::Pool(pool, _) => {
-                let outcomes = sum_pool(pool, &self.outcome_type())
+                let outcomes = sum_pool(pool, &self.outcome_type())?
                     .ordered_outcomes()
                     .iter()
                     .map(|(outcome, _)| outcome)
                     .cloned()
                     .collect::<Vec<_>>();
-                (0..repeat).flat_map(|_| outcomes.iter().cloned()).collect()
+                Ok((0..repeat).flat_map(|_| outcomes.iter().cloned()).collect())
             }
         }
     }
@@ -435,11 +441,15 @@ impl RuntimeValue {
                 pool,
                 outcome_type @ (ElementType::Uninhabited | ElementType::AdditiveIdentity),
             ) => RuntimeValue::Pool(
-                Rc::new(sum_pool(pool, outcome_type).map_outcomes(|outcome| {
-                    ElementValue::Int(f(expect_int(
-                        &outcome.materialize_identity(&ElementType::Int),
-                    )))
-                })),
+                Rc::new(
+                    sum_pool(pool, outcome_type)
+                        .expect("an empty pool is additive")
+                        .map_outcomes(|outcome| {
+                            ElementValue::Int(f(expect_int(
+                                &outcome.materialize_identity(&ElementType::Int),
+                            )))
+                        }),
+                ),
                 ElementType::Int,
             ),
             RuntimeValue::Pool(pool, _) => RuntimeValue::Pool(
@@ -483,18 +493,51 @@ pub(crate) fn sum_elements(values: &[ElementValue], outcome_type: &ElementType) 
     )
 }
 
+/// A pool that cannot be summed because its outcomes cannot be added together.
+///
+/// Carries just enough to build the error message; the range belongs to whichever
+/// call site forced the sum, so it is supplied by [`NonAdditiveSum::into_error`].
+#[derive(Debug, Clone)]
+pub(crate) struct NonAdditiveSum {
+    outcome_type: ElementType,
+    dimension: u32,
+}
+
+impl NonAdditiveSum {
+    /// `action` names what forced the sum; it completes "<action> requires summing ...".
+    pub(crate) fn into_error(self, range: ast::Range, action: &str) -> RuntimeError {
+        RuntimeError::Semantic {
+            kind: SemanticErrorKind::NonAdditiveValue,
+            range: range.into(),
+            message: format!(
+                "{action} requires summing a pool of {} dice, and {} outcomes cannot be added \
+                 together",
+                self.dimension,
+                self.outcome_type.display_name(),
+            ),
+        }
+    }
+}
+
 pub(crate) fn sum_pool(
     pool: &Pool<ElementValue>,
     outcome_type: &ElementType,
-) -> Pool<ElementValue> {
+) -> Result<Pool<ElementValue>, NonAdditiveSum> {
     if pool.dimension() == 1 && !pool.ordered_outcomes().is_empty() {
-        return pool.clone();
+        return Ok(pool.clone());
     }
     let Some(identity) = outcome_type.additive_identity() else {
-        debug_assert!(pool.dimension() <= 1, "non-additive pool has multiple dice");
-        return pool.clone();
+        // A single die is already its own sum, and a pool with no outcomes has nothing
+        // to add whatever its dimension.
+        if pool.dimension() == 1 || pool.ordered_outcomes().is_empty() {
+            return Ok(pool.clone());
+        }
+        return Err(NonAdditiveSum {
+            outcome_type: outcome_type.clone(),
+            dimension: pool.dimension(),
+        });
     };
-    pool.sum_by(identity, ElementValue::add_scaled)
+    Ok(pool.sum_by(identity, ElementValue::add_scaled))
 }
 
 impl From<i32> for RuntimeValue {
@@ -527,5 +570,122 @@ impl From<Pool> for RuntimeValue {
             Rc::new(value.map_outcomes(ElementValue::Int)),
             ElementType::Int,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attack_result() -> Rc<EnumType> {
+        Rc::new(EnumType {
+            name: "ATTACK_RESULT".to_string(),
+            members: vec!["MISS".to_string(), "HIT".to_string()],
+        })
+    }
+
+    fn enum_value(index: i32) -> ElementValue {
+        ElementValue::Enum {
+            value: index,
+            ty: attack_result(),
+        }
+    }
+
+    fn enum_pool(dimension: u32, members: &[i32]) -> Pool<ElementValue> {
+        Pool::from_list(
+            dimension,
+            members.iter().copied().map(enum_value).collect::<Vec<_>>(),
+        )
+    }
+
+    fn enum_type() -> ElementType {
+        ElementType::Enum(attack_result())
+    }
+
+    #[test]
+    fn summing_a_multidimensional_non_additive_pool_is_an_error() {
+        let error = sum_pool(&enum_pool(2, &[0, 1]), &enum_type())
+            .expect_err("two enum dice cannot be added together");
+        assert_eq!(error.dimension, 2);
+
+        // Dimension 0 with outcomes is just as unsummable as dimension 2.
+        assert!(sum_pool(&enum_pool(0, &[0, 1]), &enum_type()).is_err());
+    }
+
+    #[test]
+    fn non_additive_pools_that_need_no_addition_are_returned_unchanged() {
+        // A single die is already its own sum.
+        let one_die = enum_pool(1, &[0, 1]);
+        assert_eq!(sum_pool(&one_die, &enum_type()).unwrap(), one_die);
+
+        // A pool with no outcomes has nothing to add, whatever its dimension.
+        for dimension in [0, 1, 2] {
+            let empty = enum_pool(dimension, &[]);
+            assert_eq!(sum_pool(&empty, &enum_type()).unwrap(), empty);
+        }
+    }
+
+    #[test]
+    fn summing_additive_pools_is_unaffected() {
+        let ints = Pool::from_list(2, vec![ElementValue::Int(1), ElementValue::Int(2)]);
+        let summed = sum_pool(&ints, &ElementType::Int).unwrap();
+        assert_eq!(summed.dimension(), 1);
+        assert_eq!(
+            summed
+                .ordered_outcomes()
+                .iter()
+                .map(|(outcome, _)| outcome.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                ElementValue::Int(2),
+                ElementValue::Int(3),
+                ElementValue::Int(4)
+            ]
+        );
+
+        let pair =
+            |a, b| ElementValue::Tuple(vec![ElementValue::Int(a), ElementValue::Int(b)].into());
+        let tuples = Pool::from_list(2, vec![pair(1, 10), pair(2, 20)]);
+        let tuple_type = ElementType::Tuple(vec![ElementType::Int, ElementType::Int].into());
+        let summed = sum_pool(&tuples, &tuple_type).unwrap();
+        assert_eq!(summed.dimension(), 1);
+        assert_eq!(
+            summed
+                .ordered_outcomes()
+                .iter()
+                .map(|(outcome, _)| outcome.clone())
+                .collect::<Vec<_>>(),
+            vec![pair(2, 20), pair(3, 30), pair(4, 40)]
+        );
+    }
+
+    /// Multiset iteration sorts by `ElementValue`'s `Ord`, which is what gives
+    /// enum members their declaration order. Pinning it here means reordering the
+    /// fields of `ElementValue::Enum` breaks a test rather than the semantics.
+    #[test]
+    fn enum_multisets_are_ordered_by_declaration() {
+        let multisets = enum_pool(2, &[0, 1])
+            .multiset_iterator()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            multisets,
+            vec![
+                (vec![enum_value(0), enum_value(0)], Natural::ONE),
+                (vec![enum_value(0), enum_value(1)], Natural::from(2u32)),
+                (vec![enum_value(1), enum_value(1)], Natural::ONE),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_non_additive_sum_error_uses_the_stable_diagnostic_kind() {
+        let error = sum_pool(&enum_pool(2, &[0, 1]), &enum_type())
+            .unwrap_err()
+            .into_error((0, 1).into(), "displaying a pool");
+        let RuntimeError::Semantic { kind, message, .. } = error else {
+            panic!("expected a semantic error");
+        };
+        assert_eq!(kind, SemanticErrorKind::NonAdditiveValue);
+        assert!(message.contains("ATTACK_RESULT"), "{message}");
     }
 }

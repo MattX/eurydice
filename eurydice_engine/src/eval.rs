@@ -528,6 +528,13 @@ impl Evaluator {
                     });
                 }
                 let value = self.evaluate(eval_context, expr)?;
+                // `output` displays the summed pool, so reject one that cannot be
+                // summed here: the conversion in `output.rs` runs after evaluation and
+                // has no way to report an error.
+                if let RuntimeValue::Pool(pool, outcome_type) = &value {
+                    sum_pool(pool, outcome_type)
+                        .map_err(|error| error.into_error(expr.range, "displaying a pool"))?;
+                }
                 let field_names = if let Some(labels) = labeled {
                     let ElementType::Tuple(fields) = value.outcome_type() else {
                         return Err(RuntimeError::LabelsOnNonTupleOutput {
@@ -715,9 +722,14 @@ impl Evaluator {
                     )?;
                 }
                 let outcome = outcome.unwrap_or(ElementType::Uninhabited);
-                let elems = items
+                let mut flattened = Vec::new();
+                for item in items {
+                    flattened.extend(item.to_list(1).map_err(|error| {
+                        error.into_error(expression.range, "flattening a pool into a sequence")
+                    })?);
+                }
+                let elems = flattened
                     .into_iter()
-                    .flat_map(|item| item.to_list(1))
                     .map(|value| {
                         if matches!(
                             outcome,
@@ -826,11 +838,17 @@ impl Evaluator {
                 ))
             }
         }?;
+        let item_range = match &item.item {
+            BareListItem::Expr(expression) => expression.range,
+            BareListItem::Range(start_expr, end_expr) => {
+                (start_expr.range.start, end_expr.range.end).into()
+            }
+        };
         let outcome_type = base.outcome_type();
-        Ok(RuntimeValue::List(
-            Rc::new(base.to_list(repeat_count)),
-            outcome_type,
-        ))
+        let elements = base
+            .to_list(repeat_count)
+            .map_err(|error| error.into_error(item_range, "flattening a pool into a sequence"))?;
+        Ok(RuntimeValue::List(Rc::new(elements), outcome_type))
     }
 
     fn evaluate_function_call(
@@ -963,8 +981,13 @@ impl Evaluator {
                 }
                 _ => {}
             }
-            result_distributions
-                .push((weight, sum_pool(&result.to_pool(), &result.outcome_type())));
+            let summed = sum_pool(&result.to_pool(), &result.outcome_type()).map_err(|error| {
+                error.into_error(
+                    function.range,
+                    "combining the results of a function evaluated over a pool",
+                )
+            })?;
+            result_distributions.push((weight, summed));
         }
         let result_type = result_type.unwrap_or(ElementType::Int);
         let result = RuntimeValue::Pool(
@@ -1224,7 +1247,12 @@ fn coerce_arg(
             outcome_type,
         )),
         (RuntimeValue::Pool(pool, outcome_type), StaticType::Int) => {
-            let summed = sum_pool(&pool, &outcome_type);
+            let summed = sum_pool(&pool, &outcome_type).map_err(|error| {
+                error.into_error(
+                    range,
+                    "passing a pool to a parameter that expects a single value",
+                )
+            })?;
             Ok(RuntimeValue::Pool(Rc::new(summed), outcome_type))
         }
         (value @ RuntimeValue::Pool(_, _), _) => Ok(value),

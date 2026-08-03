@@ -68,10 +68,117 @@ fn rejects_enum_arithmetic_ordering_and_multidimensional_output() {
     for (program, expected) in [
         ("enum: R { A, B } output A + B", "not defined"),
         ("enum: R { A, B } output A < B", "not defined"),
-        ("enum: R { A, B } output 2d{A, B}", "dimension one"),
+        (
+            "enum: R { A, B } output 2d{A, B}",
+            "cannot be added together",
+        ),
     ] {
         let error = error_summary(program);
         assert!(error.contains(expected), "{error}");
+    }
+}
+
+/// A pool of enum outcomes may have any dimension. It cannot be summed, so it
+/// is only usable where multisets, not sums, are required.
+#[test]
+fn multidimensional_enum_pools_are_usable_without_being_summed() {
+    let outputs = run(r#"
+        enum: R { MISS, HIT }
+        function: hits S:s { result: [count {HIT} in S] }
+        output [hits 2d{MISS, HIT}]
+        output [count {HIT} in 2d{MISS, HIT}]
+        output [2d{MISS, HIT} contains HIT]
+        X: 2d{MISS, HIT}
+        output #X
+        "#)
+    .expect("multidimensional enum pools are constructible");
+    let probabilities = |output: &EvaluatedOutput| {
+        Distribution::from_runtime(output.value.clone(), None).probabilities
+    };
+    // Two coin flips: 0, 1 or 2 hits with probabilities 1/4, 1/2, 1/4.
+    let expected = vec![(vec![0], 0.25f64), (vec![1], 0.5f64), (vec![2], 0.25f64)];
+    assert_eq!(probabilities(&outputs[0]), expected);
+    // Icepool's `count` must agree with iterating the multisets by hand.
+    assert_eq!(probabilities(&outputs[1]), expected);
+    assert_eq!(
+        probabilities(&outputs[2]),
+        vec![(vec![0], 0.25f64), (vec![1], 0.75f64)]
+    );
+    assert_eq!(probabilities(&outputs[3]), vec![(vec![2], 1.0f64)]);
+}
+
+/// Multisets are sorted by declaration order, and `position order` picks the end
+/// they start from. Selecting a single position is the only way to observe this,
+/// since enum members support no ordering comparisons of their own.
+#[test]
+fn enum_multisets_are_ordered_by_declaration_and_respect_position_order() {
+    let program = |setting: &str| {
+        format!(
+            r#"
+            enum: R {{ MISS, HIT }}
+            function: first S:s {{ result: 1@S }}
+            {setting}
+            output [first 3d{{MISS, HIT}}]
+            "#
+        )
+    };
+    let probabilities = |program: String| {
+        let outputs = run(&program).expect("program runs");
+        Distribution::from_runtime(outputs[0].value.clone(), None).probabilities
+    };
+    // Highest first (the default): position 1 is MISS only when all three miss.
+    assert_eq!(
+        probabilities(program("")),
+        vec![(vec![0], 0.125f64), (vec![1], 0.875f64)]
+    );
+    // Lowest first: position 1 is HIT only when all three hit.
+    assert_eq!(
+        probabilities(program(r#"set "position order" to "lowest first""#)),
+        vec![(vec![0], 0.875f64), (vec![1], 0.125f64)]
+    );
+}
+
+/// Every operation that would sum a multidimensional non-additive pool must
+/// report an error rather than silently ignoring the pool's dimension.
+#[test]
+fn operations_that_would_sum_a_multidimensional_enum_pool_are_rejected() {
+    for program in [
+        "enum: R { A, B } output 2d{A, B}",
+        "enum: R { A, B } output {2d{A, B}}",
+        "enum: R { A, B } output {2d{A, B}:2}",
+        "enum: R { A, B } function: f X:n { result: X } output [f 2d{A, B}]",
+        "enum: R { A, B } output 2d{A, B} = A",
+        "enum: R { A, B } output A != 2d{A, B}",
+        "enum: R { A, B } output -2d{A, B}",
+        "enum: R { A, B } output (0-2)d{A, B}",
+        "enum: R { A, B } output (0-1)d(d{A, B})",
+        "enum: R { A, B } output d2 d {A, B}",
+        "enum: R { A, B } output d2 d (2d{A, B})",
+        "enum: R { A, B } output 0d{A, B}",
+        "enum: R { A, B } function: f S:s { result: S } output [f 2d{A, B}]",
+        "enum: R { A, B } function: f D:d { result: D } output [f 2d{A, B}]",
+        "enum: R { A, B } output [choose 2d{A, B} if 1 else 2d{A, B}]",
+        "enum: R { A, B } function: g X:n { result: 2d{A, B} } output [g d2]",
+    ] {
+        assert!(run(program).is_err(), "{program}");
+    }
+}
+
+/// Loosening pool construction must not loosen the operations that were already
+/// unavailable for enum outcomes.
+#[test]
+fn multidimensional_enum_pools_do_not_gain_ordering_or_arithmetic() {
+    for program in [
+        "enum: R { A, B } output 1@2d{A, B}",
+        "enum: R { A, B } output [sort {A, B}]",
+        "enum: R { A, B } output [highest 1 of 2d{A, B}]",
+        "enum: R { A, B } output [lowest 1 of 2d{A, B}]",
+        "enum: R { A, B } output [maximum of 2d{A, B}]",
+        "enum: R { A, B } output [explode 2d{A, B}]",
+        "enum: R { A, B } output 2d{A, B} < A",
+        "enum: R { A, B } output 2d{A, B} + A",
+    ] {
+        assert!(run(program).is_err(), "{program}");
     }
 }
 

@@ -236,14 +236,16 @@ fn apply_math_op(
     broadcast_binary(
         &left,
         &right,
-        |left, right| apply_element_math(op.value, left, right),
+        |left, right| {
+            apply_element_math(op.value, left, right).map_err(|message| RuntimeError::MathError {
+                range: op.range.into(),
+                message,
+            })
+        },
         |_, _| unreachable!("mathematical sequences are summed before broadcasting"),
         result_type,
+        op.range,
     )
-    .map_err(|message| RuntimeError::MathError {
-        range: op.range.into(),
-        message,
-    })
 }
 
 pub(crate) fn apply_binary_op(
@@ -380,32 +382,36 @@ pub(crate) fn apply_binary_op(
         | BinaryOp::Div
         | BinaryOp::Or
         | BinaryOp::And => apply_math_op(op, left, right),
-        BinaryOp::Eq => Ok(equality_binary_op(left, right, true)),
-        BinaryOp::Ne => Ok(equality_binary_op(left, right, false)),
-        BinaryOp::Lt => Ok(comp_binary_op(
+        BinaryOp::Eq => equality_binary_op(left, right, true, op.range),
+        BinaryOp::Ne => equality_binary_op(left, right, false, op.range),
+        BinaryOp::Lt => comp_binary_op(
             left,
             right,
             |a, b| if a < b { 1 } else { 0 },
             |a, b| if a < b { 1 } else { 0 },
-        )),
-        BinaryOp::Le => Ok(comp_binary_op(
+            op.range,
+        ),
+        BinaryOp::Le => comp_binary_op(
             left,
             right,
             |a, b| if a <= b { 1 } else { 0 },
             |a, b| if a <= b { 1 } else { 0 },
-        )),
-        BinaryOp::Gt => Ok(comp_binary_op(
+            op.range,
+        ),
+        BinaryOp::Gt => comp_binary_op(
             left,
             right,
             |a, b| if a > b { 1 } else { 0 },
             |a, b| if a > b { 1 } else { 0 },
-        )),
-        BinaryOp::Ge => Ok(comp_binary_op(
+            op.range,
+        ),
+        BinaryOp::Ge => comp_binary_op(
             left,
             right,
             |a, b| if a >= b { 1 } else { 0 },
             |a, b| if a >= b { 1 } else { 0 },
-        )),
+            op.range,
+        ),
     }
 }
 
@@ -472,13 +478,14 @@ fn select_in_dice(
 /// apply the element operation to every sequence member and sum the results.
 /// If either operand is a pool, both operands are first converted to summed
 /// distributions and their cross product is combined into a new distribution.
-fn broadcast_binary<E>(
+fn broadcast_binary(
     left: &RuntimeValue,
     right: &RuntimeValue,
-    element_op: impl Fn(&ElementValue, &ElementValue) -> Result<ElementValue, E>,
-    list_list_op: impl Fn(&[ElementValue], &[ElementValue]) -> Result<ElementValue, E>,
+    element_op: impl Fn(&ElementValue, &ElementValue) -> Result<ElementValue, RuntimeError>,
+    list_list_op: impl Fn(&[ElementValue], &[ElementValue]) -> Result<ElementValue, RuntimeError>,
     result_type: ElementType,
-) -> Result<RuntimeValue, E> {
+    range: ast::Range,
+) -> Result<RuntimeValue, RuntimeError> {
     match (left, right) {
         (RuntimeValue::Element(left), RuntimeValue::Element(right)) => {
             return Ok(RuntimeValue::Element(element_op(left, right)?));
@@ -503,8 +510,10 @@ fn broadcast_binary<E>(
         (RuntimeValue::Pool(_, _), _) | (_, RuntimeValue::Pool(_, _)) => {}
     }
 
-    let left_pool = sum_pool(&left.to_pool(), &left.outcome_type());
-    let right_pool = sum_pool(&right.to_pool(), &right.outcome_type());
+    let left_pool = sum_pool(&left.to_pool(), &left.outcome_type())
+        .map_err(|error| error.into_error(range, "comparing pools"))?;
+    let right_pool = sum_pool(&right.to_pool(), &right.outcome_type())
+        .map_err(|error| error.into_error(range, "comparing pools"))?;
     let components = left_pool
         .ordered_outcomes()
         .iter()
@@ -514,7 +523,7 @@ fn broadcast_binary<E>(
                 .try_map_outcomes(|right_outcome| element_op(left_outcome, &right_outcome))?;
             Ok((left_weight.clone(), distribution))
         })
-        .collect::<Result<Vec<_>, E>>()?;
+        .collect::<Result<Vec<_>, RuntimeError>>()?;
 
     Ok(RuntimeValue::Pool(
         Rc::new(Pool::from_mixture(components)),
@@ -527,14 +536,15 @@ fn comp_binary_op(
     right: &RuntimeValue,
     int_comp: impl Fn(i32, i32) -> i32,
     list_comp: impl Fn(&[i32], &[i32]) -> i32,
-) -> RuntimeValue {
+    range: ast::Range,
+) -> Result<RuntimeValue, RuntimeError> {
     let left = left.materialize_identities(&ElementType::Int);
     let right = right.materialize_identities(&ElementType::Int);
     broadcast_binary(
         &left,
         &right,
         |left, right| {
-            Ok::<_, std::convert::Infallible>(ElementValue::Int(int_comp(
+            Ok(ElementValue::Int(int_comp(
                 expect_int(left),
                 expect_int(right),
             )))
@@ -546,11 +556,16 @@ fn comp_binary_op(
             )))
         },
         ElementType::Int,
+        range,
     )
-    .expect("comparison broadcasting is infallible")
 }
 
-fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) -> RuntimeValue {
+fn equality_binary_op(
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+    equal: bool,
+    range: ast::Range,
+) -> Result<RuntimeValue, RuntimeError> {
     let outcome_type = left
         .merged_outcome_type(right)
         .expect("equality operand types were checked")
@@ -561,11 +576,11 @@ fn equality_binary_op(left: &RuntimeValue, right: &RuntimeValue, equal: bool) ->
     broadcast_binary(
         &left,
         &right,
-        |left, right| Ok::<_, std::convert::Infallible>(ElementValue::Int(compare(left, right))),
+        |left, right| Ok(ElementValue::Int(compare(left, right))),
         |left, right| Ok(ElementValue::Int(i32::from((left == right) == equal))),
         ElementType::Int,
+        range,
     )
-    .expect("equality broadcasting is infallible")
 }
 
 enum DiceCount {
@@ -633,11 +648,22 @@ fn make_d(
             });
         }
     };
-    if !outcome_type.is_additive() && !matches!(&repeat, DiceCount::Int(1)) {
+    // A negative dice count negates every face, which non-additive outcomes cannot do.
+    // Checked here so the `checked_neg` calls below stay total. For a pool dice count
+    // this tests faces rather than sums, which is conservative but has no false
+    // negatives: a negative sum implies a negative face.
+    let negates = match &repeat {
+        DiceCount::Int(i) => *i < 0,
+        DiceCount::Pool(p) => p.ordered_outcomes().iter().any(|(count, _)| *count < 0),
+    };
+    if negates && !outcome_type.is_additive() {
         return Err(RuntimeError::Semantic {
             kind: SemanticErrorKind::NonAdditiveValue,
             range: range.into(),
-            message: "non-additive pools must have dimension one".to_string(),
+            message: format!(
+                "a negative dice count negates the outcomes, which {} values do not support",
+                outcome_type.display_name()
+            ),
         });
     }
     let result: RuntimeValue = match (repeat, right) {
@@ -667,7 +693,9 @@ fn make_d(
             let left_p = (*left_p).sum();
             let right = match right {
                 DRightSide::List(list) => Pool::from_list(1, list),
-                DRightSide::Pool(p) => sum_pool(&p, &outcome_type),
+                DRightSide::Pool(p) => sum_pool(&p, &outcome_type).map_err(|error| {
+                    error.into_error(range, "rolling a variable number of dice")
+                })?,
             };
             let negated_right = if left_p
                 .ordered_outcomes()
@@ -686,6 +714,28 @@ fn make_d(
             } else {
                 None
             };
+            // `flat_map` sums each duplicated pool, and its closure cannot fail, so
+            // check up front that every multiplier leaves a summable dimension. The
+            // guard above already rejected negative multipliers for these outcomes.
+            let unsummable = (!outcome_type.is_additive() && !right.ordered_outcomes().is_empty())
+                .then(|| {
+                    left_p
+                        .ordered_outcomes()
+                        .iter()
+                        .find(|(multiplier, _)| multiplier.unsigned_abs() != 1)
+                })
+                .flatten();
+            if let Some((multiplier, _)) = unsummable {
+                return Err(RuntimeError::Semantic {
+                    kind: SemanticErrorKind::NonAdditiveValue,
+                    range: range.into(),
+                    message: format!(
+                        "rolling {multiplier} dice requires summing them, and {} outcomes \
+                         cannot be added together",
+                        outcome_type.display_name()
+                    ),
+                });
+            }
             // At this point both |left_p| and |right| have a count of 1.
             // For each outcome in the left pool, sum the right pool with itself k times
             RuntimeValue::Pool(
@@ -705,7 +755,9 @@ fn make_d(
                         right.clone()
                     };
                     dup_right.set_dimension(dup_right.dimension() * multiplier.unsigned_abs());
-                    sum_pool(&dup_right, &outcome_type).into()
+                    sum_pool(&dup_right, &outcome_type)
+                        .expect("summable dimensions were checked above")
+                        .into()
                 })),
                 outcome_type.clone(),
             )

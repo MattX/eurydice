@@ -1,0 +1,83 @@
+enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
+
+\\\ A pool of enum outcomes may have any dimension. It cannot be summed, but it
+\\\ can be iterated over its multisets, which is what an `s` parameter does.
+function: hits SEQ:s { result: [count {HIT, CRITICALHIT} in SEQ] }
+output [hits 3d{MISS, HIT, CRITICALHIT}] named "hits per multiset"
+
+\\\ Multisets are sorted by declaration order, and "position order" chooses which
+\\\ end comes first. Selecting a single position is the only way to see this,
+\\\ since enum members support no ordering comparisons of their own.
+function: first SEQ:s { result: 1@SEQ }
+output [first 3d{MISS, HIT}] named "best of three"
+set "position order" to "lowest first"
+output [first 3d{MISS, HIT}] named "worst of three"
+set "position order" to "highest first"
+
+\\\ `count` and `contains` take the pool itself rather than its multisets, so
+\\\ they neither sum nor enumerate it. This pool has 888030 multisets; going
+\\\ through Icepool keeps it instant.
+enum: FACE { FA, FB, FC, FD, FE, FF, FG, FH }
+LARGE: 20d{FA, FB, FC, FD, FE, FF, FG, FH}
+output [count {FA} in LARGE] named "count over a large pool"
+output [LARGE contains FA] named "contains over a large pool"
+
+\\\ An empty pool has nothing to add, so it is summable at any dimension.
+output 2d{MISS:0} named "empty at dimension two"
+
+output #(2d(2d{MISS, HIT})) named "dimension"
+
+\\\ Result \\\
+
+"hits per multiset"
+#,%
+0,3.7037037037037033
+1,22.22222222222222
+2,44.44444444444444
+3,29.629629629629626
+
+"best of three"
+ATTACK_RESULT,%
+MISS,12.5
+HIT,87.5
+
+"worst of three"
+ATTACK_RESULT,%
+MISS,87.5
+HIT,12.5
+
+"count over a large pool"
+#,%
+0,6.920875877393026
+1,19.77393107826579
+2,26.83604932050357
+3,23.00232798900306
+4,13.96569913618043
+5,6.384319605111053
+6,2.280114144682519
+7,0.6514611841950055
+8,0.1512320606166977
+9,0.028806106784132895
+10,0.004526673923220884
+11,0.0005878797302884264
+12,0.00006298711395947426
+13,0.000005537328699734001
+14,0.00000039552347855242864
+15,0.00000002260134163156735
+16,0.000000001008988465694971
+17,0.000000000033915578678822556
+18,0.0000000000008075137780672037
+19,0.00000000000001214306433183765
+20,0.00000000000000008673617379884035
+
+"contains over a large pool"
+#,%
+0,6.920875877393026
+1,93.07912412260697
+
+"empty at dimension two"
+ATTACK_RESULT,%
+
+"dimension"
+#,%
+4,100

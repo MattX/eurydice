@@ -103,17 +103,17 @@ There are no first-class functions.
 | | `int` | enum member | tuple of `int`s | tuple with an enum field |
 |---|---|---|---|---|
 | `=`, `!=` | ✓ | same enum only | same tuple type | same tuple type |
-| `<`, `<=`, `>`, `>=` | ✓ | ✗ | ✗ | ✗ |
+| `<`, `<=`, `>`, `>=`, `[sort]` | ✓ | ✗ | ✗ | ✗ |
 | `+`, `-`, unary `-` | ✓ | ✗ | componentwise | ✗ |
 | `*`, `/` | ✓ | ✗ | by an `int` only | ✗ |
 | `^`, `&`, `\|`, `!` | ✓ | ✗ | ✗ | ✗ |
 | `#` | digit count | `1` | arity | arity |
 | endpoint of a `..` range | ✓ | ✗ | ✗ | ✗ |
 | dice count or side count for `d`, index for `@` | ✓ | ✗ | ✗ | ✗ |
-| ordering: `[sort]`, `"position order"` | ✓ | ✗ | ✗ | ✗ |
-| summing a pool of dimension > 1 | ✓ | ✗ | ✓ | ✗ |
+| iteration order: multisets, `"position order"` | ✓ | ✓ | ✓ | ✓ |
+| summing a pool of dimension other than 1 | ✓ | ✗ | ✓ | ✗ |
 
-**Every operation requires `int` operands unless this document says otherwise.** Supplying an enum member or a tuple anywhere else is an error. Besides the ✓ entries above, the operations that accept other element types are collection construction, `@` selecting a single element, [`[SEQ contains N]`](#seqs-contains-nn), [`[count NEEDLES in HAYSTACK]`](#count-needless-in-haystacks), the [tuple built-ins](#-tuples), and `print`/`output`.
+**Every operation requires `int` operands unless this document says otherwise.** Supplying an enum member or a tuple anywhere else is an error. Besides the ✓ entries above, the operations that accept other element types are collection construction, pool construction, [multiset iteration](#multiset-iteration), `@` selecting a single element, [`[SEQ contains N]`](#seqs-contains-nn), [`[count NEEDLES in HAYSTACK]`](#count-needless-in-haystacks), the [tuple built-ins](#-tuples), and `print`/`output`.
 
 An element type is _additive_ when it has a ✓ in the `+` row: `int`, and tuples all of whose fields are `int`. A list or pool is additive when its outcome type is. Only additive values can be summed, and only additive collections can be summed to an element.
 
@@ -132,6 +132,8 @@ The enum type and its members use variable-identifier syntax. An enum must conta
 
 Enum members support equality and inequality with members of the same enum, as set out in [What element types support](#what-element-types-support).
 
+Enum members have an _iteration order_, namely the order in which they are declared. It is used only to sort multisets during [multiset iteration](#multiset-iteration), and therefore by the `"position order"` setting. It does not make ordering comparisons or `[sort]` available for enum members.
+
 ### ⊕ Tuples
 
 Tuples are constructed by the built-in functions `[tuple A B]`, `[tuple A B C]`, and `[tuple A B C D]`. Each field must be a `Scalar`. Nested tuples are not supported.
@@ -147,6 +149,8 @@ Tuple fields are selected with `[field INDEX of TUPLE]`. Indices are one-based a
 
 Tuples support structural equality and inequality with tuples of the same type: two tuples are equal exactly when every pair of corresponding fields is equal. An _additive_ tuple, one whose fields are all of type `int`, additionally supports arithmetic: `+`, `-`, and unary `-` operate componentwise, multiplication by an `int` is supported in either operand order, and division by an `int` operates componentwise. `int / tuple` is not defined. Everything else follows the default in [What element types support](#what-element-types-support).
 
+Tuples have an _iteration order_: lexicographic by field, each field in its own iteration order. As for enums, it is used only to sort multisets during [multiset iteration](#multiset-iteration), and does not make ordering comparisons or `[sort]` available for tuples.
+
 Tuple constructors and field projection participate in normal [pool-based function evaluation](#pool-based-evaluation). Consequently, constructing a tuple from pool-valued arguments produces their joint distribution, and passing a tuple-valued pool to an `n` parameter evaluates the function once per tuple outcome.
 
 ```
@@ -161,8 +165,6 @@ output [field 1 of JOINT]
 
 It is not possible to create a pool value representing a pool of different types of dice. For instance, `3d6` is a pool of three d6s, but there is no way to represent a pool of one d6 and one d8.
 
-Pools whose outcomes are not additive (essentially, those containing enums) must have dimension one. A pool with no outcome type may have any dimension.
-
 Pools may have no possible outcomes (for instance, such a pool is created with expression `d{}`). Such a pool has dimension 0.
 
 The following operations are frequently referred to in this document:
@@ -173,7 +175,7 @@ _Summing_ an [additive pool](#what-element-types-support) transforms it into a p
 
 For instance, summing `2d2` results in a pool equivalent to `d{2, 3, 3, 4}`.
 
-Summing a pool of dimension 1 does nothing, including for a non-additive pool. Summing a dimension-0 pool whose outcome type is known creates a dimension-1 pool containing that type's zero: `0` for integers, or an all-zero tuple of the appropriate type. Summing a pool with no outcome type is covered in [Empty collections](#-empty-collections).
+Summing a pool of dimension 1 does nothing, including for a non-additive pool, as does summing a pool with no possible outcomes. Summing a non-additive pool of any other dimension is an error. Summing a dimension-0 additive pool whose outcome type is known creates a dimension-1 pool containing that type's zero: `0` for integers, or an all-zero tuple of the appropriate type. Summing a pool with no outcome type is covered in [Empty collections](#-empty-collections).
 
 #### Multiset iteration
 
@@ -196,6 +198,8 @@ multiset              probability
 The probability associated with each multiset is the product of its values' probabilities, multiplied by the number of orderings that produce it. That count is the multinomial coefficient $\frac{n!}{m_1!\,m_2!\cdots m_k!}$, where $n$ is the number of dice in the pool and $m_i$ is the number of times the $i$-th distinct value occurs in the multiset. These ten probabilities sum to 1.
 
 If there is a single die in the pool, this is the same as iterating over the die's outcomes.
+
+Multiset iteration is available for every outcome type, additive or not. Given `enum: ATTACK_RESULT { MISS, HIT }`, the multisets of `2d{MISS, HIT}` are `{MISS, MISS}` with probability 1/4, `{MISS, HIT}` with probability 1/2, and `{HIT, HIT}` with probability 1/4.
 
 #### Outcome mapping
 
@@ -343,7 +347,7 @@ There are three named global settings:
 * `position order`: either `"lowest first"` or `"highest first"` (the default). This setting affects three things:
   * the behavior of the [`@` operator](#-operator),
   * the behavior of the [sort function](#sort-sequences),
-  * the behavior of [calling a function over pools](#pool-based-evaluation)
+  * the order of the elements in each multiset produced by [multiset iteration](#multiset-iteration), which affects [calling a function over pools](#pool-based-evaluation)
 
 Settings can only be set outside of a function, using the [`set` statement](#set).
 
@@ -421,7 +425,7 @@ List flattening transforms values in the following way:
 * `list` values are unchanged by flattening.
 * `pool` values are flattened first by [summing](#summing), then by discarding the probabilities and creating a list containing each outcome in ascending order. Outcomes with nonzero probability appear once regardless of their probabilities.
 
-Flattening preserves `pool` outcome types. Non-additive `pool`s always have dimension one, so flattening them does not require adding their outcomes together.
+Flattening preserves `pool` outcome types. Flattening a non-additive `pool` whose dimension is not one is an error, because it would require adding its outcomes together.
 
 #### Examples
 
@@ -484,8 +488,8 @@ The `d` operator is the main way to create a pool.
    2. If it is a `list`, it is converted to a pool whose outcomes are the distinct values in the list, and whose probability for each outcome is proportional to the number of occurrences of each value in the list. An empty list produces a pool of dimension 0.
    3. Pools provided as an RHS operand are not transformed.
 2. The LHS operand is first summed if it is a `list` (which must be an additive list), then:
-   1. If it is an `int` `i`, the dimension of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`.
-   2. If it is a pool with `int` outcomes, then the LHS is [flat mapped](#flat-mapping) with the operation described in step 1.1. (Recall that flat mapping takes a pool and an `int -> pool` function; the operation described in step 1.1 is such a function.)
+   1. If it is an `int` `i`, the dimension of the RHS pool is multiplied by `abs(i)`. If `i` is negative, then each outcome in the resulting pool is multiplied by `-1`; since that requires negating every outcome, a negative LHS requires an additive RHS outcome type.
+   2. If it is a pool with `int` outcomes, then the LHS is [flat mapped](#flat-mapping) with the operation described in step 1.1. (Recall that flat mapping takes a pool and an `int -> pool` function; the operation described in step 1.1 is such a function.) Flat mapping [sums](#summing) each intermediate pool, so a non-additive RHS is an error unless every LHS outcome is 1.
    3. It is an error if a value of another type is used as LHS to `d`.
 
 #### `@` operator
@@ -543,7 +547,7 @@ Equality and inequality are also defined nominally for enum members and structur
 1. If both arguments are elements, equality or inequality compares them directly. Ordering comparisons require two `int`s.
 2. If one argument is a `list`, and the other is an element of the same outcome type, the comparison is performed between the element and each member of the `list`. The expression's value is an `int`: the count of comparisons that evaluated to true. Ordering in this form requires `int` outcomes.
 3. If both arguments are `list`s, equality and inequality compare the complete lists structurally. Lists of `int`s may additionally be compared in [lexicographic order](https://en.wikipedia.org/wiki/Lexicographic_order).
-4. If either argument is a `pool`, both arguments are converted to `pool`s and summed. The LHS is then flat mapped with a function that applies the operator to the LHS and each value in the RHS. Additive tuple pools are summed componentwise. For non-additive pools, only equality and inequality are available, and summing their dimension-one pools is a no-op.
+4. If either argument is a `pool`, both arguments are converted to `pool`s and summed. The LHS is then flat mapped with a function that applies the operator to the LHS and each value in the RHS. Additive tuple pools are summed componentwise. For non-additive pools only equality and inequality are available, and it is an error if either operand is a non-additive pool whose dimension is not one.
 
 ### Function calls
 
@@ -596,7 +600,7 @@ The actual types of the arguments are compared to the expected argument types, a
 * If the actual argument is an element:
   * If a `list` is requested, a singleton list is created.
   * If a `pool` is requested, a single-outcome `pool` is created.
-* If the actual argument is a `pool` and an element is requested, the pool is summed, creating a new `pool` (see the note below: `pool`-typed values can be passed to element-typed arguments).
+* If the actual argument is a `pool` and an element is requested, the pool is summed, creating a new `pool` (see the note below: `pool`-typed values can be passed to element-typed arguments). This is an error for a non-additive pool whose dimension is not one.
 
 After this process, some values of type `pool` may still correspond to arguments where element or `list` shapes are requested. If this is not the case, the function is called once, and the value of the expression is the result of [evaluating the function](#function-evaluation). If it is the case, evaluation proceeds as described in the next section.
 
@@ -609,7 +613,7 @@ The function is then evaluated once for each value in the multiset cross product
 * For any argument whose actual shape matches its declared shape, the value is passed untransformed.
 * For arguments where a `pool` was provided but a `list` or element was requested, that pool's multiset value in the current item of the multiset cross product iterator. An element argument receives the multiset's sole value, which may be of any element type.
 
-Each invocation's result is converted to a `pool` through the standard conversions. The final result of the function call is a `pool` created by iterating through every possible outcome of the intermediate pools, and summing the probability of that outcome in each of the intermediate pools, multiplied by the probability of the value that generated this intermediate pool.
+Each invocation's result is converted to a `pool` through the standard conversions and [summed](#summing), so returning a non-additive pool whose dimension is not one is an error. The final result of the function call is a `pool` created by iterating through every possible outcome of the intermediate pools, and summing the probability of that outcome in each of the intermediate pools, multiplied by the probability of the value that generated this intermediate pool.
 
 For instance, suppose the following call needs to be evaluated:
 
@@ -712,7 +716,7 @@ In both cases, the expression is evaluated. Any strings present as part of a `na
 > [!IMPORTANT]
 > Eurydice is a little more explicit than AnyDice in replaced variables for lists and pools, using strings like `{1, 3, 4}` instead of `{?}`.
 
-For an `output` statement, the value of the expression is converted to a `pool`, and added to an output list.
+For an `output` statement, the value of the expression is converted to a `pool` and [summed](#summing), then added to an output list. It is therefore an error to `output` a non-additive pool whose dimension is not one.
 
 The optional `named` clause attaches a name to the distribution for display purposes. If no name is provided, the distribution is assigned the default name `output n`, where `n` is its one-based index in program execution order.
 
@@ -725,7 +729,7 @@ output [tuple d6, d8] named "Joint roll" labeled "d6 result", "d8 result"
 
 Enum outputs display member names rather than numeric values. Tuple outputs display every field of each outcome. Numeric statistics and cumulative/order-based presentation do not apply to enum or tuple distributions.
 
-For a `print` statement, the value of the expression is shown to the user as soon as possible, attached to the name if present. There is no default name otherwise.
+For a `print` statement, the value of the expression is shown to the user as soon as possible, attached to the name if present. There is no default name otherwise. `print` does not sum its argument, so it can display a pool of any dimension and outcome type, such as `2d{MISS, HIT}`.
 
 ### Set
 
@@ -779,6 +783,8 @@ The function's identifier is the sequence of words and argument positions in the
 As in [function calls](#function-calls), adjacent parameters may be separated by commas, and the commas are not part of the identifier. `function: add A:n, B:n` and `function: add A:n B:n` define the same function, and either can be called with or without commas.
 
 Each parameter name can optionally be annotated with a _shape_: `n` for an element, `s` for a list, or `d` for a pool (dice). Note that this constrains the shape only: the value's outcomes may be integers, members of any one enum, or tuples, and a definition cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
+
+An `s`-shaped parameter accepts a pool of any dimension and any outcome type, and the function is evaluated once per multiset. An `n`-shaped parameter [sums](#summing) the pool, so passing a non-additive pool whose dimension is not one is an error.
 
 ### Return from function
 
@@ -847,6 +853,7 @@ output [count {1, 2} in {3, 4}]  \ Outputs 0 \
 output [count {1, 1, 2} in {1, 2, 2, 3}]  \ Outputs 4 \
 output [count {2, 4, 6} in 2d6]  \ Outputs d{0:9, 1:18, 2:9} \
 output [count {4..6, 6} in d6]  \ Outputs d{0:3, 1:2, 2} \
+output [count {HIT} in 8d{MISS, HIT, CRITICALHIT}]  \ Counts hits across eight dice \
 ```
 
 ### `[explode POOL:d]`

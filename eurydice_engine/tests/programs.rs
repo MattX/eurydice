@@ -472,8 +472,11 @@ fn compare_distribution_results(a: &DistributionResult, b: &DistributionResult) 
 }
 
 fn export_distribution_result(result: &DistributionResult) -> String {
+    // The name row has one field and the header has one per output field, so the
+    // writer must accept records of differing lengths.
     let mut writer = WriterBuilder::new()
         .has_headers(false)
+        .flexible(true)
         .from_writer(Vec::new());
     writer.write_record([&result.name]).unwrap();
     let mut header = result.fields.clone();

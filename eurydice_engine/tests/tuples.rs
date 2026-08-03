@@ -1,4 +1,22 @@
-use eurydice_engine::{Engine, EngineDiagnostic};
+use eurydice_engine::{
+    Engine, EngineDiagnostic,
+    eval::{EvaluatedOutput, Evaluator},
+    grammar,
+    output::Distribution,
+};
+
+fn run(program: &str) -> Result<Vec<EvaluatedOutput>, String> {
+    let statements = grammar::BodyParser::new()
+        .parse(program)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut evaluator = Evaluator::new();
+    for statement in statements {
+        evaluator
+            .execute(&statement)
+            .map_err(|error| format!("{error:?}"))?;
+    }
+    Ok(evaluator.take_outputs())
+}
 
 /// The diagnostic a failing program produces, or `None` if it succeeded.
 ///
@@ -54,10 +72,50 @@ fn rejects_invalid_tuple_operations() {
         "output 0d6 + [tuple 1 2]",
         "output 2d{1:0} + [tuple 1 2]",
         "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]}",
+        // A tuple with an enum field is not additive, so summing it is an error
+        // however the sum is reached.
+        "enum: RESULT { A, B } function: f X:n { result: X } output [f 2d{[tuple 1 A], [tuple 2 B]}]",
+        "enum: RESULT { A, B } output {2d{[tuple 1 A], [tuple 2 B]}}",
+        "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]} = [tuple 1 A]",
     ] {
         assert!(
             diagnostic(program).is_some(),
             "expected error for {program}"
         );
     }
+}
+
+/// Multisets work for every non-additive element type, not just bare enums.
+#[test]
+fn multidimensional_pools_of_tuples_with_enum_fields_iterate_as_multisets() {
+    let outputs = run(r#"
+        enum: RESULT { MISS, HIT }
+        FACES: {[tuple 1 MISS], [tuple 2 HIT]}
+        function: hits SEQ:s { result: [count {[tuple 2 HIT]} in SEQ] }
+        output [hits 2dFACES]
+        output [count {[tuple 2 HIT]} in 2dFACES]
+        "#)
+    .expect("pools of tuples with an enum field are constructible");
+    let expected = vec![(vec![0], 0.25f64), (vec![1], 0.5f64), (vec![2], 0.25f64)];
+    for output in &outputs {
+        assert_eq!(
+            Distribution::from_runtime(output.value.clone(), None).probabilities,
+            expected
+        );
+    }
+}
+
+/// Loosening pool construction must not stop all-`int` tuples from summing.
+#[test]
+fn multidimensional_pools_of_int_tuples_still_sum_componentwise() {
+    let outputs = run("output 2d{[tuple 1 10], [tuple 2 20]}")
+        .expect("pools of additive tuples are summable");
+    assert_eq!(
+        Distribution::from_runtime(outputs[0].value.clone(), None).probabilities,
+        vec![
+            (vec![2, 20], 0.25f64),
+            (vec![3, 30], 0.5f64),
+            (vec![4, 40], 0.25f64),
+        ]
+    );
 }

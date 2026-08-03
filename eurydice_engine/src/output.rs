@@ -104,7 +104,7 @@ fn pool_output(
         if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ElementType::Uninhabited) {
             pool.clone()
         } else {
-            sum_pool(pool, outcome_type)
+            sum_pool(pool, outcome_type).expect("output values are checked by the evaluator")
         }
     } else {
         pool.clone()
