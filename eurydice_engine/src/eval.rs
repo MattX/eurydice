@@ -15,18 +15,22 @@ use crate::{
         SourceId, SourceRange, TraceBinding, WarningKind, missing_return_warning, preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
+    error::{
+        NonAdditiveSubject, NonAdditiveSumError, OutcomeConflict, OutcomeMismatchContext,
+        OutcomeMismatchError,
+    },
     operators::{apply_binary_op, apply_unary_op},
     primitives::{
         EXPLODE_ON_PRIMITIVE, EXPLODE_PRIMITIVE, Primitive, REROLL_ON_PRIMITIVE, REROLL_PRIMITIVE,
         register_primitives,
     },
-    value::sum_elements,
+    value::{non_numeric_field, sum_elements},
 };
 
 pub(crate) use crate::value::sum_pool;
 pub use crate::{
     error::{ArityMismatch, RuntimeError, SemanticErrorKind},
-    value::{ElementType, ElementValue, EnumType, RuntimeValue},
+    value::{ElementType, ElementValue, RuntimeValue, SymbolTable},
 };
 
 /// Runtime bindings, organized as a stack of dynamically scoped function frames.
@@ -145,24 +149,18 @@ impl EvalContext {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum BindingKind {
-    Assignment,
-    FunctionParameter,
-    LoopVariable,
-}
-
+/// What a name already refers to, when a binding tries to reuse it.
 #[derive(Debug, Clone, Copy)]
 enum EnumIdentifierKind {
-    Type,
-    Member,
+    Set,
+    Symbol,
 }
 
 impl std::fmt::Display for EnumIdentifierKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EnumIdentifierKind::Type => write!(f, "type"),
-            EnumIdentifierKind::Member => write!(f, "member"),
+            EnumIdentifierKind::Set => write!(f, "symbol set"),
+            EnumIdentifierKind::Symbol => write!(f, "symbol"),
         }
     }
 }
@@ -171,12 +169,15 @@ pub struct Evaluator {
     env: ValEnv,
     outputs: Vec<EvaluatedOutput>,
     functions: HashMap<String, Function>,
-    enums: HashMap<String, Rc<EnumType>>,
+    symbols: SymbolTable,
+    /// Declared set names and symbol names, kept separately from the symbol
+    /// table because they exist only to police the shared namespace.
+    enums: HashSet<String>,
     enum_members: HashSet<String>,
     explode_depth: usize,
     recursion_depth: usize,
     lowest_first: bool,
-    print_callback: Option<Box<dyn Fn(RuntimeValue, String)>>,
+    print_callback: Option<Box<dyn Fn(String, String)>>,
     source_id: SourceId,
     diagnostics: Vec<EngineDiagnostic>,
     /// Warnings already reported, so repeated evaluations of the same
@@ -206,7 +207,8 @@ impl Evaluator {
             env: ValEnv::new(),
             outputs: Vec::new(),
             functions,
-            enums: HashMap::new(),
+            symbols: SymbolTable::default(),
+            enums: HashSet::new(),
             enum_members: HashSet::new(),
             explode_depth: 2,
             recursion_depth: 10,
@@ -323,8 +325,13 @@ impl Evaluator {
         });
     }
 
-    pub fn set_print_callback(&mut self, callback: Box<dyn Fn(RuntimeValue, String)>) {
+    pub fn set_print_callback(&mut self, callback: Box<dyn Fn(String, String)>) {
         self.print_callback = Some(callback);
+    }
+
+    /// The declared symbols, needed to render any value that may contain one.
+    pub fn symbols(&self) -> &SymbolTable {
+        &self.symbols
     }
 
     pub fn execute(&mut self, statement: &WithRange<Statement>) -> Result<(), RuntimeError> {
@@ -342,39 +349,30 @@ impl Evaluator {
     }
 
     fn enum_identifier_kind(&self, name: &str) -> Option<EnumIdentifierKind> {
-        if self.enums.contains_key(name) {
-            Some(EnumIdentifierKind::Type)
+        if self.enums.contains(name) {
+            Some(EnumIdentifierKind::Set)
         } else if self.enum_members.contains(name) {
-            Some(EnumIdentifierKind::Member)
+            Some(EnumIdentifierKind::Symbol)
         } else {
             None
         }
     }
 
-    fn validate_binding_name(
-        &self,
-        name: &str,
-        range: ast::Range,
-        binding: BindingKind,
-    ) -> Result<(), RuntimeError> {
+    /// Rejects a name that a declaration has already claimed.
+    ///
+    /// Assignments, loop variables and function parameters all bind a variable,
+    /// and a declared name is unavailable to all three, so they report it the
+    /// same way. Which one it was is shown by where the diagnostic points.
+    fn validate_binding_name(&self, name: &str, range: ast::Range) -> Result<(), RuntimeError> {
         let Some(identifier_kind) = self.enum_identifier_kind(name) else {
             return Ok(());
-        };
-        let message = match binding {
-            BindingKind::Assignment => {
-                format!("enum {identifier_kind} {name} is immutable")
-            }
-            BindingKind::FunctionParameter => {
-                format!("enum {identifier_kind} {name} cannot be used as a parameter")
-            }
-            BindingKind::LoopVariable => {
-                format!("enum {identifier_kind} {name} cannot be used as a loop variable")
-            }
         };
         Err(RuntimeError::Semantic {
             kind: SemanticErrorKind::BindingConflict,
             range: range.into(),
-            message,
+            message: format!(
+                "`{name}` is a declared {identifier_kind}, so it cannot be used as a variable name"
+            ),
         })
     }
 
@@ -444,26 +442,22 @@ impl Evaluator {
             }
         }
 
-        let ty = Rc::new(EnumType {
-            name: definition.name.value.clone(),
-            members: definition.members.iter().map(|m| m.value.clone()).collect(),
-        });
-        for (index, member) in definition.members.iter().enumerate() {
-            let value = i32::try_from(index).map_err(|_| RuntimeError::Semantic {
-                kind: SemanticErrorKind::OutOfRange,
-                range: member.range.into(),
-                message: "enum has too many members".to_string(),
-            })?;
+        let member_names = definition
+            .members
+            .iter()
+            .map(|member| member.value.clone())
+            .collect::<Vec<_>>();
+        let indices = self
+            .symbols
+            .define_set(definition.name.value.clone(), &member_names);
+        for (member, symbol) in definition.members.iter().zip(indices) {
             self.env.insert(
                 member.value.clone(),
-                RuntimeValue::Element(ElementValue::Enum {
-                    value,
-                    ty: Rc::clone(&ty),
-                }),
+                RuntimeValue::Element(ElementValue::Symbol(symbol)),
             );
             self.enum_members.insert(member.value.clone());
         }
-        self.enums.insert(definition.name.value.clone(), ty);
+        self.enums.insert(definition.name.value.clone());
         Ok(())
     }
 
@@ -475,7 +469,7 @@ impl Evaluator {
     ) -> Result<Option<RuntimeValue>, RuntimeError> {
         match &statement.value {
             Statement::Assignment { name, value } => {
-                self.validate_binding_name(&name.value, name.range, BindingKind::Assignment)?;
+                self.validate_binding_name(&name.value, name.range)?;
                 let value = self.evaluate(eval_context, value)?;
                 self.env.insert(name.value.clone(), value);
             }
@@ -489,11 +483,7 @@ impl Evaluator {
                     self.diagnostics.push(warning);
                 }
                 for arg in &fd.args {
-                    self.validate_binding_name(
-                        &arg.value.name,
-                        arg.range,
-                        BindingKind::FunctionParameter,
-                    )?;
+                    self.validate_binding_name(&arg.value.name, arg.range)?;
                 }
                 let arg_types = fd
                     .args
@@ -531,10 +521,26 @@ impl Evaluator {
                 // `output` displays the summed pool, so reject one that cannot be
                 // summed here: the conversion in `output.rs` runs after evaluation and
                 // has no way to report an error.
-                if let RuntimeValue::Pool(pool, outcome_type) = &value {
-                    sum_pool(pool, outcome_type)
-                        .map_err(|error| error.into_error(expr.range, "displaying a pool"))?;
-                }
+                let summed = match &value {
+                    RuntimeValue::Pool(pool, outcome_type) => Some(
+                        sum_pool(pool, outcome_type)
+                            .map_err(|error| error.into_error(expr.range, "displaying a pool"))?,
+                    ),
+                    _ => None,
+                };
+                let displayed: Vec<&ElementValue> = match (&value, &summed) {
+                    (_, Some(pool)) => pool
+                        .ordered_outcomes()
+                        .iter()
+                        .map(|(outcome, _)| outcome)
+                        .collect(),
+                    (RuntimeValue::List(values, _), None) => values.iter().collect(),
+                    (RuntimeValue::Element(value), None) => vec![value],
+                    (RuntimeValue::Pool(_, _), None) => {
+                        unreachable!("a pool value is always summed above")
+                    }
+                };
+                reject_mixed_output_fields(&displayed, expr.range)?;
                 let field_names = if let Some(labels) = labeled {
                     let ElementType::Tuple(fields) = value.outcome_type() else {
                         return Err(RuntimeError::LabelsOnNonTupleOutput {
@@ -554,14 +560,16 @@ impl Evaluator {
                         labels
                             .value
                             .iter()
-                            .map(|label| interpolate_variable_names(label, &self.env))
+                            .map(|label| {
+                                interpolate_variable_names(label, &self.env, &self.symbols)
+                            })
                             .collect::<Result<Vec<_>, _>>()?,
                     )
                 } else {
                     None
                 };
                 let name = match named {
-                    Some(name) => interpolate_variable_names(name, &self.env)?,
+                    Some(name) => interpolate_variable_names(name, &self.env, &self.symbols)?,
                     None => format!("output {}", self.outputs.len() + 1),
                 };
                 self.outputs.push(EvaluatedOutput {
@@ -573,11 +581,11 @@ impl Evaluator {
             Statement::Print { expr, named } => {
                 let value = self.evaluate(eval_context, expr)?;
                 let name = match named {
-                    Some(name) => interpolate_variable_names(name, &self.env)?,
+                    Some(name) => interpolate_variable_names(name, &self.env, &self.symbols)?,
                     None => "".to_string(),
                 };
                 if let Some(ref callback) = self.print_callback {
-                    callback(value, name);
+                    callback(value.display(&self.symbols).to_string(), name);
                 }
             }
             Statement::Return { value } => {
@@ -625,11 +633,7 @@ impl Evaluator {
                 range_expression,
                 body,
             } => {
-                self.validate_binding_name(
-                    &variable.value,
-                    variable.range,
-                    BindingKind::LoopVariable,
-                )?;
+                self.validate_binding_name(&variable.value, variable.range)?;
                 let range = self.evaluate(eval_context, range_expression)?;
                 let range = match range {
                     RuntimeValue::List(range, _) => range,
@@ -712,14 +716,24 @@ impl Evaluator {
                     .map(|item| self.evaluate_list_literal_item(eval_context, item))
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut outcome: Option<ElementType> = None;
-                for item in &items {
+                // The element that settled the shape, so a later one that
+                // disagrees can be shown against it.
+                let mut settled_by: Option<ast::Range> = None;
+                for (item, source) in items.iter().zip(list.items.iter()) {
                     let item_type = item.flattened_outcome_type();
+                    let item_range = list_item_range(source);
+                    let settling = outcome.is_none();
                     merge_outcome_type(
                         &mut outcome,
                         item_type,
                         expression.range,
-                        "list literal contains mixed outcome types",
+                        OutcomeMismatchContext::SequenceLiteral,
+                        settled_by,
+                        Some(item_range),
                     )?;
+                    if settling {
+                        settled_by = Some(item_range);
+                    }
                 }
                 let outcome = outcome.unwrap_or(ElementType::Uninhabited);
                 let mut flattened = Vec::new();
@@ -967,17 +981,24 @@ impl Evaluator {
                 &mut result_type,
                 current_type,
                 function.range,
-                "function evaluations returned incompatible outcome types",
+                OutcomeMismatchContext::FunctionResults,
+                None,
+                None,
             )?;
             match &result {
                 RuntimeValue::List(values, _) if !result.is_additive() && values.len() != 1 => {
-                    return Err(RuntimeError::Semantic {
-                        kind: SemanticErrorKind::NonAdditiveValue,
-                        range: function.range.into(),
-                        message:
-                            "a non-additive sequence returned during pool evaluation cannot be summed"
-                                .to_string(),
-                    });
+                    let witness = values
+                        .iter()
+                        .find(|value| !value.element_type().is_additive());
+                    return Err(RuntimeError::NonAdditiveSum(Box::new(
+                        NonAdditiveSumError {
+                            range: function.range.into(),
+                            action: "combining the results of a function evaluated over a pool",
+                            subject: NonAdditiveSubject::Sequence(values.len()),
+                            field: witness.and_then(non_numeric_field),
+                            witness: witness.cloned(),
+                        },
+                    )));
                 }
                 _ => {}
             }
@@ -1072,7 +1093,7 @@ impl Evaluator {
                                 .zip(args)
                                 .map(|(formal, value)| TraceBinding {
                                     name: formal.value.name.clone(),
-                                    value: preview_value(value),
+                                    value: preview_value(value, &self.symbols),
                                 })
                                 .collect(),
                         }),
@@ -1174,21 +1195,102 @@ fn rolls_dice(expression: &Expression) -> bool {
     }
 }
 
+/// Rejects an output whose outcomes disagree about what a field holds.
+///
+/// A displayed distribution carries one schema per field position, so a field
+/// that is a number in one outcome and a symbol in another cannot be rendered.
+/// A distribution that is *all* symbols is an ordinary categorical output and
+/// is fine, which is why this reads the values: the outcome type only records
+/// whether everything is an `int`.
+fn reject_mixed_output_fields(
+    outcomes: &[&ElementValue],
+    range: ast::Range,
+) -> Result<(), RuntimeError> {
+    let arity = match outcomes.first() {
+        Some(ElementValue::Tuple(fields)) => fields.len(),
+        _ => 1,
+    };
+    let mut seen = vec![(false, false); arity];
+    for outcome in outcomes {
+        let fields: &[ElementValue] = match outcome {
+            ElementValue::Tuple(fields) => fields,
+            other => std::slice::from_ref(other),
+        };
+        for (position, field) in fields.iter().enumerate() {
+            let (numbers, symbols) = &mut seen[position];
+            match field {
+                ElementValue::Symbol(_) => *symbols = true,
+                _ => *numbers = true,
+            }
+        }
+    }
+    let Some(position) = seen
+        .iter()
+        .position(|(numbers, symbols)| *numbers && *symbols)
+    else {
+        return Ok(());
+    };
+    let what = if arity == 1 {
+        "this distribution".to_string()
+    } else {
+        format!("field {} of this distribution", position + 1)
+    };
+    Err(RuntimeError::Semantic {
+        kind: SemanticErrorKind::OutcomeMismatch,
+        range: range.into(),
+        message: format!(
+            "{what} holds numbers in some outcomes and symbols in others, so it cannot be \
+             displayed; map it to one kind of value first, for instance with \
+             `[sum integers in ...]`, or use `print` to inspect it as it is"
+        ),
+    })
+}
+
+/// Where a list element was written, so a diagnostic can point at it.
+fn list_item_range(item: &ListItem) -> ast::Range {
+    match &item.item {
+        BareListItem::Expr(expr) => expr.range,
+        BareListItem::Range(start, end) => ast::Range {
+            start: start.range.start,
+            end: end.range.end,
+        },
+    }
+}
+
+/// Widens `accumulated` to also describe `next`, or reports why it cannot.
+///
+/// `accumulated_range` and `next_range` name the expressions the two types came
+/// from, so the diagnostic can point at both; a caller that collects values
+/// with no source of their own passes `None`.
 fn merge_outcome_type(
     accumulated: &mut Option<ElementType>,
     next: ElementType,
     range: ast::Range,
-    error_message: &'static str,
+    context: OutcomeMismatchContext,
+    accumulated_range: Option<ast::Range>,
+    next_range: Option<ast::Range>,
 ) -> Result<(), RuntimeError> {
     let merged = match accumulated.as_ref() {
         None => next,
-        Some(current) => current
-            .merged_with(&next)
-            .ok_or_else(|| RuntimeError::Semantic {
-                kind: SemanticErrorKind::OutcomeMismatch,
-                range: range.into(),
-                message: error_message.to_string(),
-            })?,
+        Some(current) => match current.merged_with(&next) {
+            Some(merged) => merged,
+            None => {
+                return Err(RuntimeError::OutcomeMismatch(Box::new(
+                    OutcomeMismatchError {
+                        range: range.into(),
+                        context,
+                        first: OutcomeConflict {
+                            outcome_type: current.clone(),
+                            range: accumulated_range.map(Into::into),
+                        },
+                        second: OutcomeConflict {
+                            outcome_type: next,
+                            range: next_range.map(Into::into),
+                        },
+                    },
+                )));
+            }
+        },
     };
     *accumulated = Some(merged);
     Ok(())
@@ -1204,7 +1306,7 @@ fn coerce_arg(
     };
     let mut actual_outcome = arg.outcome_type();
     if let Some(required) = &expected.outcome {
-        if actual_outcome.merged_with(required).is_none() {
+        if !actual_outcome.satisfies(required) {
             return Err(RuntimeError::Semantic {
                 kind: SemanticErrorKind::OutcomeMismatch,
                 range: range.into(),
@@ -1273,6 +1375,7 @@ fn coerce_arg(
 fn interpolate_variable_names(
     template: &WithRange<String>,
     vars: &ValEnv,
+    symbols: &SymbolTable,
 ) -> Result<String, RuntimeError> {
     let mut result = String::new();
     let mut char_iter = template.value.chars();
@@ -1300,7 +1403,7 @@ fn interpolate_variable_names(
                 if matches!(value.outcome_type(), ElementType::AdditiveIdentity) {
                     value = value.materialize_identities(&ElementType::Int);
                 }
-                result.push_str(&value.to_string());
+                result.push_str(&value.display(symbols).to_string());
             } else {
                 return Err(RuntimeError::UndefinedReference {
                     range: template.range.into(),
@@ -1409,6 +1512,7 @@ mod tests {
             }
         }
 
+        let symbols = SymbolTable::default();
         let mut env = ValEnv::new();
         env.insert("A".to_string(), 1.into());
         env.insert("B".to_string(), 2.into());
@@ -1419,22 +1523,24 @@ mod tests {
             RuntimeValue::Element(ElementValue::AdditiveIdentity),
         );
         assert_eq!(
-            interpolate_variable_names(&ranged("A + B = [A] + [B]"), &env).unwrap(),
+            interpolate_variable_names(&ranged("A + B = [A] + [B]"), &env, &symbols).unwrap(),
             "A + B = 1 + 2"
         );
         assert!(
-            interpolate_variable_names(&ranged("A + B = [A] + [B] + [INVALID]"), &env).is_err()
+            interpolate_variable_names(&ranged("A + B = [A] + [B] + [INVALID]"), &env, &symbols)
+                .is_err()
         );
         assert_eq!(
-            interpolate_variable_names(&ranged("A + B = [A] + [B] + [invalid]"), &env).unwrap(),
+            interpolate_variable_names(&ranged("A + B = [A] + [B] + [invalid]"), &env, &symbols)
+                .unwrap(),
             "A + B = 1 + 2 + [invalid]"
         );
         assert_eq!(
-            interpolate_variable_names(&ranged("A + B = [A] + [B] + [C"), &env).unwrap(),
+            interpolate_variable_names(&ranged("A + B = [A] + [B] + [C"), &env, &symbols).unwrap(),
             "A + B = 1 + 2 + [C"
         );
         assert_eq!(
-            interpolate_variable_names(&ranged("[_MY_VAR], [IDENTITY]"), &env).unwrap(),
+            interpolate_variable_names(&ranged("[_MY_VAR], [IDENTITY]"), &env, &symbols).unwrap(),
             "4, 0"
         );
     }
@@ -1455,7 +1561,8 @@ mod tests {
             assert_eq!(
                 coerce_arg(argument.clone(), Some(&expected), range).unwrap(),
                 RuntimeValue::Element(ElementValue::Int(0)),
-                "{argument}"
+                "{:?}",
+                argument
             );
         }
     }
@@ -1485,7 +1592,8 @@ mod tests {
         let output = evaluator.take_outputs().remove(0);
         assert_eq!(output.name, "0");
         assert_eq!(
-            crate::output::Distribution::from(output.value).probabilities,
+            crate::output::Distribution::from_runtime(output.value, None, evaluator.symbols())
+                .probabilities,
             [(vec![0], 1.0)]
         );
     }

@@ -28,7 +28,8 @@ output [count {HIT, HIT} in d{MISS, HIT, HIT}] named "pool count"
 output 1@{MISS, HIT} named "first member"
 output #{MISS, HIT} named "enum list length"
 
-\\\ Even without outcomes, the distribution retains its enum field schema.
+\\\ A symbol's declared set lives on its values, so an empty distribution has
+\\\ nothing left to label: it falls back to a numeric field with no outcomes.
 function: typed X:s { result: X }
 output [typed {MISS:0}] named "typed empty"
 
@@ -84,7 +85,7 @@ MISS,100
 2,100
 
 "typed empty"
-ATTACK_RESULT,%
+#,%
 
 "element"
 ATTACK_RESULT,%

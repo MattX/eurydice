@@ -26,7 +26,7 @@ Statement: WithRange<Statement> = {
 };
 
 StatementInner: Statement = {
-    <id_start: @L> <id:VariableIdentifier> <id_end: @L> ":" <e:Expr> => 
+    <id_start: @L> <id:VariableIdentifier> <id_end: @R> ":" <e:Expr> => 
         Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
     <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
     "enum" ":" <name_start:@L> <name:VariableIdentifier> <name_end:@R>
@@ -43,7 +43,7 @@ StatementInner: Statement = {
     "print" <e:Expr> <n:OutputName?> => Statement::Print { expr: e, named: n },
     "result" ":" <e:Expr> => Statement::Return { value: e },
     <s:SetStatement> => s,
-    "loop" <id_start: @L> <id:VariableIdentifier> <id_end: @L> "over" <e:Expr> "{" <b:Block> "}" =>
+    "loop" <id_start: @L> <id:VariableIdentifier> <id_end: @R> "over" <e:Expr> "{" <b:Block> "}" =>
         Statement::Loop { variable: WithRange::new(id_start, id_end, id), range_expression: Box::new(e), body: b },
     <i:IfStatement> => i,
 };

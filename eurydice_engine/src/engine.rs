@@ -70,10 +70,7 @@ impl Engine {
     where
         F: Fn(String, String) + 'static,
     {
-        self.evaluator
-            .set_print_callback(Box::new(move |value, name| {
-                callback(value.to_string(), name);
-            }));
+        self.evaluator.set_print_callback(Box::new(callback));
     }
 
     /// Parses and executes a source submission, returning its outputs and any
@@ -168,7 +165,8 @@ impl Engine {
                     }
                     None => Vec::new(),
                 };
-                let mut diagnostic = runtime_diagnostic(&error, source_id, &suggestions);
+                let mut diagnostic =
+                    runtime_diagnostic(&error, source_id, &suggestions, self.evaluator.symbols());
                 add_later_definition(
                     &mut diagnostic,
                     &error,
@@ -179,13 +177,13 @@ impl Engine {
             }
         }
 
-        Ok(self
-            .evaluator
-            .take_outputs()
+        let outputs = self.evaluator.take_outputs();
+        let symbols = self.evaluator.symbols();
+        Ok(outputs
             .into_iter()
             .map(|output| EngineOutput {
                 name: output.name,
-                distribution: Distribution::from_runtime(output.value, output.field_names),
+                distribution: Distribution::from_runtime(output.value, output.field_names, symbols),
             })
             .collect())
     }
@@ -466,44 +464,28 @@ output [pick d3]";
         );
     }
 
+    /// The equality-based primitives are as total as `=` itself: a needle that
+    /// could never match counts zero matches rather than failing.
     #[test]
-    fn primitive_diagnostics_explain_outcome_and_value_constraints() {
-        for (source, signature) in [
-            (
-                "enum: R { A, B } output [{A} contains 1]",
-                "[SEQ:s contains N:n]",
-            ),
-            (
-                "enum: R { A, B } output [count {A} in {1}]",
-                "[count NEEDLES:s in HAYSTACK:s]",
-            ),
+    fn equality_primitives_count_no_matches_across_outcome_types() {
+        for source in [
+            "enum: R { A, B } output [{A} contains 1]",
+            "enum: R { A, B } output [count {A} in {1}]",
+            "enum: R { A, B } output [count {1} in 2d{A, B}]",
+            "output [{[tuple 1, 2]} contains 1]",
         ] {
-            let report = Engine::new().run_with_diagnostics(source);
-            let error = report.error().unwrap();
-            assert_eq!(error.code, "type.outcome_mismatch");
-            assert!(error.summary.contains(signature));
-            assert_eq!(error.labels.len(), 2);
-            assert!(
-                error.labels[0]
-                    .message
-                    .as_deref()
-                    .unwrap()
-                    .contains("sequence of `R` values")
-            );
-            assert!(
-                error.labels[1]
-                    .message
-                    .as_deref()
-                    .unwrap()
-                    .contains("sequence of `int` values")
-                    || error.labels[1]
-                        .message
-                        .as_deref()
-                        .unwrap()
-                        .contains("an integer")
+            let mut engine = Engine::new();
+            let outputs = run(&mut engine, source);
+            assert_eq!(
+                outputs[0].distribution.probabilities,
+                vec![(vec![0], 1.0)],
+                "{source}"
             );
         }
+    }
 
+    #[test]
+    fn primitive_diagnostics_explain_outcome_and_value_constraints() {
         let bounds = Engine::new().run_with_diagnostics("output [field 3 of [tuple 1, 2]]");
         let bounds_error = bounds.error().unwrap();
         assert_eq!(bounds_error.code, "value.out_of_range");

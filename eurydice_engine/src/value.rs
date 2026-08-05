@@ -6,36 +6,115 @@ use malachite::{Natural, base::num::basic::traits::One};
 
 use crate::ast;
 use crate::dice::Pool;
-use crate::error::{RuntimeError, SemanticErrorKind};
+use crate::error::{NonAdditiveSubject, NonAdditiveSumError, RuntimeError};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EnumType {
+/// One `enum:` declaration: a named domain of symbols.
+///
+/// Sets exist for display only. They carry no typing power: every symbol has
+/// the same element type whatever set it was declared in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolSet {
     pub name: String,
-    pub members: Vec<String>,
+    /// Global index of this set's first member. A set's members are contiguous.
+    first: u32,
+    len: u32,
 }
 
-impl EnumType {
-    pub fn member_name(&self, value: i32) -> Option<&str> {
-        usize::try_from(value)
-            .ok()
-            .and_then(|index| self.members.get(index))
+/// Every symbol declared so far, in declaration order.
+///
+/// Symbol values are bare indices into this table, so the table is the only
+/// place that knows a symbol's name and the set it came from. Keeping it out of
+/// the values means an outcome is a plain `u32`: no reference counting in the
+/// Icepool inner loops, and a derived `Ord` that already sorts symbols in
+/// declaration order.
+#[derive(Debug, Clone, Default)]
+pub struct SymbolTable {
+    names: Vec<String>,
+    /// Parallel to `names`: which set each symbol belongs to.
+    sets_by_symbol: Vec<u32>,
+    sets: Vec<SymbolSet>,
+}
+
+impl SymbolTable {
+    /// Declares a set, returning the global index of each member in order.
+    pub(crate) fn define_set(&mut self, name: String, members: &[String]) -> Vec<u32> {
+        let first = u32::try_from(self.names.len()).expect("symbol count fits in u32");
+        let set = u32::try_from(self.sets.len()).expect("set count fits in u32");
+        self.sets.push(SymbolSet {
+            name,
+            first,
+            len: u32::try_from(members.len()).expect("member count fits in u32"),
+        });
+        for member in members {
+            self.names.push(member.clone());
+            self.sets_by_symbol.push(set);
+        }
+        (first..first + u32::try_from(members.len()).expect("member count fits in u32")).collect()
+    }
+
+    pub fn name(&self, symbol: u32) -> &str {
+        self.names
+            .get(usize::try_from(symbol).expect("symbol index fits in usize"))
             .map(String::as_str)
+            .unwrap_or("<?>")
+    }
+
+    pub fn set_of(&self, symbol: u32) -> &SymbolSet {
+        &self.sets[self.set_index(symbol)]
+    }
+
+    /// Which declared set a symbol belongs to. Sets are numbered in
+    /// declaration order, so this doubles as their display order.
+    pub fn set_index(&self, symbol: u32) -> usize {
+        let set = self.sets_by_symbol[usize::try_from(symbol).expect("symbol index fits in usize")];
+        usize::try_from(set).expect("set index fits in usize")
+    }
+
+    pub fn set(&self, index: usize) -> &SymbolSet {
+        &self.sets[index]
+    }
+
+    /// The names of every member of `set`, in declaration order.
+    pub fn members(&self, set: &SymbolSet) -> &[String] {
+        let first = usize::try_from(set.first).expect("symbol index fits in usize");
+        let len = usize::try_from(set.len).expect("member count fits in usize");
+        &self.names[first..first + len]
+    }
+
+    /// The ordinal of `symbol` within its own set, which is what an output's
+    /// field values are expressed in.
+    pub fn ordinal(&self, symbol: u32) -> i32 {
+        let set = self.set_of(symbol);
+        i32::try_from(symbol - set.first).expect("member count fits in i32")
     }
 }
 
 /// Types that can be elements in collections.
+///
+/// A collection tracks, per scalar position, only whether every value there is
+/// known to be an `int`. That one bit is what `is_additive` and argument
+/// coercion need; anything finer — a symbol's name, its set, whether a
+/// collection happens to be all symbols — is read back off the values, which
+/// are always available when there are any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ElementType {
     /// An empty collection with no evidence about its outcome type.
     Uninhabited,
     /// The polymorphic identity produced by summing an uninhabited collection.
     AdditiveIdentity,
+    /// Every value is an `int`.
     Int,
-    Enum(Rc<EnumType>),
+    /// At least one value is not an `int`, so the outcomes cannot be added.
+    Mixed,
     Tuple(Rc<[ElementType]>),
 }
 
 impl ElementType {
+    /// The join: the most precise type describing values of both types.
+    ///
+    /// `None` means the two cannot appear in one collection at all, which is
+    /// the case only across shapes — a scalar with a tuple, or tuples of
+    /// different arity. Scalars always join, to `Mixed` if they disagree.
     pub(crate) fn merged_with(&self, other: &Self) -> Option<Self> {
         match (self, other) {
             (ElementType::Uninhabited, other) | (other, ElementType::Uninhabited) => {
@@ -43,8 +122,36 @@ impl ElementType {
             }
             (ElementType::AdditiveIdentity, other) if other.is_additive() => Some(other.clone()),
             (other, ElementType::AdditiveIdentity) if other.is_additive() => Some(other.clone()),
-            (left, right) if left == right => Some(left.clone()),
+            (ElementType::Int, ElementType::Int) => Some(ElementType::Int),
+            (ElementType::Int | ElementType::Mixed, ElementType::Int | ElementType::Mixed) => {
+                Some(ElementType::Mixed)
+            }
+            (ElementType::Tuple(left), ElementType::Tuple(right)) if left.len() == right.len() => {
+                left.iter()
+                    .zip(right.iter())
+                    .map(|(left, right)| left.merged_with(right))
+                    .collect::<Option<Vec<_>>>()
+                    .map(|fields| ElementType::Tuple(fields.into()))
+            }
             _ => None,
+        }
+    }
+
+    /// Whether every value of this type is also a value of `required`.
+    ///
+    /// This is the check the join cannot do: now that mismatched scalars join
+    /// to `Mixed` rather than failing, "these two can coexist" no longer
+    /// implies "this one will do where that one is demanded".
+    pub(crate) fn satisfies(&self, required: &Self) -> bool {
+        match (self, required) {
+            (ElementType::Uninhabited, _) => true,
+            (ElementType::AdditiveIdentity, required) => required.is_additive(),
+            (ElementType::Tuple(left), ElementType::Tuple(right)) if left.len() == right.len() => {
+                left.iter()
+                    .zip(right.iter())
+                    .all(|(left, right)| left.satisfies(right))
+            }
+            (left, right) => left == right,
         }
     }
 
@@ -53,7 +160,7 @@ impl ElementType {
             ElementType::Uninhabited => "empty".to_string(),
             ElementType::AdditiveIdentity => "additive identity".to_string(),
             ElementType::Int => "int".to_string(),
-            ElementType::Enum(ty) => ty.name.clone(),
+            ElementType::Mixed => "non-numeric".to_string(),
             ElementType::Tuple(fields) => format!(
                 "tuple({})",
                 fields
@@ -82,7 +189,7 @@ impl ElementType {
                         .into(),
                 ))
             }
-            ElementType::Enum(_) | ElementType::Tuple(_) => None,
+            ElementType::Mixed | ElementType::Tuple(_) => None,
         }
     }
 
@@ -108,11 +215,14 @@ impl ElementType {
     }
 }
 
+/// Variant order is the iteration order: ints, then symbols in global
+/// declaration order, then tuples lexicographically. Symbol indices are handed
+/// out in declaration order, so the derived `Ord` gets that for free.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ElementValue {
     AdditiveIdentity,
     Int(i32),
-    Enum { value: i32, ty: Rc<EnumType> },
+    Symbol(u32),
     Tuple(Rc<[ElementValue]>),
 }
 
@@ -121,7 +231,7 @@ impl ElementValue {
         match self {
             ElementValue::AdditiveIdentity => ElementType::AdditiveIdentity,
             ElementValue::Int(_) => ElementType::Int,
-            ElementValue::Enum { ty, .. } => ElementType::Enum(Rc::clone(ty)),
+            ElementValue::Symbol(_) => ElementType::Mixed,
             ElementValue::Tuple(fields) => ElementType::Tuple(
                 fields
                     .iter()
@@ -135,16 +245,9 @@ impl ElementValue {
     pub fn as_int(&self) -> Option<i32> {
         match self {
             ElementValue::Int(value) => Some(*value),
-            ElementValue::AdditiveIdentity | ElementValue::Enum { .. } | ElementValue::Tuple(_) => {
+            ElementValue::AdditiveIdentity | ElementValue::Symbol(_) | ElementValue::Tuple(_) => {
                 None
             }
-        }
-    }
-
-    pub fn enum_type(&self) -> Option<Rc<EnumType>> {
-        match self {
-            ElementValue::Enum { ty, .. } => Some(Rc::clone(ty)),
-            ElementValue::AdditiveIdentity | ElementValue::Int(_) | ElementValue::Tuple(_) => None,
         }
     }
 
@@ -190,7 +293,7 @@ impl ElementValue {
             )),
             // Reachable through `checked_neg`, which a negative dice count applies to
             // every face. `make_d` rejects that case first; this keeps the branch total.
-            ElementValue::Enum { .. } => Err(format!("Cannot negate {self}")),
+            ElementValue::Symbol(_) => Err("Cannot negate a symbol".to_string()),
         }
     }
 
@@ -236,21 +339,38 @@ impl ElementValue {
     }
 }
 
-impl std::fmt::Display for ElementValue {
+/// A value paired with the table that can name its symbols.
+///
+/// Symbol values are bare indices, so rendering one needs the [`SymbolTable`];
+/// this wrapper carries it to `Display` rather than putting it back into every
+/// value. Obtain one with [`ElementValue::display`] or [`RuntimeValue::display`].
+pub struct Displayed<'a, T> {
+    value: &'a T,
+    symbols: &'a SymbolTable,
+}
+
+impl ElementValue {
+    pub fn display<'a>(&'a self, symbols: &'a SymbolTable) -> Displayed<'a, Self> {
+        Displayed {
+            value: self,
+            symbols,
+        }
+    }
+}
+
+impl std::fmt::Display for Displayed<'_, ElementValue> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        match self.value {
             // Use italic 𝑒 for additive identity
             ElementValue::AdditiveIdentity => write!(f, "\u{1d452}"),
             ElementValue::Int(value) => write!(f, "{value}"),
-            ElementValue::Enum { value, ty } => {
-                write!(f, "{}", ty.member_name(*value).unwrap_or("<?>"))
-            }
+            ElementValue::Symbol(symbol) => write!(f, "{}", self.symbols.name(*symbol)),
             ElementValue::Tuple(fields) => write!(
                 f,
                 "({})",
                 fields
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|field| field.display(self.symbols).to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -265,26 +385,39 @@ pub enum RuntimeValue {
     Pool(Rc<Pool<ElementValue>>, ElementType),
 }
 
-impl std::fmt::Display for RuntimeValue {
+impl RuntimeValue {
+    pub fn display<'a>(&'a self, symbols: &'a SymbolTable) -> Displayed<'a, Self> {
+        Displayed {
+            value: self,
+            symbols,
+        }
+    }
+}
+
+impl std::fmt::Display for Displayed<'_, RuntimeValue> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RuntimeValue::Element(value) => write!(f, "{value}"),
+        match self.value {
+            RuntimeValue::Element(value) => write!(f, "{}", value.display(self.symbols)),
             RuntimeValue::List(list, _) => write!(
                 f,
                 "{{{}}}",
                 list.iter()
-                    .map(ToString::to_string)
+                    .map(|value| value.display(self.symbols).to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
             RuntimeValue::Pool(pool, outcome_type) => {
-                write!(f, "{}", display_pool(pool, outcome_type))
+                write!(f, "{}", display_pool(pool, outcome_type, self.symbols))
             }
         }
     }
 }
 
-fn display_pool(pool: &Pool<ElementValue>, outcome_type: &ElementType) -> String {
+fn display_pool(
+    pool: &Pool<ElementValue>,
+    outcome_type: &ElementType,
+    symbols: &SymbolTable,
+) -> String {
     if pool.ordered_outcomes().is_empty() {
         return "d{}".to_string();
     }
@@ -316,9 +449,9 @@ fn display_pool(pool: &Pool<ElementValue>, outcome_type: &ElementType) -> String
             pool.ordered_outcomes()
                 .iter()
                 .map(|(outcome, weight)| if weight == &Natural::ONE {
-                    outcome.to_string()
+                    outcome.display(symbols).to_string()
                 } else {
-                    format!("{}:{}", outcome, weight)
+                    format!("{}:{}", outcome.display(symbols), weight)
                 })
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -355,16 +488,6 @@ impl RuntimeValue {
             RuntimeValue::List(_, outcome_type) | RuntimeValue::Pool(_, outcome_type) => {
                 outcome_type.clone()
             }
-        }
-    }
-
-    pub fn enum_type(&self) -> Option<Rc<EnumType>> {
-        match self.outcome_type() {
-            ElementType::Enum(ty) => Some(ty),
-            ElementType::Uninhabited
-            | ElementType::AdditiveIdentity
-            | ElementType::Int
-            | ElementType::Tuple(_) => None,
         }
     }
 
@@ -460,7 +583,7 @@ impl RuntimeValue {
                 ),
                 ElementType::Int,
             ),
-            RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
+            RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
                 unreachable!("non-numeric values are rejected before numeric mapping")
             }
         }
@@ -495,28 +618,51 @@ pub(crate) fn sum_elements(values: &[ElementValue], outcome_type: &ElementType) 
 
 /// A pool that cannot be summed because its outcomes cannot be added together.
 ///
-/// Carries just enough to build the error message; the range belongs to whichever
-/// call site forced the sum, so it is supplied by [`NonAdditiveSum::into_error`].
+/// Carries a `witness`: one outcome that cannot be added, so the diagnostic can
+/// name a value the user wrote rather than only its type. The range belongs to
+/// whichever call site forced the sum, so it is supplied by
+/// [`NonAdditiveSum::into_error`].
 #[derive(Debug, Clone)]
 pub(crate) struct NonAdditiveSum {
-    outcome_type: ElementType,
     dimension: u32,
+    witness: Option<ElementValue>,
+    field: Option<usize>,
 }
 
 impl NonAdditiveSum {
     /// `action` names what forced the sum; it completes "<action> requires summing ...".
-    pub(crate) fn into_error(self, range: ast::Range, action: &str) -> RuntimeError {
-        RuntimeError::Semantic {
-            kind: SemanticErrorKind::NonAdditiveValue,
+    pub(crate) fn into_error(self, range: ast::Range, action: &'static str) -> RuntimeError {
+        RuntimeError::NonAdditiveSum(Box::new(NonAdditiveSumError {
             range: range.into(),
-            message: format!(
-                "{action} requires summing a pool of {} dice, and {} outcomes cannot be added \
-                 together",
-                self.dimension,
-                self.outcome_type.display_name(),
-            ),
-        }
+            action,
+            subject: NonAdditiveSubject::Pool(self.dimension),
+            witness: self.witness,
+            field: self.field,
+        }))
     }
+}
+
+/// The one-based field that stops a tuple from being added, if it is a tuple
+/// and one of its fields is not a number.
+pub(crate) fn non_numeric_field(value: &ElementValue) -> Option<usize> {
+    match value {
+        ElementValue::Tuple(fields) => fields
+            .iter()
+            .position(|field| field.as_int().is_none())
+            .map(|index| index + 1),
+        _ => None,
+    }
+}
+
+/// The first outcome that stands in the way of summing, and which of its
+/// fields is at fault when it is a tuple.
+fn non_additive_witness(pool: &Pool<ElementValue>) -> (Option<ElementValue>, Option<usize>) {
+    let witness = pool
+        .ordered_outcomes()
+        .iter()
+        .map(|(outcome, _)| outcome)
+        .find(|outcome| !outcome.element_type().is_additive());
+    (witness.cloned(), witness.and_then(non_numeric_field))
 }
 
 pub(crate) fn sum_pool(
@@ -532,9 +678,11 @@ pub(crate) fn sum_pool(
         if pool.dimension() == 1 || pool.ordered_outcomes().is_empty() {
             return Ok(pool.clone());
         }
+        let (witness, field) = non_additive_witness(pool);
         return Err(NonAdditiveSum {
-            outcome_type: outcome_type.clone(),
             dimension: pool.dimension(),
+            witness,
+            field,
         });
     };
     Ok(pool.sum_by(identity, ElementValue::add_scaled))
@@ -577,21 +725,21 @@ impl From<Pool> for RuntimeValue {
 mod tests {
     use super::*;
 
-    fn attack_result() -> Rc<EnumType> {
-        Rc::new(EnumType {
-            name: "ATTACK_RESULT".to_string(),
-            members: vec!["MISS".to_string(), "HIT".to_string()],
-        })
+    /// A table holding one declared set, `ATTACK_RESULT { MISS, HIT }`.
+    pub(crate) fn attack_result() -> SymbolTable {
+        let mut symbols = SymbolTable::default();
+        symbols.define_set(
+            "ATTACK_RESULT".to_string(),
+            &["MISS".to_string(), "HIT".to_string()],
+        );
+        symbols
     }
 
-    fn enum_value(index: i32) -> ElementValue {
-        ElementValue::Enum {
-            value: index,
-            ty: attack_result(),
-        }
+    fn enum_value(index: u32) -> ElementValue {
+        ElementValue::Symbol(index)
     }
 
-    fn enum_pool(dimension: u32, members: &[i32]) -> Pool<ElementValue> {
+    fn enum_pool(dimension: u32, members: &[u32]) -> Pool<ElementValue> {
         Pool::from_list(
             dimension,
             members.iter().copied().map(enum_value).collect::<Vec<_>>(),
@@ -599,7 +747,7 @@ mod tests {
     }
 
     fn enum_type() -> ElementType {
-        ElementType::Enum(attack_result())
+        ElementType::Mixed
     }
 
     #[test]
@@ -660,8 +808,9 @@ mod tests {
     }
 
     /// Multiset iteration sorts by `ElementValue`'s `Ord`, which is what gives
-    /// enum members their declaration order. Pinning it here means reordering the
-    /// fields of `ElementValue::Enum` breaks a test rather than the semantics.
+    /// symbols their declaration order: indices are handed out in declaration
+    /// order, so the derived `Ord` sorts by it. Pinning it here means changing
+    /// how indices are assigned breaks a test rather than the semantics.
     #[test]
     fn enum_multisets_are_ordered_by_declaration() {
         let multisets = enum_pool(2, &[0, 1])
@@ -677,15 +826,89 @@ mod tests {
         );
     }
 
+    /// The error names an outcome the user can recognize, not just a type.
     #[test]
-    fn a_non_additive_sum_error_uses_the_stable_diagnostic_kind() {
+    fn a_non_additive_sum_error_carries_an_offending_outcome() {
         let error = sum_pool(&enum_pool(2, &[0, 1]), &enum_type())
             .unwrap_err()
             .into_error((0, 1).into(), "displaying a pool");
-        let RuntimeError::Semantic { kind, message, .. } = error else {
-            panic!("expected a semantic error");
+        let RuntimeError::NonAdditiveSum(error) = error else {
+            panic!("expected a non-additive sum error");
         };
-        assert_eq!(kind, SemanticErrorKind::NonAdditiveValue);
-        assert!(message.contains("ATTACK_RESULT"), "{message}");
+        assert!(matches!(error.subject, NonAdditiveSubject::Pool(2)));
+        assert_eq!(error.witness, Some(ElementValue::Symbol(0)));
+        assert_eq!(error.field, None);
+    }
+
+    /// For a tuple it also names which field is at fault.
+    #[test]
+    fn a_non_additive_tuple_sum_names_the_offending_field() {
+        let outcome = ElementValue::Tuple(
+            vec![
+                ElementValue::Int(1),
+                ElementValue::Int(2),
+                ElementValue::Symbol(0),
+            ]
+            .into(),
+        );
+        let pool = Pool::from_list(2, vec![outcome.clone()]);
+        let outcome_type =
+            ElementType::Tuple(vec![ElementType::Int, ElementType::Int, ElementType::Mixed].into());
+        let error = sum_pool(&pool, &outcome_type)
+            .unwrap_err()
+            .into_error((0, 1).into(), "displaying a pool");
+        let RuntimeError::NonAdditiveSum(error) = error else {
+            panic!("expected a non-additive sum error");
+        };
+        assert_eq!(error.witness, Some(outcome));
+        assert_eq!(error.field, Some(3));
+    }
+
+    /// Symbols join with ints instead of failing, but the join stops at scalars:
+    /// nothing reconciles a scalar with a tuple, or two tuple arities.
+    #[test]
+    fn scalars_join_but_shapes_do_not() {
+        let pair = ElementType::Tuple(vec![ElementType::Int, ElementType::Int].into());
+        let triple =
+            ElementType::Tuple(vec![ElementType::Int, ElementType::Int, ElementType::Int].into());
+        let mixed_pair = ElementType::Tuple(vec![ElementType::Mixed, ElementType::Int].into());
+
+        assert_eq!(
+            ElementType::Int.merged_with(&ElementType::Mixed),
+            Some(ElementType::Mixed)
+        );
+        assert_eq!(
+            ElementType::Int.merged_with(&ElementType::Int),
+            Some(ElementType::Int)
+        );
+        // A field-wise join is how `[tuple DIE 1]` over a mixed die stays typed.
+        assert_eq!(pair.merged_with(&mixed_pair), Some(mixed_pair.clone()));
+        assert_eq!(pair.merged_with(&triple), None);
+        assert_eq!(ElementType::Int.merged_with(&pair), None);
+        assert_eq!(ElementType::Mixed.merged_with(&pair), None);
+    }
+
+    /// The join says two values can share a collection; `satisfies` says one
+    /// will do where the other is demanded. Mixed outcomes satisfy nothing.
+    #[test]
+    fn mixed_outcomes_do_not_satisfy_an_int_requirement() {
+        assert!(ElementType::Int.satisfies(&ElementType::Int));
+        assert!(!ElementType::Mixed.satisfies(&ElementType::Int));
+        assert!(ElementType::Uninhabited.satisfies(&ElementType::Int));
+        assert!(ElementType::AdditiveIdentity.satisfies(&ElementType::Int));
+
+        let pair = ElementType::Tuple(vec![ElementType::Int, ElementType::Int].into());
+        let mixed_pair = ElementType::Tuple(vec![ElementType::Mixed, ElementType::Int].into());
+        assert!(pair.satisfies(&pair));
+        assert!(!mixed_pair.satisfies(&pair));
+    }
+
+    /// A symbol carries only its index; the table is what names it.
+    #[test]
+    fn symbols_are_named_by_the_table() {
+        let symbols = attack_result();
+        assert_eq!(enum_value(1).display(&symbols).to_string(), "HIT");
+        assert_eq!(symbols.set_of(1).name, "ATTACK_RESULT");
+        assert_eq!(symbols.ordinal(1), 1);
     }
 }

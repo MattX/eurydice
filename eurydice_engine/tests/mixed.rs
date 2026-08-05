@@ -1,0 +1,411 @@
+//! Collections whose outcomes are not all of one kind.
+//!
+//! The motivating shape is a die with mostly numeric faces plus a symbolic
+//! one, such as `d{0:2, 1:2, 2, TIMES_TWO}`.
+
+use eurydice_engine::{
+    Engine, EngineDiagnostic, LabelStyle,
+    eval::{EvaluatedOutput, Evaluator, SymbolTable},
+    grammar,
+    output::{Distribution, FieldSchema},
+};
+
+/// Runs a program, returning its outputs together with the symbol table needed
+/// to render them: a symbol value is an index, and the evaluator that assigned
+/// it does not outlive this call.
+fn run(program: &str) -> Result<(Vec<EvaluatedOutput>, SymbolTable), String> {
+    let statements = grammar::BodyParser::new()
+        .parse(program)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut evaluator = Evaluator::new();
+    for statement in statements {
+        evaluator
+            .execute(&statement)
+            .map_err(|error| format!("{error:?}"))?;
+    }
+    let symbols = evaluator.symbols().clone();
+    Ok((evaluator.take_outputs(), symbols))
+}
+
+/// The probabilities of every output of a program that is expected to run.
+fn probabilities(program: &str) -> Vec<Vec<(Vec<i32>, f64)>> {
+    let (outputs, symbols) = run(program).unwrap_or_else(|error| panic!("{program}: {error}"));
+    outputs
+        .into_iter()
+        .map(|output| {
+            Distribution::from_runtime(output.value, output.field_names, &symbols).probabilities
+        })
+        .collect()
+}
+
+fn error_summary(program: &str) -> String {
+    error(program).summary.clone()
+}
+
+fn error(program: &str) -> EngineDiagnostic {
+    Engine::new()
+        .run_with_diagnostics(program)
+        .error()
+        .unwrap_or_else(|| panic!("expected an error for {program}"))
+        .clone()
+}
+
+/// The die this feature exists for, declared as a list and as a pool.
+const DIE: &str = "enum: SPECIAL { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
+
+#[test]
+fn lists_and_pools_can_mix_numbers_and_symbols() {
+    // Six equally likely faces, three of which contribute nothing to a sum.
+    assert_eq!(
+        probabilities(&format!("{DIE} output [sum integers in DIE]")),
+        vec![vec![
+            (vec![0], 3.0 / 6.0),
+            (vec![1], 2.0 / 6.0),
+            (vec![2], 1.0 / 6.0),
+        ]]
+    );
+    // A mixed list is a list like any other; `#` counts its elements.
+    assert_eq!(
+        probabilities("enum: R { A } output #{1, A, 2}"),
+        vec![vec![(vec![3], 1.0)]]
+    );
+}
+
+/// A value pulled out of a mixed pool has no memory of the union it came from,
+/// so equality has to be total for the central idiom to work at all.
+#[test]
+fn equality_discriminates_symbols_inside_a_mixed_pool() {
+    assert_eq!(
+        probabilities(&format!(
+            "{DIE} function: doubler X:n {{ result: X = TIMES_TWO }} output [doubler DIE]"
+        )),
+        vec![vec![(vec![0], 5.0 / 6.0), (vec![1], 1.0 / 6.0)]]
+    );
+}
+
+#[test]
+fn integers_are_summed_and_counted_across_a_whole_pool() {
+    // Four dice, each an integer with probability 5/6.
+    let all_ints = (5.0f64 / 6.0).powi(4);
+    let counts = probabilities(&format!("{DIE} output [count integers in 4dDIE]"));
+    assert_eq!(counts[0].len(), 5);
+    let (outcome, probability) = counts[0].last().unwrap();
+    assert_eq!(outcome, &vec![4]);
+    assert!((probability - all_ints).abs() < 1e-9, "{probability}");
+
+    // Summing ignores the symbols rather than failing on them, at any dimension.
+    let sums = probabilities(&format!("{DIE} output [sum integers in 4dDIE]"));
+    assert_eq!(sums[0].first().unwrap().0, vec![0]);
+    assert_eq!(sums[0].last().unwrap().0, vec![8]);
+    let total: f64 = sums[0].iter().map(|(_, probability)| probability).sum();
+    assert!((total - 1.0).abs() < 1e-9, "{total}");
+
+    // Sequences take the same route as pools.
+    assert_eq!(
+        probabilities("enum: R { A } output [sum integers in {1, A, 2}]"),
+        vec![vec![(vec![3], 1.0)]]
+    );
+    assert_eq!(
+        probabilities("enum: R { A } output [count integers in {1, A, 2}]"),
+        vec![vec![(vec![2], 1.0)]]
+    );
+}
+
+#[test]
+fn is_integer_distinguishes_the_faces_of_a_mixed_die() {
+    assert_eq!(
+        probabilities(&format!("{DIE} output [DIE is integer]")),
+        vec![vec![(vec![0], 1.0 / 6.0), (vec![1], 5.0 / 6.0)]]
+    );
+    assert_eq!(
+        probabilities("enum: R { A } output [A is integer] output [1 is integer]"),
+        vec![vec![(vec![0], 1.0)], vec![(vec![1], 1.0)]]
+    );
+}
+
+/// The worked example: total the numeric faces, then double once per special
+/// face. `POOL:s` keeps the sum and the count correlated within each multiset.
+///
+/// Checked against an independent enumeration of all 6^4 face combinations.
+#[test]
+fn the_motivating_program_matches_a_brute_force_enumeration() {
+    let program = format!(
+        r#"
+        {DIE}
+        function: score POOL:s {{
+          result: [sum integers in POOL] * (2 ^ [count {{TIMES_TWO}} in POOL])
+        }}
+        output [score 4dDIE]
+        "#
+    );
+    let expected: Vec<(Vec<i32>, f64)> = [
+        (0, 81),
+        (1, 64),
+        (2, 224),
+        (3, 160),
+        (4, 328),
+        (5, 80),
+        (6, 160),
+        (7, 8),
+        (8, 129),
+        (10, 24),
+        (12, 28),
+        (16, 10),
+    ]
+    .into_iter()
+    .map(|(outcome, weight)| (vec![outcome], f64::from(weight) / 1296.0))
+    .collect();
+    let actual = probabilities(&program).remove(0);
+    assert_eq!(actual.len(), expected.len());
+    for ((actual_outcome, actual_p), (expected_outcome, expected_p)) in
+        actual.iter().zip(expected.iter())
+    {
+        assert_eq!(actual_outcome, expected_outcome);
+        assert!(
+            (actual_p - expected_p).abs() < 1e-9,
+            "{actual_outcome:?}: {actual_p} != {expected_p}"
+        );
+    }
+}
+
+/// A tuple built over a mixed die has a mixed *field*, which is the one kind of
+/// union that arises without anyone asking for it. Projecting the field back
+/// out recovers an ordinary mixed scalar.
+#[test]
+fn tuples_carry_a_mixed_field_through_construction_and_projection() {
+    let program = format!("{DIE} PAIR: [tuple DIE 1] output [sum integers in [field 1 of PAIR]]");
+    assert_eq!(
+        probabilities(&program),
+        vec![vec![
+            (vec![0], 3.0 / 6.0),
+            (vec![1], 2.0 / 6.0),
+            (vec![2], 1.0 / 6.0),
+        ]]
+    );
+
+    // The mixed field is what stops the tuple itself from being displayed.
+    let error = error_summary(&format!("{DIE} output [tuple DIE 1]"));
+    assert!(error.contains("field 1 of this distribution"), "{error}");
+}
+
+/// Unions stop at the scalar level: nothing reconciles a scalar with a tuple,
+/// or two tuple arities, and there is no way to take such a value apart.
+#[test]
+fn shapes_do_not_mix() {
+    for program in [
+        "output {1, [tuple 1 2]}",
+        "output {[tuple 1 2], [tuple 1 2 3]}",
+        "enum: R { A } output {A, [tuple 1 2]}",
+        "output d{1, [tuple 1 2]}",
+        "function: f X:n { if X { result: 1 } result: [tuple 1 2] } output [f d{0, 1}]",
+    ] {
+        // The wording depends on where the two shapes met; the code does not.
+        assert_eq!(error(program).code, "type.outcome_mismatch", "{program}");
+    }
+}
+
+/// The shapes that could not be reconciled are named, and both the element
+/// that set the shape and the one that broke it are pointed at.
+#[test]
+fn a_shape_mismatch_names_both_shapes_and_elements() {
+    let source = "output {[tuple 1 2], 7, [tuple 1 2 3]}";
+    let diagnostic = error(source);
+    assert_eq!(
+        diagnostic.summary,
+        "A sequence cannot mix a tuple of 2 fields and a single value"
+    );
+    // The second element broke the shape, so it is what the error points at.
+    let primary = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.style == LabelStyle::Primary)
+        .expect("a primary label");
+    assert_eq!(primary.message.as_deref(), Some("this is a single value"));
+    assert_eq!(
+        &source[primary.range.range.start..primary.range.range.end],
+        "7"
+    );
+
+    let secondary = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.style == LabelStyle::Secondary)
+        .expect("a secondary label");
+    assert_eq!(
+        secondary.message.as_deref(),
+        Some("this is a tuple of 2 fields, which set the shape")
+    );
+    assert_eq!(
+        &source[secondary.range.range.start..secondary.range.range.end],
+        "[tuple 1 2]"
+    );
+
+    // Arity is named too, not just "tuple".
+    assert_eq!(
+        error("output {[tuple 1 2], [tuple 1 2 3]}").summary,
+        "A sequence cannot mix a tuple of 2 fields and a tuple of 3 fields"
+    );
+}
+
+/// Results collected from a pool evaluation have no source of their own, so
+/// that one label names the shapes on the call instead.
+#[test]
+fn mismatched_function_results_name_the_shapes() {
+    let diagnostic =
+        error("function: f X:n { if X { result: 1 } result: [tuple 1 2] } output [f d{0, 1}]");
+    // `d{0, 1}` reaches the `[tuple 1 2]` branch first, so that is the shape
+    // the later `1` fails to join.
+    assert_eq!(
+        diagnostic.summary,
+        "A function evaluated over a pool cannot mix a tuple of 2 fields and a single value"
+    );
+    assert_eq!(
+        diagnostic.labels[0].message.as_deref(),
+        Some("one result is a tuple of 2 fields, another is a single value")
+    );
+}
+
+/// A pool that cannot be summed names an outcome the user can recognize, and
+/// for a tuple says which field is at fault.
+#[test]
+fn a_non_additive_sum_names_the_offending_value() {
+    let scalar = error("enum: R { A, B } output 2d{A, B}");
+    assert_eq!(
+        scalar.summary,
+        "displaying a pool requires summing a pool of 2 dice, but they cannot be added together"
+    );
+    assert_eq!(
+        scalar.labels[0].message.as_deref(),
+        Some("outcomes like `A` are not numbers")
+    );
+    assert!(
+        scalar.help.as_deref().unwrap().contains("sum integers in"),
+        "{:?}",
+        scalar.help
+    );
+
+    let tuple = error("enum: R { A } output 2d{[tuple 1 2 A]}");
+    assert_eq!(
+        tuple.labels[0].message.as_deref(),
+        Some("field 3 of outcomes like `(1, 2, A)` is not a number")
+    );
+    assert!(
+        tuple.help.as_deref().unwrap().contains("field by field"),
+        "{:?}",
+        tuple.help
+    );
+
+    // A multiset returned from a pool evaluation is a sequence, not a pool.
+    let sequence = error("enum: R { A, B } function: f X:s { result: X } output [f 2d{A, B}]");
+    assert!(
+        sequence.summary.contains("summing a sequence of 2 values"),
+        "{}",
+        sequence.summary
+    );
+    assert_eq!(
+        sequence.labels[0].message.as_deref(),
+        Some("values like `A` are not numbers")
+    );
+}
+
+/// The empty sum has no shape of its own, so its mismatch is described as an
+/// addition problem rather than a shape problem.
+#[test]
+fn the_empty_sum_reports_what_it_cannot_be_added_to() {
+    let diagnostic = error("enum: R { A } X: {} + {} output {X, A}");
+    assert_eq!(
+        diagnostic.summary,
+        "A sequence cannot mix the empty sum with values that cannot be added"
+    );
+    let messages: Vec<_> = diagnostic
+        .labels
+        .iter()
+        .map(|label| label.message.as_deref().unwrap())
+        .collect();
+    assert!(messages.contains(&"this cannot be added"), "{messages:?}");
+    assert!(messages.contains(&"this is the empty sum"), "{messages:?}");
+}
+
+/// `output` needs one schema per field, so a field cannot be a number in one
+/// outcome and a symbol in another. Everything else about the value still
+/// works, including `print`.
+#[test]
+fn output_rejects_a_field_that_disagrees_with_itself() {
+    for program in [
+        "enum: R { A } output {A, 1}",
+        "enum: R { A } output d{A, 1}",
+        "enum: R { A } output [tuple 1, d{A, 2}]",
+    ] {
+        let error = error_summary(program);
+        assert!(error.contains("cannot be displayed"), "{program}: {error}");
+        assert!(
+            error.contains("sum integers in"),
+            "the error should say what to do instead: {error}"
+        );
+    }
+
+    // Mapping to one kind of value first is all it takes.
+    assert_eq!(
+        probabilities("enum: R { A } output [sum integers in d{A, 1}]"),
+        vec![vec![(vec![0], 0.5), (vec![1], 0.5)]]
+    );
+}
+
+/// A distribution that is *all* symbols is an ordinary categorical output, even
+/// though its outcome type is the same one a mixed pool has.
+#[test]
+fn all_symbol_distributions_still_display() {
+    let (outputs, symbols) = run("enum: R { MISS, HIT } output d{MISS, HIT}").expect("runs");
+    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+    let FieldSchema::Enum { enum_name, labels } = &distribution.fields[0] else {
+        panic!("expected a symbol field");
+    };
+    assert_eq!(enum_name, "R");
+    assert_eq!(labels, &["MISS", "HIT"]);
+}
+
+/// Multiset iteration and the arithmetic that a mixed pool cannot support are
+/// unchanged from the all-symbol case: the outcome type is the same.
+#[test]
+fn mixed_pools_gain_no_arithmetic_or_ordering() {
+    for program in [
+        "output 4dDIE",
+        "output 2dDIE + 1",
+        "output [highest 2 of 4dDIE]",
+        "output [sort {1, TIMES_TWO}]",
+        "output DIE < 1",
+        "output -2dDIE",
+        "output [maximum of 4dDIE]",
+        "output [explode 4dDIE]",
+    ] {
+        let program = format!("{DIE} {program}");
+        assert!(run(&program).is_err(), "{program}");
+    }
+}
+
+/// Iteration order across kinds: integers first, in numeric order, then
+/// symbols in declaration order. Selecting one position is the only way to
+/// observe it, since mixed outcomes have no ordering comparisons.
+#[test]
+fn integers_sort_before_symbols_in_multisets() {
+    let program = |setting: &str| {
+        format!(
+            r#"
+            enum: R {{ A }}
+            function: first S:s {{ result: [1@S is integer] }}
+            {setting}
+            output [first 2d{{1, A}}]
+            "#
+        )
+    };
+    // Highest first: position 1 is an integer only when both dice roll 1.
+    assert_eq!(
+        probabilities(&program("")),
+        vec![vec![(vec![0], 0.75), (vec![1], 0.25)]]
+    );
+    // Lowest first: position 1 is a symbol only when both dice roll A.
+    assert_eq!(
+        probabilities(&program(r#"set "position order" to "lowest first""#)),
+        vec![vec![(vec![0], 0.25), (vec![1], 0.75)]]
+    );
+}

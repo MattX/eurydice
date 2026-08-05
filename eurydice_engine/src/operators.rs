@@ -35,7 +35,7 @@ pub(crate) fn apply_unary_op(
             RuntimeValue::Element(ElementValue::Int(i)) => i32::try_from(i.abs().to_string().len())
                 .expect("vector length fits in i32")
                 .into(),
-            RuntimeValue::Element(ElementValue::Enum { .. }) => 1.into(),
+            RuntimeValue::Element(ElementValue::Symbol(_)) => 1.into(),
             RuntimeValue::Element(ElementValue::Tuple(fields)) => i32::try_from(fields.len())
                 .expect("tuple length fits in i32")
                 .into(),
@@ -183,7 +183,12 @@ fn apply_element_math(
                 unreachable!("division divisor was type checked")
             };
             if divisor == 0 {
-                return Err(format!("Cannot divide {} by zero", left));
+                // The dividend is additive here, so it names itself without
+                // needing the symbol table to render it.
+                return Err(match left {
+                    ElementValue::Int(value) => format!("Cannot divide {value} by zero"),
+                    _ => "Cannot divide by zero".to_string(),
+                });
             }
             if matches!(left, ElementValue::AdditiveIdentity) {
                 return Ok(ElementValue::AdditiveIdentity);
@@ -269,14 +274,6 @@ pub(crate) fn apply_binary_op(
             ),
         });
     }
-    if matches!(op.value, BinaryOp::Eq | BinaryOp::Ne) && left.merged_outcome_type(right).is_none()
-    {
-        return Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::OutcomeMismatch,
-            range: op.range.into(),
-            message: "equality requires operands with the same outcome type".to_string(),
-        });
-    }
     match &op.value {
         BinaryOp::D => make_d(Some(left), right, op.range),
         BinaryOp::At => {
@@ -302,7 +299,7 @@ pub(crate) fn apply_binary_op(
                         value: left.clone(),
                     });
                 }
-                RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
+                RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
                     unreachable!()
                 }
             };
@@ -367,7 +364,7 @@ pub(crate) fn apply_binary_op(
                         lst[usize::try_from(index - 1).unwrap()].clone(),
                     ))
                 }
-                RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_))
+                RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_))
                 | RuntimeValue::Pool(_, _) => Err(RuntimeError::Semantic {
                     kind: SemanticErrorKind::OperatorOperands,
                     range: op.range.into(),
@@ -566,12 +563,20 @@ fn equality_binary_op(
     equal: bool,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
-    let outcome_type = left
-        .merged_outcome_type(right)
-        .expect("equality operand types were checked")
-        .summed_type();
-    let left = left.materialize_identities(&outcome_type);
-    let right = right.materialize_identities(&outcome_type);
+    // Equality is total: values of different kinds are simply unequal. The
+    // join is consulted only to give the empty sum a concrete type, so that
+    // `{} = 0` still holds; where there is no join there is nothing to
+    // reconcile, and the comparison is false whatever the values.
+    let (left, right) = match left.merged_outcome_type(right) {
+        Some(outcome_type) => {
+            let outcome_type = outcome_type.summed_type();
+            (
+                left.materialize_identities(&outcome_type),
+                right.materialize_identities(&outcome_type),
+            )
+        }
+        None => (left.clone(), right.clone()),
+    };
     let compare = |a: &ElementValue, b: &ElementValue| i32::from((a == b) == equal);
     broadcast_binary(
         &left,
@@ -603,7 +608,7 @@ fn normalize_dice_count(arg: &RuntimeValue) -> DiceCount {
                 .clone()
                 .map_outcomes(|outcome| expect_int(&outcome)),
         )),
-        RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
+        RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
             unreachable!("non-numeric values are rejected before numeric operations")
         }
     }
@@ -639,7 +644,7 @@ fn make_d(
         }
         RuntimeValue::List(list, _) => DRightSide::List((**list).clone()),
         RuntimeValue::Pool(d, _) => DRightSide::Pool(Rc::clone(d)),
-        RuntimeValue::Element(ElementValue::Enum { .. } | ElementValue::Tuple(_)) => {
+        RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
             return Err(RuntimeError::Semantic {
                 kind: SemanticErrorKind::OperatorOperands,
                 range: range.into(),

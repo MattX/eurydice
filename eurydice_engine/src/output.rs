@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::fmt::Write;
 
 use crate::dice::Pool;
-use crate::eval::{ElementType, ElementValue, RuntimeValue, sum_pool};
+use crate::eval::{ElementType, ElementValue, RuntimeValue, SymbolTable, sum_pool};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Distribution {
@@ -29,16 +29,14 @@ pub enum FieldSchema {
     },
 }
 
-impl From<RuntimeValue> for Distribution {
-    fn from(value: RuntimeValue) -> Self {
-        Self::from_runtime(value, None)
-    }
-}
-
 impl Distribution {
     /// Converts an evaluated value into its serialized display representation,
     /// attaching validated tuple field names when the output supplied them.
-    pub fn from_runtime(value: RuntimeValue, field_names: Option<Vec<String>>) -> Self {
+    pub fn from_runtime(
+        value: RuntimeValue,
+        field_names: Option<Vec<String>>,
+        symbols: &SymbolTable,
+    ) -> Self {
         match value {
             RuntimeValue::Element(value) => {
                 let outcome_type = value.element_type();
@@ -47,6 +45,7 @@ impl Distribution {
                     &outcome_type,
                     false,
                     field_names,
+                    symbols,
                 )
             }
             RuntimeValue::List(values, outcome_type) => pool_output(
@@ -54,44 +53,110 @@ impl Distribution {
                 &outcome_type,
                 false,
                 field_names,
+                symbols,
             ),
             RuntimeValue::Pool(pool, outcome_type) => {
-                pool_output(&pool, &outcome_type, true, field_names)
+                pool_output(&pool, &outcome_type, true, field_names, symbols)
             }
         }
     }
 }
 
-/// Flattens any output outcome to raw `i32`s. Scalar outcomes have one value;
-/// tuples have one per field, and enum values are represented by their ordinal.
-fn output_values(value: &ElementValue) -> Vec<i32> {
-    /// Ordinal of a single (non-tuple) field. Enum values map to their member index.
-    fn field_ordinal(field: &ElementValue) -> i32 {
-        match field {
-            ElementValue::AdditiveIdentity => 0,
-            ElementValue::Int(value) | ElementValue::Enum { value, .. } => *value,
-            ElementValue::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
+/// How one field position is rendered, derived from the values at that
+/// position rather than from the outcome type.
+///
+/// The type only records whether a field is all `int`s, which is not enough to
+/// label a symbol field: the names and the declared sets live on the values.
+enum FieldRender {
+    Int,
+    /// The declared sets present at this position, in declaration order. Their
+    /// members are concatenated to form the field's labels, so a symbol's wire
+    /// value is its ordinal plus its set's offset in that concatenation.
+    Symbols(Vec<usize>),
+}
+
+impl FieldRender {
+    /// The wire value for one field of one outcome.
+    fn ordinal(&self, field: &ElementValue, symbols: &SymbolTable) -> i32 {
+        match (self, field) {
+            (_, ElementValue::AdditiveIdentity) => 0,
+            (_, ElementValue::Int(value)) => *value,
+            (FieldRender::Symbols(sets), ElementValue::Symbol(symbol)) => {
+                let set = symbols.set_index(*symbol);
+                let offset: usize = sets
+                    .iter()
+                    .take_while(|present| **present != set)
+                    .map(|present| symbols.members(symbols.set(*present)).len())
+                    .sum();
+                i32::try_from(offset).expect("label count fits in i32") + symbols.ordinal(*symbol)
+            }
+            (FieldRender::Int, ElementValue::Symbol(_)) => {
+                unreachable!("a field mixing ints and symbols is rejected by the evaluator")
+            }
+            (_, ElementValue::Tuple(_)) => {
+                unreachable!("nested tuples are rejected by the evaluator")
+            }
         }
     }
-    match value {
-        ElementValue::Tuple(fields) => fields.iter().map(field_ordinal).collect(),
-        other => vec![field_ordinal(other)],
+
+    fn schema(&self, symbols: &SymbolTable) -> FieldSchema {
+        match self {
+            FieldRender::Int => FieldSchema::Int,
+            FieldRender::Symbols(sets) => FieldSchema::Enum {
+                // Several sets in one field is rare, and joining their names
+                // keeps the wire format — and the frontend's grouping of
+                // outputs by enum name — unchanged for the common single-set
+                // case.
+                enum_name: sets
+                    .iter()
+                    .map(|set| symbols.set(*set).name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+                labels: sets
+                    .iter()
+                    .flat_map(|set| symbols.members(symbols.set(*set)).iter().cloned())
+                    .collect(),
+            },
+        }
     }
 }
 
-/// Describes a single concrete (non-tuple) field's schema.
-fn field_schema(ty: &ElementType) -> FieldSchema {
-    match ty {
-        ElementType::Int => FieldSchema::Int,
-        ElementType::Enum(ty) => FieldSchema::Enum {
-            enum_name: ty.name.clone(),
-            labels: ty.members.clone(),
-        },
-        ElementType::Uninhabited | ElementType::AdditiveIdentity => {
-            unreachable!("defaulted outcome types are concrete")
+/// Derives each field position's rendering by scanning that position's values.
+///
+/// `arity` is fixed for a distribution, so every outcome contributes one value
+/// per position; a position with no symbols renders as `int`, which is also
+/// what an empty distribution falls back to.
+fn field_renders(
+    outcomes: &[(ElementValue, Natural)],
+    arity: usize,
+    symbols: &SymbolTable,
+) -> Vec<FieldRender> {
+    let mut sets_by_field: Vec<Vec<usize>> = vec![Vec::new(); arity];
+    for (outcome, _) in outcomes {
+        let fields: &[ElementValue] = match outcome {
+            ElementValue::Tuple(fields) => fields,
+            other => std::slice::from_ref(other),
+        };
+        for (position, field) in fields.iter().enumerate() {
+            if let ElementValue::Symbol(symbol) = field {
+                let set = symbols.set_index(*symbol);
+                let sets = &mut sets_by_field[position];
+                if let Err(index) = sets.binary_search(&set) {
+                    sets.insert(index, set);
+                }
+            }
         }
-        ElementType::Tuple(_) => unreachable!("nested tuples are rejected by the evaluator"),
     }
+    sets_by_field
+        .into_iter()
+        .map(|sets| {
+            if sets.is_empty() {
+                FieldRender::Int
+            } else {
+                FieldRender::Symbols(sets)
+            }
+        })
+        .collect()
 }
 
 fn pool_output(
@@ -99,6 +164,7 @@ fn pool_output(
     outcome_type: &ElementType,
     sum: bool,
     field_names: Option<Vec<String>>,
+    symbols: &SymbolTable,
 ) -> Distribution {
     let pool = if sum {
         if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ElementType::Uninhabited) {
@@ -119,12 +185,16 @@ fn pool_output(
     } else {
         pool
     };
-    let fields = match &outcome_type {
-        ElementType::Tuple(field_types) => field_types.iter().map(field_schema).collect(),
-        other => vec![field_schema(other)],
+    let arity = match &outcome_type {
+        ElementType::Tuple(field_types) => field_types.len(),
+        _ => 1,
     };
+    let renders = field_renders(pool.ordered_outcomes(), arity, symbols);
     Distribution {
-        fields,
+        fields: renders
+            .iter()
+            .map(|render| render.schema(symbols))
+            .collect(),
         field_names: if matches!(outcome_type, ElementType::Tuple(_)) {
             field_names
         } else {
@@ -132,7 +202,20 @@ fn pool_output(
         },
         probabilities: to_probabilities_generic(pool.ordered_outcomes())
             .into_iter()
-            .map(|(value, probability)| (output_values(&value), probability))
+            .map(|(value, probability)| {
+                let fields: &[ElementValue] = match &value {
+                    ElementValue::Tuple(fields) => fields,
+                    other => std::slice::from_ref(other),
+                };
+                (
+                    fields
+                        .iter()
+                        .zip(renders.iter())
+                        .map(|(field, render)| render.ordinal(field, symbols))
+                        .collect(),
+                    probability,
+                )
+            })
             .collect(),
     }
 }
@@ -213,9 +296,14 @@ mod tests {
 
     use super::*;
 
+    /// Most outputs contain no symbols, so they need nothing from the table.
+    fn distribution(value: RuntimeValue) -> Distribution {
+        Distribution::from_runtime(value, None, &SymbolTable::default())
+    }
+
     #[test]
     fn converts_int_to_distribution() {
-        let distribution = Distribution::from(RuntimeValue::from(5));
+        let distribution = distribution(RuntimeValue::from(5));
 
         assert_eq!(distribution.probabilities, vec![(vec![5], 1.0)]);
     }
@@ -226,7 +314,7 @@ mod tests {
             5, -1, 5, 0, 5, 1, 5, 2, 5, 3, 5, 4, 5, 5, 5, 5,
         ]));
 
-        let distribution = Distribution::from(value);
+        let distribution = distribution(value);
 
         assert_eq!(
             distribution.probabilities,
@@ -246,7 +334,7 @@ mod tests {
     fn converts_pool_to_distribution_by_summing_dice() {
         let value = RuntimeValue::from(Pool::from_list(2, vec![1, 2]));
 
-        let distribution = Distribution::from(value);
+        let distribution = distribution(value);
 
         assert_eq!(
             distribution.probabilities,

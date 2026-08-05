@@ -68,8 +68,7 @@ Errors are fatal and terminate program execution.
 The type grammar for Eurydice is
 
 ```
-Scalar  = int | E
-          where E ranges over declared enums
+Scalar  = int | symbol
 Element = Scalar | tuple of 2 to 4 Scalars
 Type    = Element | list [Element] | pool [Element]
 ```
@@ -77,15 +76,13 @@ Type    = Element | list [Element] | pool [Element]
 There are three kinds of element values:
 
 * `int`: values of this type hold a 32-bit signed integer
-* _enum members_: values of a user-declared type which contains a set of nominal, non-numeric values, which can be used to represent discrete outcomes, booleans, etc.
-* _tuples_: fixed-size, ordered products of two to four `int` or enum member fields. Tuple types are structural: the type of a tuple is determined by the number and types of its fields. Tuples do not nest.
+* _symbols_: non-numeric values, declared in named sets, which can be used to represent discrete outcomes, booleans, etc.
+* _tuples_: fixed-size, ordered products of two to four `int` or symbol fields. Tuple types are structural: the type of a tuple is determined by the number and types of its fields. Tuples do not nest.
 
 Two kinds of collections are built on these:
 
-* _lists_: values of this type hold a list of one particular element type.
-* _pools_: values of this type hold a pool of one element type `e`. A pool consists of a mapping from outcomes of type `e` to probabilities (whose representation is unspecified), together with an unsigned count of dice called the _dimension_.
-
-Lists and pools are homogeneous and cannot mix values with different outcome types. For example, all tuples in one list must have the same arity and corresponding field types.
+* _lists_: values of this type hold a list of elements.
+* _pools_: values of this type hold a pool of elements. A pool consists of a mapping from outcomes to probabilities (whose representation is unspecified), together with an unsigned count of dice called the _dimension_.
 
 The outcome type of a collection is bracketed in the grammar because it may be _absent_: an empty collection that carries no information about what it could contain has no outcome type, and adopts one from its context. Only collections can lack an outcome type; there is no element value whose type is absent. See [empty collections](#-empty-collections) for discussion.
 
@@ -93,16 +90,32 @@ The maximum number of elements in a list, or of outcomes in a pool, is 2^31-1.
 
 There are no first-class functions.
 
+### ⊕ Mixed collections
+
+A collection's outcomes need not all be of one kind: a single list or pool may hold both `int`s and symbols. This is what makes dice like `4d{0:2, 1:2, 2, TIMES_TWO}` — mostly numeric faces, plus a symbolic one — expressible.
+
+Mixing is allowed at the scalar level only. Every outcome of a collection must have the same _shape_: all scalars, or all tuples of the same arity. It is an error to build a collection from a scalar and a tuple, or from tuples of different arities, because nothing in the language could take such a value apart again — `#` cannot distinguish a tuple from an `int`, since `#[tuple 1 2]` and `#42` are both `2`.
+
+A tuple's individual fields are scalars, so a collection of tuples may well disagree about a field:
+
+```
+enum: SPECIAL { TIMES_TWO }
+DIE: d{0:2, 1:2, 2, TIMES_TWO}
+PAIR: [tuple DIE 1]   \ field 1 is sometimes an int, sometimes a symbol \
+```
+
+A collection whose outcomes are not all `int`s (or not all tuples of `int`s) is not [additive](#what-element-types-support), so it cannot be summed unless its dimension is one. That restriction is what makes most operations on a mixed collection an error; the operations that remain are multiset iteration, equality, `#`, `@` selecting a single element, [`[SEQ contains N]`](#seqs-contains-nn), [`[count NEEDLES in HAYSTACK]`](#count-needless-in-haystacks), the [integer built-ins](#-nn-is-integer), and `print`.
+
 > [!IMPORTANT]
-> A reader concerned only with AnyDice compatibility may read `Element` as `int` throughout, treat every ✗ in the table below as "does not arise", and skip those sections entirely.
+> A reader concerned only with AnyDice compatibility may read `Element` as `int` throughout — every collection is then homogeneous and none of this arises. Such a reader may also treat every ✗ in the table below as "does not arise", and skip those sections entirely.
 >
 > AnyDice does not restrict integers to 32-bit values. Experimentation suggests that AnyDice integers are represented as double-precision floats (`output 9007199254740993` returns 9007199254740992).
 
 ### What element types support
 
-| | `int` | enum member | tuple of `int`s | tuple with an enum field |
+| | `int` | symbol | tuple of `int`s | tuple with a symbol field |
 |---|---|---|---|---|
-| `=`, `!=` | ✓ | same enum only | same tuple type | same tuple type |
+| `=`, `!=` | ✓ | ✓ | ✓ | ✓ |
 | `<`, `<=`, `>`, `>=`, `[sort]` | ✓ | ✗ | ✗ | ✗ |
 | `+`, `-`, unary `-` | ✓ | ✗ | componentwise | ✗ |
 | `*`, `/` | ✓ | ✗ | by an `int` only | ✗ |
@@ -113,26 +126,28 @@ There are no first-class functions.
 | iteration order: multisets, `"position order"` | ✓ | ✓ | ✓ | ✓ |
 | summing a pool of dimension other than 1 | ✓ | ✗ | ✓ | ✗ |
 
-**Every operation requires `int` operands unless this document says otherwise.** Supplying an enum member or a tuple anywhere else is an error. Besides the ✓ entries above, the operations that accept other element types are collection construction, pool construction, [multiset iteration](#multiset-iteration), `@` selecting a single element, [`[SEQ contains N]`](#seqs-contains-nn), [`[count NEEDLES in HAYSTACK]`](#count-needless-in-haystacks), the [tuple built-ins](#-tuples), and `print`/`output`.
+`=` and `!=` are _total_: they are defined between any two elements, and elements of different kinds are never equal. Nothing else is: **every operation requires `int` operands unless this document says otherwise**, and supplying a symbol or a tuple anywhere else is an error. Besides the ✓ entries above, the operations that accept other element types are collection construction, pool construction, [multiset iteration](#multiset-iteration), `@` selecting a single element, [`[SEQ contains N]`](#seqs-contains-nn), [`[count NEEDLES in HAYSTACK]`](#count-needless-in-haystacks), the [integer built-ins](#-nn-is-integer), the [tuple built-ins](#-tuples), and `print`/`output`.
 
-An element type is _additive_ when it has a ✓ in the `+` row: `int`, and tuples all of whose fields are `int`. A list or pool is additive when its outcome type is. Only additive values can be summed, and only additive collections can be summed to an element.
+An element value is _additive_ when it has a ✓ in the `+` row: an `int`, or a tuple all of whose fields are `int`. A list or pool is additive when every one of its outcomes is. Only additive values can be summed, and only additive collections can be summed to an element.
 
 > [!IMPORTANT]
 > In AnyDice the only element type is `int`, so every column but the first is empty, everything is additive, and the rule above imposes no restrictions.
 
-### ⊕ Enums
+### ⊕ Symbols
 
-Enums must be declared at the top level:
+Symbols are declared at the top level, in named sets:
 
 ```
 enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
 ```
 
-The enum type and its members use variable-identifier syntax. An enum must contain at least one member. Variables, enum type names, and enum member names all share a namespace. It is an error to declare an enum whose name or any of whose member names equals that of a declared variable. Conversely, it is an error to declare a variable whose name collides with an enum name or member name.
+The set name and its members use variable-identifier syntax. A set must contain at least one member. Variables, set names, and symbol names all share a namespace. It is an error to declare a set whose name or any of whose member names equals that of a declared variable. Conversely, it is an error to declare a variable whose name collides with a set name or a symbol name.
 
-Enum members support equality and inequality with members of the same enum, as set out in [What element types support](#what-element-types-support).
+A declared set names a _domain_, not a type. All symbols share one element type, whichever set they were declared in, so symbols from two sets may appear in one collection and comparing them is not an error — they are simply never equal. A set determines how its members are displayed, and where they fall in the iteration order.
 
-Enum members have an _iteration order_, namely the order in which they are declared. It is used only to sort multisets during [multiset iteration](#multiset-iteration), and therefore by the `"position order"` setting. It does not make ordering comparisons or `[sort]` available for enum members.
+Symbols have an _iteration order_, namely the order in which they are declared, across all sets. It is used only to sort multisets during [multiset iteration](#multiset-iteration), and therefore by the `"position order"` setting. It does not make ordering comparisons or `[sort]` available for symbols.
+
+Every `int` sorts before every symbol, and every symbol before every tuple.
 
 ### ⊕ Tuples
 
@@ -149,7 +164,7 @@ Tuple fields are selected with `[field INDEX of TUPLE]`. Indices are one-based a
 
 Tuples support structural equality and inequality with tuples of the same type: two tuples are equal exactly when every pair of corresponding fields is equal. An _additive_ tuple, one whose fields are all of type `int`, additionally supports arithmetic: `+`, `-`, and unary `-` operate componentwise, multiplication by an `int` is supported in either operand order, and division by an `int` operates componentwise. `int / tuple` is not defined. Everything else follows the default in [What element types support](#what-element-types-support).
 
-Tuples have an _iteration order_: lexicographic by field, each field in its own iteration order. As for enums, it is used only to sort multisets during [multiset iteration](#multiset-iteration), and does not make ordering comparisons or `[sort]` available for tuples.
+Tuples have an _iteration order_: lexicographic by field, each field in its own iteration order. As for symbols, it is used only to sort multisets during [multiset iteration](#multiset-iteration), and does not make ordering comparisons or `[sort]` available for tuples.
 
 Tuple constructors and field projection participate in normal [pool-based function evaluation](#pool-based-evaluation). Consequently, constructing a tuple from pool-valued arguments produces their joint distribution, and passing a tuple-valued pool to an `n` parameter evaluates the function once per tuple outcome.
 
@@ -163,7 +178,7 @@ output [field 1 of JOINT]
 
 ### Pools
 
-It is not possible to create a pool value representing a pool of different types of dice. For instance, `3d6` is a pool of three d6s, but there is no way to represent a pool of one d6 and one d8.
+Every die in a pool is identical. For instance, `3d6` is a pool of three d6s, but there is no way to represent a pool of one d6 and one d8. A single die's faces may still be of different kinds, as in [mixed collections](#-mixed-collections).
 
 Pools may have no possible outcomes (for instance, such a pool is created with expression `d{}`). Such a pool has dimension 0.
 
@@ -175,7 +190,7 @@ _Summing_ an [additive pool](#what-element-types-support) transforms it into a p
 
 For instance, summing `2d2` results in a pool equivalent to `d{2, 3, 3, 4}`.
 
-Summing a pool of dimension 1 does nothing, including for a non-additive pool, as does summing a pool with no possible outcomes. Summing a non-additive pool of any other dimension is an error. Summing a dimension-0 additive pool whose outcome type is known creates a dimension-1 pool containing that type's zero: `0` for integers, or an all-zero tuple of the appropriate type. Summing a pool with no outcome type is covered in [Empty collections](#-empty-collections).
+Summing a pool of dimension 1 does nothing, including for a non-additive pool, as does summing a pool with no possible outcomes. Summing a non-additive pool of any other dimension is an error. Summing a dimension-0 additive pool whose outcome type is known creates a dimension-1 pool containing that type's zero: `0` for integers, or an all-zero tuple of the appropriate arity. Summing a pool with no outcome type is covered in [Empty collections](#-empty-collections).
 
 #### Multiset iteration
 
@@ -254,7 +269,7 @@ Everything in this section concerns collections that are empty and carry no info
 
 #### Absent outcome types
 
-A bare empty list literal `{}`, and the empty pool `d{}`, have no outcome type. Because they contain no values, they are compatible with any outcome type their context supplies, so `{{}, {MISS}}` is valid and produces a list of enum members. An explicitly typed empty literal such as `{1:0}` instead retains the outcome type of its repeated expression, so `{{1:0}, {MISS}}` is an error.
+A bare empty list literal `{}`, and the empty pool `d{}`, have no outcome type. Because they contain no values, they are compatible with any outcome type their context supplies, so `{{}, {MISS}}` is valid and produces a list of symbols. An explicitly typed empty literal such as `{1:0}` instead retains the outcome type of its repeated expression, so `{{1:0}, [tuple 1 2]}` is an error.
 
 This gives a way to write an empty collection of a chosen type, either from a sample element or from an existing collection:
 
@@ -458,7 +473,7 @@ There are four unary operators, all of which bind more tightly than any binary o
 `#` evaluates to the length of its argument:
 
 * If the argument is an `int`, it returns the number of digits in the base-10 representation. `#0` evaluates to `1`. A leading `-` is not counted as a digit.
-* If the argument is an enum member, it returns `1`.
+* If the argument is a symbol, it returns `1`.
 * If the argument is a tuple, it returns the tuple's arity.
 * If the argument is a `list`, it returns the number of elements.
 * If the argument is a `pool`, it returns the pool's dimension (count of dice in the pool).
@@ -542,10 +557,12 @@ The operators `=`, `!=`, `<`, `<=`, `>`, and `>=` are comparison operators, perf
 
 In all cases, these operators evaluate to `1` if their condition is true, or `0` otherwise.
 
-Equality and inequality are also defined nominally for enum members and structurally for tuples of the same type. Comparing values with different types is an error.
+Equality and inequality are _total_: they are defined between any two values, whatever their types. Two elements of different kinds — a symbol and an `int`, two symbols from different declared sets, two tuples of different arity — are never equal. Symbols compare by identity and tuples of the same arity structurally.
+
+This totality is what makes a [mixed collection](#-mixed-collections) usable: a value drawn from one carries no record of the collection it came from, so `X = TIMES_TWO` has to be answerable when `X` happens to be a number.
 
 1. If both arguments are elements, equality or inequality compares them directly. Ordering comparisons require two `int`s.
-2. If one argument is a `list`, and the other is an element of the same outcome type, the comparison is performed between the element and each member of the `list`. The expression's value is an `int`: the count of comparisons that evaluated to true. Ordering in this form requires `int` outcomes.
+2. If one argument is a `list`, and the other is an element, the comparison is performed between the element and each member of the `list`. The expression's value is an `int`: the count of comparisons that evaluated to true. Ordering in this form requires `int` outcomes.
 3. If both arguments are `list`s, equality and inequality compare the complete lists structurally. Lists of `int`s may additionally be compared in [lexicographic order](https://en.wikipedia.org/wiki/Lexicographic_order).
 4. If either argument is a `pool`, both arguments are converted to `pool`s and summed. The LHS is then flat mapped with a function that applies the operator to the LHS and each value in the RHS. Additive tuple pools are summed componentwise. For non-additive pools only equality and inequality are available, and it is an error if either operand is a non-additive pool whose dimension is not one.
 
@@ -718,6 +735,8 @@ In both cases, the expression is evaluated. Any strings present as part of a `na
 
 For an `output` statement, the value of the expression is converted to a `pool` and [summed](#summing), then added to an output list. It is therefore an error to `output` a non-additive pool whose dimension is not one.
 
+A displayed distribution carries one description per field, shared by all of its outcomes, so it is also an error to `output` a value whose outcomes disagree about a field: one holding a number in some outcomes and a symbol in others has no single description. A distribution that is entirely symbols is unaffected — that is an ordinary categorical output. Map a [mixed](#-mixed-collections) value to one kind of value first, for instance with [`[sum integers in SEQ]`](#-sum-integers-in-seqs), or inspect it with `print`.
+
 The optional `named` clause attaches a name to the distribution for display purposes. If no name is provided, the distribution is assigned the default name `output n`, where `n` is its one-based index in program execution order.
 
 The optional `labeled` clause assigns display names to the fields of a tuple-valued output. It is an error to use it with a non-tuple output or to provide a number of labels different from the tuple's arity. The labels do not change the tuple's type or values. `named` and `labeled` may occur in either order.
@@ -727,9 +746,9 @@ output [tuple d6, d8] labeled "First die", "Second die"
 output [tuple d6, d8] named "Joint roll" labeled "d6 result", "d8 result"
 ```
 
-Enum outputs display member names rather than numeric values. Tuple outputs display every field of each outcome. Numeric statistics and cumulative/order-based presentation do not apply to enum or tuple distributions.
+Symbol outputs display symbol names rather than numeric values, and show every member of the declared sets involved, including those with probability zero. Tuple outputs display every field of each outcome. Numeric statistics and cumulative/order-based presentation do not apply to symbol or tuple distributions.
 
-For a `print` statement, the value of the expression is shown to the user as soon as possible, attached to the name if present. There is no default name otherwise. `print` does not sum its argument, so it can display a pool of any dimension and outcome type, such as `2d{MISS, HIT}`.
+For a `print` statement, the value of the expression is shown to the user as soon as possible, attached to the name if present. There is no default name otherwise. `print` does not sum its argument, so it can display a pool of any dimension and outcome type, such as `2d{MISS, HIT}` or `4d{0:2, 1:2, 2, TIMES_TWO}`.
 
 ### Set
 
@@ -752,15 +771,15 @@ Assignment statements either create a new binding in the [innermost environment 
 AssignmentStatement = VariableName ':' Expr.
 ```
 
-Assigning to the name of an enum type or enum member is an error. Enum names also cannot be reused for function parameters or loop variables.
+Assigning to the name of a declared set or one of its symbols is an error. Those names also cannot be reused for function parameters or loop variables.
 
-### ⊕ Enum definition
+### ⊕ Symbol set definition
 
 ```
 EnumDefinitionStatement = 'enum' ':' VariableName '{' VariableName {',' VariableName} '}'.
 ```
 
-Enum definitions are executed sequentially and are only valid at the top level.
+Set definitions are executed sequentially and are only valid at the top level. The keyword is `enum` for historical reasons; a definition declares a named set of [symbols](#-symbols), not a type.
 
 ### Function definition
 
@@ -782,7 +801,7 @@ The function's identifier is the sequence of words and argument positions in the
 
 As in [function calls](#function-calls), adjacent parameters may be separated by commas, and the commas are not part of the identifier. `function: add A:n, B:n` and `function: add A:n B:n` define the same function, and either can be called with or without commas.
 
-Each parameter name can optionally be annotated with a _shape_: `n` for an element, `s` for a list, or `d` for a pool (dice). Note that this constrains the shape only: the value's outcomes may be integers, members of any one enum, or tuples, and a definition cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
+Each parameter name can optionally be annotated with a _shape_: `n` for an element, `s` for a list, or `d` for a pool (dice). Note that this constrains the shape only: the value's outcomes may be integers, symbols, or tuples, in any combination a collection can hold, and a definition cannot constrain their outcome type. Specifying a shape causes the usual argument coercion and pool-based evaluation.
 
 An `s`-shaped parameter accepts a pool of any dimension and any outcome type, and the function is evaluated once per multiset. An `n`-shaped parameter [sums](#summing) the pool, so passing a non-additive pool whose dimension is not one is an error.
 
@@ -834,14 +853,14 @@ output [choose FIRST if d{0:SECOND_WEIGHT, 1:FIRST_WEIGHT} else SECOND]
 
 ### `[SEQ:s contains N:n]`
 
-Returns `1` if `SEQ` contains `N`, or `0` otherwise. `SEQ` and `N` must have the same outcome type.
+Returns `1` if `SEQ` contains `N`, or `0` otherwise. Like `=`, this is total: an `N` that no element of `SEQ` could ever equal simply is not contained in it.
 
 > ![IMPORTANT]
 > If `SEQ` is a pool, Eurydice does not perform multiset enumeration and uses a Icepool instead. AnyDice performs multiset enumeration, and can be much slower.
 
 ### `[count NEEDLES:s in HAYSTACK:s]`
 
-Counts the number of occurrences of each element of `NEEDLES` in `HAYSTACK`. Returns the sum of these counts. Both lists must have the same outcome type.
+Counts the number of occurrences of each element of `NEEDLES` in `HAYSTACK`. Returns the sum of these counts. Like `=`, this is total: needles that could never match count zero occurrences.
 
 > ![IMPORTANT]
 > If `HAYSTACK` is a pool, Eurydice does not perform multiset enumeration and uses Icepool instead. AnyDice performs multiset enumeration, and can be much slower.
@@ -854,6 +873,43 @@ output [count {1, 1, 2} in {1, 2, 2, 3}]  \ Outputs 4 \
 output [count {2, 4, 6} in 2d6]  \ Outputs d{0:9, 1:18, 2:9} \
 output [count {4..6, 6} in d6]  \ Outputs d{0:3, 1:2, 2} \
 output [count {HIT} in 8d{MISS, HIT, CRITICALHIT}]  \ Counts hits across eight dice \
+output [count {TIMES_TWO} in 4d{0:2, 1:2, 2, TIMES_TWO}]  \ Counts one face of a mixed die \
+```
+
+### ⊕ `[N:n is integer]`
+
+Returns `1` if `N` is an `int`, or `0` if it is a symbol or a tuple. This is the only way to tell the numeric outcomes of a [mixed collection](#-mixed-collections) apart from the rest; symbols are told apart from each other with `=`.
+
+As with any `n`-shaped parameter, a pool argument is [summed](#summing) and the function is evaluated for each of its outcomes, so `[POOL is integer]` reports the distribution of a single die's kind and is an error for a mixed pool of dimension other than one.
+
+```
+enum: SPECIAL { TIMES_TWO }
+output [d{0:2, 1:2, 2, TIMES_TWO} is integer]  \ Outputs d{0:1, 1:5} \
+```
+
+### ⊕ `[sum integers in SEQ:s]`
+
+Returns the sum of the `int` outcomes of `SEQ`, ignoring outcomes that are not `int`s. Unlike summing `SEQ` itself, this is defined for a [mixed collection](#-mixed-collections) of any dimension.
+
+If `SEQ` is a pool, the result is the distribution of that sum across all of its dice.
+
+```
+enum: SPECIAL { TIMES_TWO }
+output [sum integers in {1, TIMES_TWO, 2}]  \ Outputs 3 \
+output [sum integers in d{0:2, 1:2, 2, TIMES_TWO}]  \ Outputs d{0:3, 1:2, 2} \
+```
+
+> ![IMPORTANT]
+> Eurydice does not perform multiset enumeration for a pool argument: the sum is additive over the dice, so each die's outcomes are mapped and the results summed.
+
+### ⊕ `[count integers in SEQ:s]`
+
+Returns how many outcomes of `SEQ` are `int`s. As with [`[sum integers in SEQ]`](#-sum-integers-in-seqs), this is defined for a [mixed collection](#-mixed-collections) of any dimension, and a pool argument gives the distribution of that count across its dice.
+
+```
+enum: SPECIAL { TIMES_TWO }
+output [count integers in {1, TIMES_TWO, 2}]  \ Outputs 2 \
+output [count integers in 2d{1, TIMES_TWO}]  \ Outputs d{0:1, 1:2, 2:1} \
 ```
 
 ### `[explode POOL:d]`
@@ -938,7 +994,7 @@ Returns `SEQUENCE` in reverse order.
 
 This function returns a list with the same elements as `SEQUENCE`, sorted in ascending or descending order depending on the value of the `"position order"` global setting.
 
-The list must have `int` outcomes; enums and tuples have no language-level ordering.
+The list must have `int` outcomes; symbols and tuples have no language-level ordering.
 
 ### ⊕ `[tuple A:n B:n]`, `[tuple A:n B:n C:n]`, `[tuple A:n B:n C:n D:n]`
 

@@ -6,9 +6,12 @@ use serde::Serialize;
 
 use crate::{
     ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
-    error::{ArityMismatch, PrimitiveArgumentErrorKind, RuntimeError, SemanticErrorKind},
+    error::{
+        ArityMismatch, NonAdditiveSubject, OutcomeConflict, OutcomeMismatchContext,
+        PrimitiveArgumentErrorKind, RuntimeError, SemanticErrorKind,
+    },
     primitives::primitive_signature,
-    value::{ElementValue, RuntimeValue},
+    value::{ElementType, ElementValue, RuntimeValue, SymbolTable},
 };
 
 /// Identifies one source submission within a stateful [`crate::Engine`].
@@ -116,8 +119,8 @@ impl EngineDiagnostic {
 
 /// A value rendered for display, truncated so one oversized pool cannot push
 /// the rest of a diagnostic off the screen.
-pub(crate) fn preview_value(value: &RuntimeValue) -> String {
-    let preview = value.to_string();
+pub(crate) fn preview_value(value: &RuntimeValue, symbols: &SymbolTable) -> String {
+    let preview = value.display(symbols).to_string();
     if preview.chars().count() > 80 {
         format!("{}…", preview.chars().take(79).collect::<String>())
     } else {
@@ -125,24 +128,72 @@ pub(crate) fn preview_value(value: &RuntimeValue) -> String {
     }
 }
 
-fn describe_value(value: &RuntimeValue) -> String {
+fn describe_value(value: &RuntimeValue, symbols: &SymbolTable) -> String {
     match value {
         RuntimeValue::Element(ElementValue::AdditiveIdentity | ElementValue::Int(_)) => {
             "an integer".to_string()
         }
-        RuntimeValue::Element(ElementValue::Enum { ty, .. }) => {
-            format!("a `{}` value", ty.name)
+        RuntimeValue::Element(ElementValue::Symbol(symbol)) => {
+            format!("a `{}` value", symbols.set_of(*symbol).name)
         }
         RuntimeValue::Element(ElementValue::Tuple(_)) => "a tuple".to_string(),
-        RuntimeValue::List(_, outcome_type) => {
-            format!("a sequence of `{}` values", outcome_type.display_name())
-        }
-        RuntimeValue::Pool(_, outcome_type) => {
-            format!(
-                "a dice pool with `{}` outcomes",
-                outcome_type.display_name()
+        RuntimeValue::List(values, outcome_type) => format!(
+            "a sequence of `{}` values",
+            describe_outcomes(values.iter(), outcome_type, symbols)
+        ),
+        RuntimeValue::Pool(pool, outcome_type) => format!(
+            "a dice pool with `{}` outcomes",
+            describe_outcomes(
+                pool.ordered_outcomes().iter().map(|(outcome, _)| outcome),
+                outcome_type,
+                symbols
             )
+        ),
+    }
+}
+
+/// Names a collection's outcome kinds for a diagnostic.
+///
+/// The outcome type only records whether every value is an `int`, so anything
+/// more specific — which declared sets a collection's symbols come from —
+/// is read back off the values themselves.
+fn describe_outcomes<'a>(
+    values: impl IntoIterator<Item = &'a ElementValue>,
+    outcome_type: &ElementType,
+    symbols: &SymbolTable,
+) -> String {
+    if !matches!(outcome_type, ElementType::Mixed) {
+        return outcome_type.display_name();
+    }
+    let mut sets: Vec<&str> = Vec::new();
+    let mut has_int = false;
+    for value in values {
+        match value {
+            ElementValue::Symbol(symbol) => {
+                let name = symbols.set_of(*symbol).name.as_str();
+                if !sets.contains(&name) {
+                    sets.push(name);
+                }
+            }
+            _ => has_int = true,
         }
+    }
+    if has_int {
+        sets.insert(0, "int");
+    }
+    match sets.len() {
+        0 => outcome_type.display_name(),
+        _ => sets.join(" or "),
+    }
+}
+
+/// How a value is shaped, which is the only thing two outcomes of one
+/// collection can irreconcilably disagree about.
+fn shape_name(outcome_type: &ElementType) -> String {
+    match outcome_type {
+        ElementType::Tuple(fields) => format!("a tuple of {} fields", fields.len()),
+        ElementType::AdditiveIdentity | ElementType::Uninhabited => "the empty sum".to_string(),
+        ElementType::Int | ElementType::Mixed => "a single value".to_string(),
     }
 }
 
@@ -158,6 +209,7 @@ fn type_mismatch_label(
     range: &SourceSpan,
     expected: &str,
     value: &RuntimeValue,
+    symbols: &SymbolTable,
 ) -> DiagnosticLabel {
     DiagnosticLabel {
         range: SourceRange {
@@ -166,8 +218,8 @@ fn type_mismatch_label(
         },
         message: Some(format!(
             "`{}` is {}; expected {expected}",
-            preview_value(value),
-            describe_value(value)
+            preview_value(value, symbols),
+            describe_value(value, symbols)
         )),
         style: LabelStyle::Primary,
     }
@@ -175,11 +227,16 @@ fn type_mismatch_label(
 
 /// The same report for a named argument, which leads with the name because a
 /// call can have more than one argument at fault.
-fn argument_mismatch_message(name: &str, value: &RuntimeValue, expected: &str) -> String {
+fn argument_mismatch_message(
+    name: &str,
+    value: &RuntimeValue,
+    expected: &str,
+    symbols: &SymbolTable,
+) -> String {
     format!(
         "`{name}` is {}: `{}`; expected {expected}",
-        describe_value(value),
-        preview_value(value)
+        describe_value(value, symbols),
+        preview_value(value, symbols)
     )
 }
 
@@ -611,6 +668,7 @@ pub(crate) fn runtime_diagnostic(
     error: &RuntimeError,
     source_id: SourceId,
     suggestions: &[String],
+    symbols: &SymbolTable,
 ) -> EngineDiagnostic {
     let mut trace = Vec::new();
     let (error, source_id) = runtime_context(error, source_id, &mut trace);
@@ -682,7 +740,13 @@ pub(crate) fn runtime_diagnostic(
             let parts = DiagnosticParts::new(
                 "type.expected_sequence",
                 "A loop can only iterate over a sequence",
-                vec![type_mismatch_label(source_id, range, "a sequence", value)],
+                vec![type_mismatch_label(
+                    source_id,
+                    range,
+                    "a sequence",
+                    value,
+                    symbols,
+                )],
             );
             if matches!(value, RuntimeValue::Pool(_, _)) {
                 parts.help(
@@ -697,7 +761,13 @@ pub(crate) fn runtime_diagnostic(
             let parts = DiagnosticParts::new(
                 "type.expected_number",
                 "An `if` condition must be an integer",
-                vec![type_mismatch_label(source_id, range, "an integer", value)],
+                vec![type_mismatch_label(
+                    source_id,
+                    range,
+                    "an integer",
+                    value,
+                    symbols,
+                )],
             );
             if matches!(value, RuntimeValue::Pool(_, _)) {
                 parts.help(
@@ -721,7 +791,11 @@ pub(crate) fn runtime_diagnostic(
                 unlabeled(operator_range, LabelStyle::Secondary),
                 primary(
                     found_range,
-                    format!("`{}` is {}", preview_value(value), describe_value(value)),
+                    format!(
+                        "`{}` is {}",
+                        preview_value(value, symbols),
+                        describe_value(value, symbols)
+                    ),
                 ),
             ],
         ),
@@ -752,6 +826,7 @@ pub(crate) fn runtime_diagnostic(
                         argument.name,
                         &argument.value,
                         &argument.expected,
+                        symbols,
                     )),
                     style: if index == 0 {
                         LabelStyle::Primary
@@ -762,7 +837,6 @@ pub(crate) fn runtime_diagnostic(
                 .collect::<Vec<_>>();
             let code = match error.kind {
                 PrimitiveArgumentErrorKind::Type => "type.function_argument",
-                PrimitiveArgumentErrorKind::OutcomeType => "type.outcome_mismatch",
             };
             DiagnosticParts::new(
                 code,
@@ -776,10 +850,110 @@ pub(crate) fn runtime_diagnostic(
             format!("`{}` {}", primitive_call(error.function), error.requirement),
             vec![primary(
                 &error.found_range,
-                argument_mismatch_message(error.argument, &error.value, &error.constraint),
+                argument_mismatch_message(error.argument, &error.value, &error.constraint, symbols),
             )],
         )
         .maybe_help(error.help.clone()),
+        RuntimeError::OutcomeMismatch(error) => {
+            let subject = match error.context {
+                OutcomeMismatchContext::SequenceLiteral => "A sequence",
+                OutcomeMismatchContext::FunctionResults => "A function evaluated over a pool",
+            };
+            let first = shape_name(&error.first.outcome_type);
+            let second = shape_name(&error.second.outcome_type);
+            let empty_sum = |conflict: &OutcomeConflict| {
+                matches!(
+                    conflict.outcome_type,
+                    ElementType::AdditiveIdentity | ElementType::Uninhabited
+                )
+            };
+            // Numbers and symbols mix freely, so the only irreconcilable
+            // difference is one of shape — or the empty sum, which takes the
+            // shape of whatever it is added to and so needs something addable.
+            let involves_empty_sum = empty_sum(&error.first) || empty_sum(&error.second);
+            let summary = if involves_empty_sum {
+                format!("{subject} cannot mix the empty sum with values that cannot be added")
+            } else {
+                format!("{subject} cannot mix {first} and {second}")
+            };
+            // Against the empty sum the shape is not the point — what matters
+            // is that the other value cannot be added at all.
+            let describe = |conflict: &OutcomeConflict, name: &str, settled: bool| match (
+                involves_empty_sum,
+                empty_sum(conflict),
+                settled,
+            ) {
+                (true, false, _) => "this cannot be added".to_string(),
+                (true, true, _) => "this is the empty sum".to_string(),
+                (false, _, true) => format!("this is {name}, which set the shape"),
+                (false, _, false) => format!("this is {name}"),
+            };
+            let labels = match (error.first.range, error.second.range) {
+                (Some(first_range), Some(second_range)) => vec![
+                    primary(&second_range, describe(&error.second, &second, false)),
+                    DiagnosticLabel {
+                        range: SourceRange {
+                            source: source_id,
+                            range: (&first_range).into(),
+                        },
+                        message: Some(describe(&error.first, &first, true)),
+                        style: LabelStyle::Secondary,
+                    },
+                ],
+                _ => vec![primary(
+                    &error.range,
+                    format!("one result is {first}, another is {second}"),
+                )],
+            };
+            DiagnosticParts::new("type.outcome_mismatch", summary, labels).help(
+                if involves_empty_sum {
+                    "The empty sum stands in for a value of whatever type it is added to, so it \
+                     can only share a collection with values that can be added."
+                } else {
+                    "Values sharing a sequence or a pool may be numbers or symbols, but they must \
+                     all be single values, or all tuples of the same size."
+                },
+            )
+        }
+        RuntimeError::NonAdditiveSum(error) => {
+            let (subject, parts_of_it) = match error.subject {
+                NonAdditiveSubject::Pool(dimension) => {
+                    (format!("a pool of {dimension} dice"), "outcomes")
+                }
+                NonAdditiveSubject::Sequence(length) => {
+                    (format!("a sequence of {length} values"), "values")
+                }
+            };
+            let label = match (&error.witness, error.field) {
+                (Some(witness), Some(field)) => format!(
+                    "field {field} of {parts_of_it} like `{}` is not a number",
+                    witness.display(symbols)
+                ),
+                (Some(witness), None) => format!(
+                    "{parts_of_it} like `{}` are not numbers",
+                    witness.display(symbols)
+                ),
+                (None, _) => format!("these {parts_of_it} cannot be added together"),
+            };
+            DiagnosticParts::new(
+                "type.non_additive_value",
+                format!(
+                    "{} requires summing {subject}, but they cannot be added together",
+                    error.action
+                ),
+                vec![primary(&error.range, label)],
+            )
+            .help(match error.field {
+                Some(_) => {
+                    "Tuples are added field by field, so every field must be a number. Project the \
+                     numeric fields with `[field N of ...]` first."
+                }
+                None => {
+                    "Only numbers can be added. `[sum integers in ...]` totals just the numeric \
+                     outcomes, and `print` displays a pool without summing it."
+                }
+            })
+        }
         RuntimeError::MathError { range, message } => DiagnosticParts::new(
             "value.arithmetic",
             message,
@@ -811,7 +985,7 @@ pub(crate) fn runtime_diagnostic(
             "Output labels require a tuple-valued output",
             vec![
                 unlabeled(range, LabelStyle::Secondary),
-                type_mismatch_label(source_id, value_range, "a tuple", value),
+                type_mismatch_label(source_id, value_range, "a tuple", value, symbols),
             ],
         ),
         RuntimeError::OutputLabelCountMismatch {
@@ -833,12 +1007,24 @@ pub(crate) fn runtime_diagnostic(
         RuntimeError::InvalidRepeatExpression { range, value } => DiagnosticParts::new(
             "type.repeat_count",
             "A repetition count must be an integer",
-            vec![type_mismatch_label(source_id, range, "an integer", value)],
+            vec![type_mismatch_label(
+                source_id,
+                range,
+                "an integer",
+                value,
+                symbols,
+            )],
         ),
         RuntimeError::RangeHasNonSequenceEndpoints { range, value } => DiagnosticParts::new(
             "type.range_endpoint",
             "Both ends of a range must be integers",
-            vec![type_mismatch_label(source_id, range, "an integer", value)],
+            vec![type_mismatch_label(
+                source_id,
+                range,
+                "an integer",
+                value,
+                symbols,
+            )],
         ),
         RuntimeError::Semantic {
             kind,

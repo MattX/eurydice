@@ -76,7 +76,7 @@ HIT,12.5
 1,93.07912412260697
 
 "empty at dimension two"
-ATTACK_RESULT,%
+#,%
 
 "dimension"
 #,%

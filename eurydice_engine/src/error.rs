@@ -10,7 +10,7 @@ use miette::SourceSpan;
 use crate::{
     ast::{self, BinaryOp},
     diagnostic::{EvaluationFrame, SourceId},
-    value::RuntimeValue,
+    value::{ElementType, ElementValue, RuntimeValue},
 };
 
 #[derive(Debug)]
@@ -24,7 +24,6 @@ pub struct PrimitiveArgumentError {
 #[derive(Debug, Clone, Copy)]
 pub enum PrimitiveArgumentErrorKind {
     Type,
-    OutcomeType,
 }
 
 /// Why a [`RuntimeError::Semantic`] was raised.
@@ -67,6 +66,61 @@ pub struct PrimitiveValueError {
     pub value: RuntimeValue,
     pub constraint: String,
     pub help: Option<String>,
+}
+
+/// Two outcome types that cannot share a collection.
+///
+/// Outcomes may differ in kind — a number here, a symbol there — but not in
+/// shape, so this is always a scalar meeting a tuple, two tuples of different
+/// sizes, or the empty sum meeting something it cannot be added to.
+#[derive(Debug)]
+pub struct OutcomeMismatchError {
+    pub range: SourceSpan,
+    pub context: OutcomeMismatchContext,
+    /// The outcome type the collection had already settled on.
+    pub first: OutcomeConflict,
+    /// The one that could not join it.
+    pub second: OutcomeConflict,
+}
+
+/// One side of an [`OutcomeMismatchError`].
+#[derive(Debug)]
+pub struct OutcomeConflict {
+    pub outcome_type: ElementType,
+    /// The expression this outcome type came from, where the raise site can
+    /// name one. Results collected from a pool evaluation cannot.
+    pub range: Option<SourceSpan>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum OutcomeMismatchContext {
+    /// A `{...}` literal.
+    SequenceLiteral,
+    /// The results of one function evaluated once per multiset.
+    FunctionResults,
+}
+
+/// What had to be summed, and how much of it.
+#[derive(Debug, Clone, Copy)]
+pub enum NonAdditiveSubject {
+    /// A pool of this many dice.
+    Pool(u32),
+    /// A sequence of this many values, such as one multiset of a pool.
+    Sequence(usize),
+}
+
+/// A value that had to be summed, but whose parts cannot be added together.
+#[derive(Debug)]
+pub struct NonAdditiveSumError {
+    pub range: SourceSpan,
+    /// What forced the sum; completes "<action> requires summing ...".
+    pub action: &'static str,
+    pub subject: NonAdditiveSubject,
+    /// An outcome that cannot be added, so the diagnostic can name a concrete
+    /// value rather than only its type. `None` for a pool with no outcomes.
+    pub witness: Option<ElementValue>,
+    /// For a tuple witness, the one-based field that is not a number.
+    pub field: Option<usize>,
 }
 
 /// A call that named no function, but whose words match a function taking a
@@ -179,6 +233,10 @@ pub enum RuntimeError {
 
     InvalidPrimitiveValue(Box<PrimitiveValueError>),
 
+    OutcomeMismatch(Box<OutcomeMismatchError>),
+
+    NonAdditiveSum(Box<NonAdditiveSumError>),
+
     InvalidRepeatExpression {
         range: SourceSpan,
         value: RuntimeValue,
@@ -209,6 +267,8 @@ impl RuntimeError {
             RuntimeError::NegativeArgumentToFunction { range, .. } => range.into(),
             RuntimeError::InvalidPrimitiveArguments(error) => (&error.range).into(),
             RuntimeError::InvalidPrimitiveValue(error) => (&error.range).into(),
+            RuntimeError::OutcomeMismatch(error) => (&error.range).into(),
+            RuntimeError::NonAdditiveSum(error) => (&error.range).into(),
             RuntimeError::InvalidRepeatExpression { range, .. } => range.into(),
             RuntimeError::MathError { range, .. } => range.into(),
         }

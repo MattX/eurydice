@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use malachite::Natural;
 use serde::Serialize;
@@ -10,7 +10,7 @@ use crate::{
         PrimitiveArgumentError, PrimitiveArgumentErrorKind, PrimitiveArgumentsError,
         PrimitiveValueError,
     },
-    eval::{ElementValue, Function, RuntimeError, RuntimeValue},
+    eval::{ElementType, ElementValue, Function, RuntimeError, RuntimeValue, sum_pool},
 };
 
 /// Evaluation context passed to every primitive, bundling the ambient settings
@@ -131,50 +131,33 @@ fn absolute_execute(
     Ok(arg.map_numeric_outcomes(i32::abs))
 }
 
+/// Puts two values on comparable footing for the equality-based primitives.
+///
+/// Like `=` itself, these primitives are total: values of different kinds are
+/// simply never equal, so mismatched outcome types count zero matches rather
+/// than failing. The join is consulted only to give the empty sum a concrete
+/// type; where there is no join there is nothing to reconcile.
 fn materialize_compatible_pair(
     left: &RuntimeValue,
     right: &RuntimeValue,
-    ctx: PrimitiveCtx,
-) -> Result<(RuntimeValue, RuntimeValue), RuntimeError> {
-    let error = || {
-        let left_name = argument_name(ctx.identifier, 0);
-        let right_name = argument_name(ctx.identifier, 1);
-        invalid_arguments(
-            ctx,
-            format!("requires `{left_name}` and `{right_name}` to have the same outcome type"),
-            "Both arguments must use integers or members of the same enum type.",
-            PrimitiveArgumentErrorKind::OutcomeType,
-            vec![
-                argument_error(
-                    ctx,
-                    0,
-                    format!("the same outcome type as `{right_name}`"),
-                    left,
-                ),
-                argument_error(
-                    ctx,
-                    1,
-                    format!("the same outcome type as `{left_name}`"),
-                    right,
-                ),
-            ],
-        )
-    };
-    let outcome_type = left
-        .merged_outcome_type(right)
-        .ok_or_else(error)?
-        .summed_type();
-    Ok((
-        left.materialize_identities(&outcome_type),
-        right.materialize_identities(&outcome_type),
-    ))
+) -> (RuntimeValue, RuntimeValue) {
+    match left.merged_outcome_type(right) {
+        Some(outcome_type) => {
+            let outcome_type = outcome_type.summed_type();
+            (
+                left.materialize_identities(&outcome_type),
+                right.materialize_identities(&outcome_type),
+            )
+        }
+        None => (left.clone(), right.clone()),
+    }
 }
 
 fn contains_execute(
     args: &[RuntimeValue],
-    ctx: PrimitiveCtx,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let (haystack, needle) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
+    let (haystack, needle) = materialize_compatible_pair(&args[0], &args[1]);
     let RuntimeValue::Element(needle) = needle else {
         unreachable!("contains needle shape is enforced by the evaluator")
     };
@@ -191,9 +174,9 @@ fn contains_execute(
 
 fn count_execute(
     args: &[RuntimeValue],
-    ctx: PrimitiveCtx,
+    _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let (needles, haystack) = materialize_compatible_pair(&args[0], &args[1], ctx)?;
+    let (needles, haystack) = materialize_compatible_pair(&args[0], &args[1]);
     let RuntimeValue::List(needles, _) = needles else {
         unreachable!("count needle shape is enforced by the evaluator")
     };
@@ -450,7 +433,7 @@ fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
         .iter()
         .map(|arg| match arg {
             RuntimeValue::Element(ElementValue::AdditiveIdentity) => ElementValue::Int(0),
-            RuntimeValue::Element(value @ (ElementValue::Int(_) | ElementValue::Enum { .. })) => {
+            RuntimeValue::Element(value @ (ElementValue::Int(_) | ElementValue::Symbol(_))) => {
                 value.clone()
             }
             RuntimeValue::Element(ElementValue::Tuple(_)) => {
@@ -498,6 +481,7 @@ fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
     else {
         unreachable!("field argument types were checked above")
     };
+    let requested = *index;
     let index = index
         .checked_sub(1)
         .and_then(|index| usize::try_from(index).ok());
@@ -506,7 +490,7 @@ fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
             PrimitiveValueError {
                 range: ctx.function_range.into(),
                 function: ctx.identifier,
-                requirement: format!("cannot select field `{}`", args[0]),
+                requirement: format!("cannot select field `{requested}`"),
                 argument: "INDEX",
                 found_range: ctx.arg_ranges[0].into(),
                 value: args[0].clone(),
@@ -516,6 +500,57 @@ fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
         )));
     };
     Ok(RuntimeValue::Element(value.clone()))
+}
+
+fn is_integer_execute(
+    args: &[RuntimeValue],
+    _ctx: PrimitiveCtx,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    let RuntimeValue::Element(value) = &args[0] else {
+        unreachable!("an element argument is enforced by the evaluator")
+    };
+    // The empty sum has already become `0` on its way to an element argument.
+    Ok(i32::from(value.as_int().is_some()).into())
+}
+
+/// Shared body of the two `... integers in SEQ` primitives, which differ only
+/// in what an `int` outcome contributes.
+///
+/// Both quantities are additive over the dice, so a pool is handled by mapping
+/// each die's outcomes and summing: exact at any dimension, and without
+/// enumerating multisets. Outcomes that are not `int`s contribute nothing,
+/// which is what lets these take a mixed pool apart.
+fn integers_in(arg: &RuntimeValue, of_int: fn(i32) -> i32) -> RuntimeValue {
+    let contribution = |value: &ElementValue| match value {
+        ElementValue::Int(value) => of_int(*value),
+        ElementValue::AdditiveIdentity => of_int(0),
+        ElementValue::Symbol(_) | ElementValue::Tuple(_) => 0,
+    };
+    match arg {
+        RuntimeValue::Element(value) => contribution(value).into(),
+        RuntimeValue::List(values, _) => values.iter().map(contribution).sum::<i32>().into(),
+        RuntimeValue::Pool(pool, _) => {
+            let mapped = (**pool)
+                .clone()
+                .map_outcomes(|outcome| ElementValue::Int(contribution(&outcome)));
+            let summed = sum_pool(&mapped, &ElementType::Int).expect("an int pool is additive");
+            RuntimeValue::Pool(Rc::new(summed), ElementType::Int)
+        }
+    }
+}
+
+fn sum_integers_execute(
+    args: &[RuntimeValue],
+    _ctx: PrimitiveCtx,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    Ok(integers_in(&args[0], |value| value))
+}
+
+fn count_integers_execute(
+    args: &[RuntimeValue],
+    _ctx: PrimitiveCtx,
+) -> Result<RuntimeValue, crate::eval::RuntimeError> {
+    Ok(integers_in(&args[0], |_| 1))
 }
 
 fn numeric_pool(pool: &Pool<ElementValue>) -> Pool<i32> {
@@ -598,6 +633,27 @@ define_primitives! {
         count_execute,
         "[count NEEDLES:s in HAYSTACK:s]", "count ${NEEDLES} in ${HAYSTACK}",
         "Counts occurrences of every element of NEEDLES in HAYSTACK.", "/help/spec/#count-needless-in-haystacks";
+    // Keep SEQ uncoerced for the same reason as `count`: a pool must reach the
+    // executor whole, so that it can be mapped and summed rather than
+    // enumerated.
+    COUNT_INTEGERS_PRIMITIVE:
+        "count integers in {}",
+        &[None],
+        true,
+        count_integers_execute,
+        "[count integers in SEQ:s]", "count integers in ${SEQ}",
+        "Counts the outcomes of SEQ that are integers.", "/help/spec/#-count-integers-in-seqs";
+    SUM_INTEGERS_PRIMITIVE:
+        "sum integers in {}",
+        &[None],
+        true,
+        sum_integers_execute,
+        "[sum integers in SEQ:s]", "sum integers in ${SEQ}",
+        "Sums the outcomes of SEQ that are integers, ignoring the rest.", "/help/spec/#-sum-integers-in-seqs";
+    IS_INTEGER_PRIMITIVE:
+        "{} is integer", &[Some(StaticType::Int)], true, is_integer_execute,
+        "[N:n is integer]", "${N} is integer",
+        "Returns 1 when N is an integer, or 0 when it is a symbol or a tuple.", "/help/spec/#-nn-is-integer";
     EXPLODE_PRIMITIVE:
         "explode {}", &[Some(StaticType::Pool)], false, explode_execute,
         "[explode POOL:d]", "explode ${POOL}",

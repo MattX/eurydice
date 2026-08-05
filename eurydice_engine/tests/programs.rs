@@ -143,8 +143,11 @@ fn run_fixture_directory(directory: &str) {
                             .then(|| export_anydice_format(&output.name, &pool))
                     }
                     ExpectedResult::Distribution(expected) => {
-                        let distribution =
-                            Distribution::from_runtime(output.value, output.field_names);
+                        let distribution = Distribution::from_runtime(
+                            output.value,
+                            output.field_names,
+                            evaluator.symbols(),
+                        );
                         let actual = create_distribution_result(&output.name, distribution);
                         (!compare_distribution_results(&actual, expected))
                             .then(|| export_distribution_result(&actual))
@@ -178,7 +181,7 @@ fn numeric_fixture_pool(value: eval::RuntimeValue) -> Result<Pool, &'static str>
     let to_int = |value: eval::ElementValue| match value {
         eval::ElementValue::AdditiveIdentity => Ok(0),
         eval::ElementValue::Int(value) => Ok(value),
-        eval::ElementValue::Enum { .. } | eval::ElementValue::Tuple(_) => {
+        eval::ElementValue::Symbol(_) | eval::ElementValue::Tuple(_) => {
             Err("AnyDice fixtures must have numeric outputs")
         }
     };
