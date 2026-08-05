@@ -105,7 +105,8 @@ pub enum ElementType {
     /// Every value is an `int`.
     Int,
     /// At least one value is not an `int`, so the outcomes cannot be added.
-    NonNumeric,
+    /// Not every value need be non-numeric: one symbol among the ints is enough.
+    NotAllInt,
     Tuple(Rc<[ElementType]>),
 }
 
@@ -114,7 +115,7 @@ impl ElementType {
     ///
     /// `None` means the two cannot appear in one collection at all, which is
     /// the case only across shapes — a scalar with a tuple, or tuples of
-    /// different arity. Scalars always join, to `NonNumeric` if they disagree.
+    /// different arity. Scalars always join, to `NotAllInt` if they disagree.
     pub(crate) fn merged_with(&self, other: &Self) -> Option<Self> {
         match (self, other) {
             (ElementType::Uninhabited, other) | (other, ElementType::Uninhabited) => {
@@ -124,9 +125,9 @@ impl ElementType {
             (other, ElementType::AdditiveIdentity) if other.is_additive() => Some(other.clone()),
             (ElementType::Int, ElementType::Int) => Some(ElementType::Int),
             (
-                ElementType::Int | ElementType::NonNumeric,
-                ElementType::Int | ElementType::NonNumeric,
-            ) => Some(ElementType::NonNumeric),
+                ElementType::Int | ElementType::NotAllInt,
+                ElementType::Int | ElementType::NotAllInt,
+            ) => Some(ElementType::NotAllInt),
             (ElementType::Tuple(left), ElementType::Tuple(right)) if left.len() == right.len() => {
                 left.iter()
                     .zip(right.iter())
@@ -141,7 +142,7 @@ impl ElementType {
     /// Whether every value of this type is also a value of `required`.
     ///
     /// This is the check the join cannot do: now that mismatched scalars join
-    /// to `NonNumeric` rather than failing, "these two can coexist" no longer
+    /// to `NotAllInt` rather than failing, "these two can coexist" no longer
     /// implies "this one will do where that one is demanded".
     pub(crate) fn satisfies(&self, required: &Self) -> bool {
         match (self, required) {
@@ -161,7 +162,7 @@ impl ElementType {
             ElementType::Uninhabited => "empty".to_string(),
             ElementType::AdditiveIdentity => "additive identity".to_string(),
             ElementType::Int => "int".to_string(),
-            ElementType::NonNumeric => "non-numeric".to_string(),
+            ElementType::NotAllInt => "non-numeric".to_string(),
             ElementType::Tuple(fields) => format!(
                 "tuple({})",
                 fields
@@ -180,6 +181,11 @@ impl ElementType {
     /// [`Self::satisfies`], [`Self::summed_type`] and
     /// [`RuntimeValue::flattened_outcome_type`], where the difference between
     /// "no evidence" and "must be additive" is the whole point.
+    ///
+    /// Use this where the code asks a yes-or-no question. Where it is one arm of
+    /// a `match` over the variants, spell `Uninhabited | AdditiveIdentity` out
+    /// instead: the compiler then checks that a new variant is handled, which a
+    /// guard on this predicate would silently skip.
     pub(crate) fn is_empty_sum(&self) -> bool {
         matches!(
             self,
@@ -205,7 +211,7 @@ impl ElementType {
                         .into(),
                 ))
             }
-            ElementType::NonNumeric | ElementType::Tuple(_) => None,
+            ElementType::NotAllInt | ElementType::Tuple(_) => None,
         }
     }
 
@@ -246,7 +252,7 @@ impl ElementValue {
         match self {
             ElementValue::AdditiveIdentity => ElementType::AdditiveIdentity,
             ElementValue::Int(_) => ElementType::Int,
-            ElementValue::Symbol(_) => ElementType::NonNumeric,
+            ElementValue::Symbol(_) => ElementType::NotAllInt,
             ElementValue::Tuple(fields) => ElementType::Tuple(
                 fields
                     .iter()
@@ -533,6 +539,13 @@ impl RuntimeValue {
         let materialize = |value: &ElementValue| value.materialize_identity(outcome_type);
         match self {
             RuntimeValue::Element(value) => RuntimeValue::Element(materialize(value)),
+            // A collection with no values has nothing to materialize, so adopting
+            // `outcome_type` would only invent evidence it never carried. That
+            // matters for an empty die: told it produces `int`s, it displays as
+            // `0` instead of as nothing, and `[explode d{}]` stops agreeing with
+            // `d{}`.
+            RuntimeValue::List(values, _) if values.is_empty() => self.clone(),
+            RuntimeValue::Pool(pool, _) if pool.ordered_outcomes().is_empty() => self.clone(),
             RuntimeValue::List(values, _) => RuntimeValue::List(
                 Rc::new(values.iter().map(materialize).collect()),
                 outcome_type.clone(),
@@ -699,6 +712,25 @@ fn non_additive_witness(pool: &Pool<ElementValue>) -> (Option<ElementValue>, Opt
     (witness.cloned(), witness.and_then(non_numeric_field))
 }
 
+/// Whether displaying a pool means summing it first.
+///
+/// A die with no faces is the exception, and its outcome type has no say in it.
+/// There is no distribution over an empty outcome set, so an empty die displays
+/// as no outcomes rather than as its additive identity — summing one would
+/// invent an outcome that cannot occur. This is the distinction
+/// [`RuntimeValue::empty_pool`] draws: an empty die contributes nothing, where
+/// an empty *sequence* legitimately sums to zero.
+///
+/// Note this asks about faces, not dice. `0d6` has six faces and no dice, so it
+/// sums, to the `0` that rolling no dice yields.
+///
+/// The evaluator applies this when it stores an output and [`crate::output`]
+/// applies it when it renders one. Stating it in one place is what keeps those
+/// two answering the same way.
+pub(crate) fn display_requires_summing(pool: &Pool<ElementValue>) -> bool {
+    !pool.ordered_outcomes().is_empty()
+}
+
 pub(crate) fn sum_pool(
     pool: &Pool<ElementValue>,
     outcome_type: &ElementType,
@@ -782,12 +814,12 @@ mod tests {
 
     #[test]
     fn summing_a_multidimensional_non_additive_pool_is_an_error() {
-        let error = sum_pool(&enum_pool(2, &[0, 1]), &ElementType::NonNumeric)
+        let error = sum_pool(&enum_pool(2, &[0, 1]), &ElementType::NotAllInt)
             .expect_err("two enum dice cannot be added together");
         assert_eq!(error.dimension, 2);
 
         // Dimension 0 with outcomes is just as unsummable as dimension 2.
-        assert!(sum_pool(&enum_pool(0, &[0, 1]), &ElementType::NonNumeric).is_err());
+        assert!(sum_pool(&enum_pool(0, &[0, 1]), &ElementType::NotAllInt).is_err());
     }
 
     #[test]
@@ -795,14 +827,14 @@ mod tests {
         // A single die is already its own sum.
         let one_die = enum_pool(1, &[0, 1]);
         assert_eq!(
-            sum_pool(&one_die, &ElementType::NonNumeric).unwrap(),
+            sum_pool(&one_die, &ElementType::NotAllInt).unwrap(),
             one_die
         );
 
         // A pool with no outcomes has nothing to add, whatever its dimension.
         for dimension in [0, 1, 2] {
             let empty = enum_pool(dimension, &[]);
-            assert_eq!(sum_pool(&empty, &ElementType::NonNumeric).unwrap(), empty);
+            assert_eq!(sum_pool(&empty, &ElementType::NotAllInt).unwrap(), empty);
         }
     }
 
@@ -862,7 +894,7 @@ mod tests {
     /// The error names an outcome the user can recognize, not just a type.
     #[test]
     fn a_non_additive_sum_error_carries_an_offending_outcome() {
-        let error = sum_pool(&enum_pool(2, &[0, 1]), &ElementType::NonNumeric)
+        let error = sum_pool(&enum_pool(2, &[0, 1]), &ElementType::NotAllInt)
             .unwrap_err()
             .into_error((0, 1).into(), "displaying a pool");
         let RuntimeError::NonAdditiveSum(error) = error else {
@@ -886,7 +918,7 @@ mod tests {
         );
         let pool = Pool::from_list(2, vec![outcome.clone()]);
         let outcome_type = ElementType::Tuple(
-            vec![ElementType::Int, ElementType::Int, ElementType::NonNumeric].into(),
+            vec![ElementType::Int, ElementType::Int, ElementType::NotAllInt].into(),
         );
         let error = sum_pool(&pool, &outcome_type)
             .unwrap_err()
@@ -905,11 +937,11 @@ mod tests {
         let pair = ElementType::Tuple(vec![ElementType::Int, ElementType::Int].into());
         let triple =
             ElementType::Tuple(vec![ElementType::Int, ElementType::Int, ElementType::Int].into());
-        let mixed_pair = ElementType::Tuple(vec![ElementType::NonNumeric, ElementType::Int].into());
+        let mixed_pair = ElementType::Tuple(vec![ElementType::NotAllInt, ElementType::Int].into());
 
         assert_eq!(
-            ElementType::Int.merged_with(&ElementType::NonNumeric),
-            Some(ElementType::NonNumeric)
+            ElementType::Int.merged_with(&ElementType::NotAllInt),
+            Some(ElementType::NotAllInt)
         );
         assert_eq!(
             ElementType::Int.merged_with(&ElementType::Int),
@@ -919,7 +951,7 @@ mod tests {
         assert_eq!(pair.merged_with(&mixed_pair), Some(mixed_pair.clone()));
         assert_eq!(pair.merged_with(&triple), None);
         assert_eq!(ElementType::Int.merged_with(&pair), None);
-        assert_eq!(ElementType::NonNumeric.merged_with(&pair), None);
+        assert_eq!(ElementType::NotAllInt.merged_with(&pair), None);
     }
 
     /// The join says two values can share a collection; `satisfies` says one
@@ -927,12 +959,12 @@ mod tests {
     #[test]
     fn mixed_outcomes_do_not_satisfy_an_int_requirement() {
         assert!(ElementType::Int.satisfies(&ElementType::Int));
-        assert!(!ElementType::NonNumeric.satisfies(&ElementType::Int));
+        assert!(!ElementType::NotAllInt.satisfies(&ElementType::Int));
         assert!(ElementType::Uninhabited.satisfies(&ElementType::Int));
         assert!(ElementType::AdditiveIdentity.satisfies(&ElementType::Int));
 
         let pair = ElementType::Tuple(vec![ElementType::Int, ElementType::Int].into());
-        let mixed_pair = ElementType::Tuple(vec![ElementType::NonNumeric, ElementType::Int].into());
+        let mixed_pair = ElementType::Tuple(vec![ElementType::NotAllInt, ElementType::Int].into());
         assert!(pair.satisfies(&pair));
         assert!(!mixed_pair.satisfies(&pair));
     }

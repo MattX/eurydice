@@ -685,19 +685,70 @@ output [pick d3]";
         }
     }
 
-    /// A function with no `result:` produces an empty die, and an empty die
-    /// displays as no outcomes at all — not as a single outcome at zero.
+    /// An empty die displays as no outcomes at all — not as a single outcome at
+    /// zero — and stays that way after passing through a function that demands
+    /// `int` arguments.
     ///
-    /// Summing an empty die would materialize its additive identity into a real
-    /// outcome, so every path that sums an output has to leave this one alone.
+    /// Summing an empty die turns its additive identity into a real outcome, so
+    /// the display rule leaves it alone while its outcome type still says
+    /// nothing about what it would have produced. Coercing it to an `int`
+    /// parameter used to overwrite that type, which made `[explode d{}]`
+    /// disagree with the `d{}` it was given.
     #[test]
-    fn an_empty_die_outputs_no_outcomes() {
-        let mut engine = Engine::new();
-        let report = engine.run_with_diagnostics("function: nothing {}\noutput [nothing]");
-        assert_eq!(report.error(), None);
+    fn an_empty_die_outputs_no_outcomes_even_after_coercion() {
+        // `explode` and `reroll` hand an empty die straight back, so what they
+        // display is decided entirely by the coercion and the display rule.
+        // `highest`/`lowest`/`middle` are not listed: they sum the dice they
+        // keep, and the sum of no dice is `0`, which is a claim about those
+        // primitives rather than about empty dice.
+        for source in [
+            "function: nothing {}\noutput [nothing]",
+            "output d{}",
+            "output [explode d{}]",
+            "output [reroll d{}]",
+        ] {
+            let report = Engine::new().run_with_diagnostics(source);
+            assert_eq!(report.error(), None, "{source}");
+            assert_eq!(report.outputs.len(), 1, "{source}");
+            assert_eq!(
+                report.outputs[0].distribution.probabilities,
+                vec![],
+                "{source}"
+            );
+        }
+    }
 
-        assert_eq!(report.outputs.len(), 1);
-        assert_eq!(report.outputs[0].distribution.probabilities, vec![]);
+    /// Knowing what an empty die's faces *would* have been does not make it
+    /// rollable, so a die with no faces displays as no outcomes whatever its
+    /// outcome type. `d{}` and `d{5:0}` differ only in whether a face was
+    /// written down, and neither has an outcome to show.
+    #[test]
+    fn an_empty_die_outputs_no_outcomes_whatever_its_type() {
+        for source in ["output d{}", "output d{5:0}", "output d{[tuple 5 6]:0}"] {
+            let report = Engine::new().run_with_diagnostics(source);
+            assert_eq!(report.error(), None, "{source}");
+            assert_eq!(
+                report.outputs[0].distribution.probabilities,
+                vec![],
+                "{source}"
+            );
+        }
+    }
+
+    /// The contrast that keeps the rule honest: it asks about faces, not dice.
+    /// `0d6` has faces and no dice, so it still sums — to the `0` that rolling
+    /// no dice yields.
+    #[test]
+    fn rolling_no_dice_still_sums_to_zero() {
+        for source in ["output 0d6", "output d0"] {
+            let outputs = run(&mut Engine::new(), source);
+
+            assert_eq!(
+                outputs[0].distribution.probabilities,
+                vec![(vec![0], 1.0)],
+                "{source}"
+            );
+        }
     }
 
     #[test]

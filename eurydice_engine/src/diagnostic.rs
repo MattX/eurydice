@@ -162,7 +162,7 @@ fn describe_outcomes<'a>(
     outcome_type: &ElementType,
     symbols: &SymbolTable,
 ) -> String {
-    if !matches!(outcome_type, ElementType::NonNumeric) {
+    if !matches!(outcome_type, ElementType::NotAllInt) {
         return outcome_type.display_name();
     }
     let mut sets: Vec<&str> = Vec::new();
@@ -193,7 +193,7 @@ fn shape_name(outcome_type: &ElementType) -> String {
     match outcome_type {
         ElementType::Tuple(fields) => format!("a tuple of {} fields", fields.len()),
         ElementType::AdditiveIdentity | ElementType::Uninhabited => "the empty sum".to_string(),
-        ElementType::Int | ElementType::NonNumeric => "a single value".to_string(),
+        ElementType::Int | ElementType::NotAllInt => "a single value".to_string(),
     }
 }
 

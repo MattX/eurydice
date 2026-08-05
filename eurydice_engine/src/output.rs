@@ -5,6 +5,7 @@ use std::fmt::Write;
 
 use crate::dice::Pool;
 use crate::eval::{ElementType, ElementValue, RuntimeValue, SymbolTable, sum_pool};
+use crate::value::display_requires_summing;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Distribution {
@@ -166,12 +167,8 @@ fn pool_output(
     field_names: Option<Vec<String>>,
     symbols: &SymbolTable,
 ) -> Distribution {
-    let pool = if sum {
-        if pool.ordered_outcomes().is_empty() && matches!(outcome_type, ElementType::Uninhabited) {
-            pool.clone()
-        } else {
-            sum_pool(pool, outcome_type).expect("output values are checked by the evaluator")
-        }
+    let pool = if sum && display_requires_summing(pool) {
+        sum_pool(pool, outcome_type).expect("output values are checked by the evaluator")
     } else {
         pool.clone()
     };

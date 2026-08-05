@@ -90,7 +90,6 @@ output [maybe tuple d{0, 1}] named "merged identity and tuple"
 
 "typed empty tuple"
 #,#,%
-0,0,100
 
 "left identities"
 #,#,%

@@ -9,15 +9,11 @@
 use approx::relative_ne;
 use csv::{ReaderBuilder, WriterBuilder};
 use eurydice_engine::{
-    dice::Pool,
     eval, grammar,
-    output::{
-        Distribution, FieldSchema, export_anydice_format, mean, min_and_max, stddev,
-        to_probabilities,
-    },
+    output::{Distribution, FieldSchema, mean, min_and_max, stddev},
 };
 use pretty_assertions::StrComparison;
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, fmt::Write, fs, path::Path};
 use thiserror::Error;
 
 /// Fixtures whose expected output was captured from AnyDice itself, and so
@@ -126,8 +122,13 @@ fn run_fixture_directory(directory: &str) {
             {
                 let mismatch = match expected {
                     ExpectedResult::AnyDice(expected) => {
-                        let pool = match numeric_fixture_pool(output.value) {
-                            Ok(pool) => pool,
+                        let distribution = Distribution::from_runtime(
+                            output.value,
+                            output.field_names,
+                            evaluator.symbols(),
+                        );
+                        let actual = match create_anydice_result(&output.name, &distribution) {
+                            Ok(actual) => actual,
                             Err(error) => {
                                 paths_with_errors.insert(path_string.clone());
                                 println!(
@@ -138,9 +139,8 @@ fn run_fixture_directory(directory: &str) {
                                 continue;
                             }
                         };
-                        let actual = create_anydice_result(&output.name, &pool);
                         (!compare_anydice_results(&actual, expected))
-                            .then(|| export_anydice_format(&output.name, &pool))
+                            .then(|| export_anydice_result(&actual))
                     }
                     ExpectedResult::Distribution(expected) => {
                         let distribution = Distribution::from_runtime(
@@ -175,29 +175,6 @@ fn run_fixture_directory(directory: &str) {
         println!("❌ {}", path);
     }
     assert_eq!(paths_with_errors.len(), 0, "Some test files had errors");
-}
-
-fn numeric_fixture_pool(value: eval::RuntimeValue) -> Result<Pool, &'static str> {
-    let to_int = |value: eval::ElementValue| match value {
-        eval::ElementValue::AdditiveIdentity => Ok(0),
-        eval::ElementValue::Int(value) => Ok(value),
-        eval::ElementValue::Symbol(_) | eval::ElementValue::Tuple(_) => {
-            Err("AnyDice fixtures must have numeric outputs")
-        }
-    };
-
-    match value {
-        eval::RuntimeValue::Element(value) => Ok(Pool::from_list(1, vec![to_int(value)?])),
-        eval::RuntimeValue::List(values, _) => {
-            let values = values
-                .iter()
-                .cloned()
-                .map(to_int)
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Pool::from_list(1, values))
-        }
-        eval::RuntimeValue::Pool(pool, _) => pool.as_ref().clone().try_map_outcomes(to_int),
-    }
 }
 
 #[derive(Debug)]
@@ -343,36 +320,62 @@ fn parse_distribution_result<'a>(
     }))
 }
 
-fn create_anydice_result(name: &str, pool: &Pool) -> AnyDiceResult {
-    // Unfortunately we have to special case this I think
-    if pool.is_empty() {
-        return AnyDiceResult {
-            name: name.to_string(),
-            mean: 0.0,
-            stddev: 0.0,
-            min: 0,
-            max: 0,
-            outcomes: Vec::new(),
-        };
+/// Reads an AnyDice-comparable result out of the distribution a frontend would
+/// receive.
+///
+/// This deliberately goes through [`Distribution::from_runtime`] rather than
+/// summing the pool itself. A harness that converts outputs its own way can only
+/// test its own conversion: it once rendered `[explode d{}]` as no outcomes
+/// while the real engine rendered `0` at 100%, and the fixture asserting the
+/// AnyDice answer passed regardless.
+///
+/// An empty distribution needs no special case — it has no outcomes, and the
+/// statistics of nothing are the zeroes AnyDice reports.
+fn create_anydice_result(
+    name: &str,
+    distribution: &Distribution,
+) -> Result<AnyDiceResult, &'static str> {
+    match distribution.fields.as_slice() {
+        [FieldSchema::Int] => {}
+        [FieldSchema::Enum { .. }] => return Err("AnyDice fixtures must have numeric outputs"),
+        _ => return Err("AnyDice fixtures must have a single output field"),
     }
-
-    let probabilities = to_probabilities(pool.sum().ordered_outcomes());
+    let probabilities = distribution
+        .probabilities
+        .iter()
+        .map(|(values, probability)| (values[0], *probability))
+        .collect::<Vec<_>>();
     let mean = mean(&probabilities);
     let stddev = stddev(&probabilities, mean);
     let (min, max) = min_and_max(&probabilities);
 
-    let mut outcomes = Vec::new();
-    for (outcome, prob) in probabilities {
-        outcomes.push((outcome, prob * 100.0));
-    }
-    AnyDiceResult {
+    Ok(AnyDiceResult {
         name: name.to_string(),
         mean,
         stddev,
         min,
         max,
-        outcomes,
+        outcomes: probabilities
+            .into_iter()
+            .map(|(outcome, probability)| (outcome, probability * 100.0))
+            .collect(),
+    })
+}
+
+/// Renders a mismatched result in the fixture's own format, for the diff.
+fn export_anydice_result(result: &AnyDiceResult) -> String {
+    let mut string = String::new();
+    writeln!(
+        string,
+        "\"{}\",{},{},{},{}",
+        result.name, result.mean, result.stddev, result.min, result.max
+    )
+    .expect("write to string");
+    writeln!(string, "#,%").expect("write to string");
+    for (outcome, percent) in &result.outcomes {
+        writeln!(string, "{outcome},{percent}").expect("write to string");
     }
+    string
 }
 
 fn create_distribution_result(name: &str, distribution: Distribution) -> DistributionResult {
