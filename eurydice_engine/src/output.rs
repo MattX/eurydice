@@ -175,10 +175,7 @@ fn pool_output(
     } else {
         pool.clone()
     };
-    let unresolved = matches!(
-        outcome_type,
-        ElementType::Uninhabited | ElementType::AdditiveIdentity
-    );
+    let unresolved = outcome_type.is_empty_sum();
     let outcome_type = outcome_type.defaulted();
     let pool = if unresolved {
         pool.map_outcomes(|value| value.materialize_identity(&outcome_type))

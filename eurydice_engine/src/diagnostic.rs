@@ -7,8 +7,8 @@ use serde::Serialize;
 use crate::{
     ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
     error::{
-        ArityMismatch, NonAdditiveSubject, OutcomeConflict, OutcomeMismatchContext,
-        PrimitiveArgumentErrorKind, RuntimeError, SemanticErrorKind,
+        ArityMismatch, NonAdditiveSubject, OutcomeConflict, OutcomeMismatchContext, RuntimeError,
+        SemanticErrorKind,
     },
     primitives::primitive_signature,
     value::{ElementType, ElementValue, RuntimeValue, SymbolTable},
@@ -162,7 +162,7 @@ fn describe_outcomes<'a>(
     outcome_type: &ElementType,
     symbols: &SymbolTable,
 ) -> String {
-    if !matches!(outcome_type, ElementType::Mixed) {
+    if !matches!(outcome_type, ElementType::NonNumeric) {
         return outcome_type.display_name();
     }
     let mut sets: Vec<&str> = Vec::new();
@@ -193,7 +193,7 @@ fn shape_name(outcome_type: &ElementType) -> String {
     match outcome_type {
         ElementType::Tuple(fields) => format!("a tuple of {} fields", fields.len()),
         ElementType::AdditiveIdentity | ElementType::Uninhabited => "the empty sum".to_string(),
-        ElementType::Int | ElementType::Mixed => "a single value".to_string(),
+        ElementType::Int | ElementType::NonNumeric => "a single value".to_string(),
     }
 }
 
@@ -835,11 +835,8 @@ pub(crate) fn runtime_diagnostic(
                     },
                 })
                 .collect::<Vec<_>>();
-            let code = match error.kind {
-                PrimitiveArgumentErrorKind::Type => "type.function_argument",
-            };
             DiagnosticParts::new(
-                code,
+                "type.function_argument",
                 format!("`{}` {}", primitive_call(error.function), error.requirement),
                 labels,
             )
@@ -861,12 +858,7 @@ pub(crate) fn runtime_diagnostic(
             };
             let first = shape_name(&error.first.outcome_type);
             let second = shape_name(&error.second.outcome_type);
-            let empty_sum = |conflict: &OutcomeConflict| {
-                matches!(
-                    conflict.outcome_type,
-                    ElementType::AdditiveIdentity | ElementType::Uninhabited
-                )
-            };
+            let empty_sum = |conflict: &OutcomeConflict| conflict.outcome_type.is_empty_sum();
             // Numbers and symbols mix freely, so the only irreconcilable
             // difference is one of shape — or the empty sum, which takes the
             // shape of whatever it is added to and so needs something addable.

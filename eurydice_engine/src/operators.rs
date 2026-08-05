@@ -6,7 +6,10 @@ use crate::{
     ast::{self, BinaryOp, UnaryOp, WithRange},
     dice::Pool,
     error::{RuntimeError, SemanticErrorKind},
-    value::{ElementType, ElementValue, RuntimeValue, expect_int, sum_elements, sum_pool},
+    value::{
+        ElementType, ElementValue, RuntimeValue, expect_int, materialize_comparable_pair,
+        sum_elements, sum_pool,
+    },
 };
 
 pub(crate) fn apply_unary_op(
@@ -563,20 +566,7 @@ fn equality_binary_op(
     equal: bool,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
-    // Equality is total: values of different kinds are simply unequal. The
-    // join is consulted only to give the empty sum a concrete type, so that
-    // `{} = 0` still holds; where there is no join there is nothing to
-    // reconcile, and the comparison is false whatever the values.
-    let (left, right) = match left.merged_outcome_type(right) {
-        Some(outcome_type) => {
-            let outcome_type = outcome_type.summed_type();
-            (
-                left.materialize_identities(&outcome_type),
-                right.materialize_identities(&outcome_type),
-            )
-        }
-        None => (left.clone(), right.clone()),
-    };
+    let (left, right) = materialize_comparable_pair(left, right);
     let compare = |a: &ElementValue, b: &ElementValue| i32::from((a == b) == equal);
     broadcast_binary(
         &left,

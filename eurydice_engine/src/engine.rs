@@ -685,6 +685,21 @@ output [pick d3]";
         }
     }
 
+    /// A function with no `result:` produces an empty die, and an empty die
+    /// displays as no outcomes at all — not as a single outcome at zero.
+    ///
+    /// Summing an empty die would materialize its additive identity into a real
+    /// outcome, so every path that sums an output has to leave this one alone.
+    #[test]
+    fn an_empty_die_outputs_no_outcomes() {
+        let mut engine = Engine::new();
+        let report = engine.run_with_diagnostics("function: nothing {}\noutput [nothing]");
+        assert_eq!(report.error(), None);
+
+        assert_eq!(report.outputs.len(), 1);
+        assert_eq!(report.outputs[0].distribution.probabilities, vec![]);
+    }
+
     #[test]
     fn warns_when_depth_settings_bound_results() {
         let explode = Engine::new().run_with_diagnostics("output [explode d6]");

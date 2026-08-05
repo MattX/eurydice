@@ -572,6 +572,20 @@ impl Evaluator {
                     Some(name) => interpolate_variable_names(name, &self.env, &self.symbols)?,
                     None => format!("output {}", self.outputs.len() + 1),
                 };
+                // Hand on the pool already summed above, so that displaying it
+                // does not repeat the summation. Empty pools are passed through
+                // untouched: summing one turns its additive identity into a real
+                // outcome at zero, and each consumer has its own rule for when
+                // that is wanted — `output.rs` keys off an uninhabited outcome
+                // type, `export_anydice_format` off the pool being empty. Only
+                // the nonempty case is unambiguous enough to settle here, and it
+                // is the only one where the work is worth saving.
+                let value = match (&value, summed) {
+                    (RuntimeValue::Pool(pool, outcome_type), Some(summed)) if !pool.is_empty() => {
+                        RuntimeValue::Pool(Rc::new(summed), outcome_type.clone())
+                    }
+                    _ => value,
+                };
                 self.outputs.push(EvaluatedOutput {
                     value,
                     name,
@@ -745,10 +759,7 @@ impl Evaluator {
                 let elems = flattened
                     .into_iter()
                     .map(|value| {
-                        if matches!(
-                            outcome,
-                            ElementType::Uninhabited | ElementType::AdditiveIdentity
-                        ) {
+                        if outcome.is_empty_sum() {
                             value
                         } else {
                             value.materialize_identity(&outcome)

@@ -6,11 +6,9 @@ use serde::Serialize;
 use crate::{
     ast::{self, StaticType},
     dice::{Pool, explode, reroll},
-    error::{
-        PrimitiveArgumentError, PrimitiveArgumentErrorKind, PrimitiveArgumentsError,
-        PrimitiveValueError,
-    },
+    error::{PrimitiveArgumentError, PrimitiveArgumentsError, PrimitiveValueError},
     eval::{ElementType, ElementValue, Function, RuntimeError, RuntimeValue, sum_pool},
+    value::materialize_comparable_pair,
 };
 
 /// Evaluation context passed to every primitive, bundling the ambient settings
@@ -62,16 +60,6 @@ enum KeepMode {
     Middle,
 }
 
-impl KeepMode {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Highest => "highest",
-            Self::Lowest => "lowest",
-            Self::Middle => "middle",
-        }
-    }
-}
-
 /// The argument names of a primitive, in order, read from the signature the
 /// registry displays to users.
 ///
@@ -110,7 +98,6 @@ fn invalid_arguments(
     ctx: PrimitiveCtx,
     requirement: impl Into<String>,
     help: impl Into<String>,
-    kind: PrimitiveArgumentErrorKind,
     arguments: Vec<PrimitiveArgumentError>,
 ) -> RuntimeError {
     RuntimeError::InvalidPrimitiveArguments(Box::new(PrimitiveArgumentsError {
@@ -118,7 +105,6 @@ fn invalid_arguments(
         function: ctx.identifier,
         requirement: requirement.into(),
         help: Some(help.into()),
-        kind,
         arguments,
     }))
 }
@@ -131,33 +117,11 @@ fn absolute_execute(
     Ok(arg.map_numeric_outcomes(i32::abs))
 }
 
-/// Puts two values on comparable footing for the equality-based primitives.
-///
-/// Like `=` itself, these primitives are total: values of different kinds are
-/// simply never equal, so mismatched outcome types count zero matches rather
-/// than failing. The join is consulted only to give the empty sum a concrete
-/// type; where there is no join there is nothing to reconcile.
-fn materialize_compatible_pair(
-    left: &RuntimeValue,
-    right: &RuntimeValue,
-) -> (RuntimeValue, RuntimeValue) {
-    match left.merged_outcome_type(right) {
-        Some(outcome_type) => {
-            let outcome_type = outcome_type.summed_type();
-            (
-                left.materialize_identities(&outcome_type),
-                right.materialize_identities(&outcome_type),
-            )
-        }
-        None => (left.clone(), right.clone()),
-    }
-}
-
 fn contains_execute(
     args: &[RuntimeValue],
     _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let (haystack, needle) = materialize_compatible_pair(&args[0], &args[1]);
+    let (haystack, needle) = materialize_comparable_pair(&args[0], &args[1]);
     let RuntimeValue::Element(needle) = needle else {
         unreachable!("contains needle shape is enforced by the evaluator")
     };
@@ -176,7 +140,7 @@ fn count_execute(
     args: &[RuntimeValue],
     _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let (needles, haystack) = materialize_compatible_pair(&args[0], &args[1]);
+    let (needles, haystack) = materialize_comparable_pair(&args[0], &args[1]);
     let RuntimeValue::List(needles, _) = needles else {
         unreachable!("count needle shape is enforced by the evaluator")
     };
@@ -208,10 +172,9 @@ fn transform_die(
     on: Option<&RuntimeValue>,
     ctx: PrimitiveCtx,
     transform: DieTransform,
-    name: &str,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     let RuntimeValue::Pool(d, _) = &args[0] else {
-        panic!("wrong argument types to [{name}]");
+        panic!("wrong argument types to [{}]", ctx.identifier);
     };
     if d.is_empty() {
         return Ok(args[0].clone());
@@ -220,7 +183,7 @@ fn transform_die(
     let on = match on {
         None => vec![die.last().unwrap().0],
         Some(RuntimeValue::List(cond, _)) => numeric_list(cond),
-        Some(_) => panic!("wrong argument types to [{name}]"),
+        Some(_) => panic!("wrong argument types to [{}]", ctx.identifier),
     };
     Ok(Pool::from(transform(die, &on, ctx.explode_depth)).into())
 }
@@ -229,28 +192,28 @@ fn explode_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    transform_die(args, None, ctx, explode, "explode")
+    transform_die(args, None, ctx, explode)
 }
 
 fn explode_on_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    transform_die(args, Some(&args[1]), ctx, explode, "explode on")
+    transform_die(args, Some(&args[1]), ctx, explode)
 }
 
 fn reroll_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    transform_die(args, None, ctx, reroll, "reroll")
+    transform_die(args, None, ctx, reroll)
 }
 
 fn reroll_on_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    transform_die(args, Some(&args[1]), ctx, reroll, "reroll on")
+    transform_die(args, Some(&args[1]), ctx, reroll)
 }
 
 /// Shared body of `highest {} of {}`, `lowest {} of {}` and `middle {} of {}`:
@@ -263,7 +226,7 @@ fn keep_execute(
     let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
         (&args[0], &args[1])
     else {
-        panic!("wrong argument types to [{}]", mode.name());
+        panic!("wrong argument types to [{}]", ctx.identifier);
     };
     let keep_list = keep_list_for_primitive(
         mode,
@@ -425,7 +388,6 @@ fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
             ctx,
             "cannot contain another tuple",
             "Pass each inner field as its own tuple argument.",
-            PrimitiveArgumentErrorKind::Type,
             invalid,
         ));
     }
@@ -470,7 +432,6 @@ fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
                 EXPECTED[1],
             ),
             "Build a tuple with `[tuple A B]`. Tuple field positions start at 1.",
-            PrimitiveArgumentErrorKind::Type,
             invalid,
         ));
     }

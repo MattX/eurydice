@@ -627,7 +627,10 @@ fn sum_mapper(state: &i32, outcome: &i32, count: u32) -> i32 {
     state + outcome * i32::try_from(count).expect("count fits in i32")
 }
 
-/// Mapper that sums the outcomes.
+/// Mapper that sums the outcomes. Production summation goes through
+/// [`Pool::sum`] and its generic counterparts; this is the bare mapper the
+/// tests drive [`Pool::apply`] with directly.
+#[cfg(test)]
 #[allow(clippy::type_complexity)]
 pub const SUM_MAPPER: StateMapper<i32, fn(&i32, &i32, u32) -> i32> = StateMapper {
     initial_state: 0,

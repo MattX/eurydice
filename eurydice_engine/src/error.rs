@@ -21,11 +21,6 @@ pub struct PrimitiveArgumentError {
     pub value: RuntimeValue,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum PrimitiveArgumentErrorKind {
-    Type,
-}
-
 /// Why a [`RuntimeError::Semantic`] was raised.
 ///
 /// This determines the diagnostic code, so each raise site states it outright
@@ -52,7 +47,6 @@ pub struct PrimitiveArgumentsError {
     pub function: &'static str,
     pub requirement: String,
     pub help: Option<String>,
-    pub kind: PrimitiveArgumentErrorKind,
     pub arguments: Vec<PrimitiveArgumentError>,
 }
 
