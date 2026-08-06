@@ -16,6 +16,12 @@ output [attack d20 vs 15] named "attack"
 \\\ enum member.
 output {{}, MISS} named "adopted enum type"
 
+\\\ A die contributes its faces to a sequence, so a die with no faces
+\\\ contributes nothing at all — it has no sum to stand in for, and an enum
+\\\ sequence would have nothing to turn one into.
+output {d{}, MISS} named "empty die in an enum sequence"
+output #{d{}, MISS} named "empty die contributes no elements"
+
 function: pool D:d { result: D }
 function: sequence S:s { result: [reverse S] }
 function: generic element X:n { result: X }
@@ -47,6 +53,14 @@ CRITICALHIT,5
 "adopted enum type"
 ATTACK_RESULT,%
 MISS,100
+
+"empty die in an enum sequence"
+ATTACK_RESULT,%
+MISS,100
+
+"empty die contributes no elements"
+#,%
+1,100
 
 "pool constraint"
 ATTACK_RESULT,%

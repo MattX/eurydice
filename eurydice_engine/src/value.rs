@@ -178,8 +178,7 @@ impl ElementType {
     /// about its outcomes, or the polymorphic identity they summed to. Both
     /// stand in for a value of whatever type they meet, which is why so much of
     /// the engine treats them alike. They part ways only in [`Self::merged_with`],
-    /// [`Self::satisfies`], [`Self::summed_type`] and
-    /// [`RuntimeValue::flattened_outcome_type`], where the difference between
+    /// [`Self::satisfies`] and [`Self::summed_type`], where the difference between
     /// "no evidence" and "must be additive" is the whole point.
     ///
     /// Use this where the code asks a yes-or-no question. Where it is one arm of
@@ -525,13 +524,6 @@ impl RuntimeValue {
         self.outcome_type().is_additive()
     }
 
-    pub(crate) fn flattened_outcome_type(&self) -> ElementType {
-        match self {
-            RuntimeValue::Pool(_, ElementType::Uninhabited) => ElementType::AdditiveIdentity,
-            _ => self.outcome_type(),
-        }
-    }
-
     pub(crate) fn materialize_identities(&self, outcome_type: &ElementType) -> Self {
         if outcome_type.is_empty_sum() {
             return self.clone();
@@ -563,6 +555,11 @@ impl RuntimeValue {
             RuntimeValue::List(list, _) => {
                 Ok((0..repeat).flat_map(|_| list.iter().cloned()).collect())
             }
+            // A die contributes its faces, so a die with no faces contributes
+            // nothing: `{d2}` is `{1, 2}` and `{d{}}` is `{}`. Summing it first
+            // would invent the single `𝑒` face that no distribution over an empty
+            // outcome set has — and that a sequence of symbols cannot materialize.
+            RuntimeValue::Pool(pool, _) if pool.ordered_outcomes().is_empty() => Ok(Vec::new()),
             RuntimeValue::Pool(pool, _) => {
                 let outcomes = sum_pool(pool, &self.outcome_type())?
                     .ordered_outcomes()

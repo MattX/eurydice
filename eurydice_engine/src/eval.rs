@@ -730,7 +730,7 @@ impl Evaluator {
                 // disagrees can be shown against it.
                 let mut settled_by: Option<ast::Range> = None;
                 for (item, source) in items.iter().zip(list.items.iter()) {
-                    let item_type = item.flattened_outcome_type();
+                    let item_type = item.outcome_type();
                     let item_range = list_item_range(source);
                     let settling = outcome.is_none();
                     merge_outcome_type(
