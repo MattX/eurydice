@@ -2,6 +2,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use eurydice_engine::{
     ast::{Statement, WithRange},
     eval::Evaluator,
+    output::Distribution,
 };
 
 criterion_group!(benches, criterion_benchmark);
@@ -21,6 +22,16 @@ fn criterion_benchmark(c: &mut Criterion) {
 fn execute_all(eval: &mut Evaluator, parsed: &[WithRange<Statement>]) {
     for stmt in parsed {
         eval.execute(stmt).unwrap();
+    }
+    // `output` stores its value as it stands, so summing a pool and laying out
+    // its outcomes only happens when the result is rendered. Draining the
+    // outputs here is what puts that work inside the measurement.
+    for output in eval.take_outputs() {
+        std::hint::black_box(Distribution::from_runtime(
+            output.value,
+            output.field_names,
+            eval.symbols(),
+        ));
     }
 }
 

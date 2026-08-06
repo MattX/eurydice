@@ -171,15 +171,26 @@ fn pool_output(
     // the evaluator has already checked they all agree on it. Giving the
     // identity that shape here is what lets one die of tuples and one truncated
     // recursion share a distribution.
-    let shape = pool
-        .ordered_outcomes()
-        .iter()
-        .map(|(outcome, _)| outcome)
-        .find(|outcome| !matches!(outcome, ElementValue::AdditiveIdentity))
-        .cloned();
-    let pool = match &shape {
-        Some(shape) => pool.map_outcomes(|outcome| outcome.materialize_identity_like(shape)),
-        None => pool,
+    let mut shape = None;
+    let mut has_identity = false;
+    for (outcome, _) in pool.ordered_outcomes() {
+        if matches!(outcome, ElementValue::AdditiveIdentity) {
+            has_identity = true;
+        } else if shape.is_none() {
+            shape = Some(outcome.clone());
+        }
+        if has_identity && shape.is_some() {
+            break;
+        }
+    }
+    // Every outcome that is not the identity maps to itself, so rebuilding the
+    // pool only pays for itself when there is an identity to replace. Skipping
+    // it keeps a long list off a rebuild it would not change.
+    let pool = match (&shape, has_identity) {
+        (Some(shape), true) => {
+            pool.map_outcomes(|outcome| outcome.materialize_identity_like(shape))
+        }
+        _ => pool,
     };
     let is_tuple = matches!(shape, Some(ElementValue::Tuple(_)));
     let arity = match &shape {
