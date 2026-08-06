@@ -2,7 +2,6 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use eurydice_engine::{
     ast::{Statement, WithRange},
     eval::Evaluator,
-    output::Distribution,
 };
 
 criterion_group!(benches, criterion_benchmark);
@@ -22,15 +21,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 fn execute_all(eval: &mut Evaluator, parsed: &[WithRange<Statement>]) {
     for stmt in parsed {
         eval.execute(stmt).unwrap();
-    }
-    // `output` stores its value as it stands, so summing a pool and laying out
-    // its outcomes only happens when the result is rendered. Draining the
-    // outputs here is what puts that work inside the measurement.
-    for output in eval.take_outputs() {
-        std::hint::black_box(Distribution::from_runtime(
-            output.value,
-            output.field_names,
-        ));
     }
 }
 
@@ -52,6 +42,7 @@ static PROGRAMS: &[(&str, &str)] = &[
     ("sequence sort", SEQUENCE_SORT),
     ("function over pool", FUNCTION_OVER_POOL),
     ("pool comparison", POOL_COMPARISON),
+    ("symbol pool count", SYMBOL_POOL_COUNT),
     ("explode pool", EXPLODE_POOL),
 ];
 
@@ -110,13 +101,20 @@ const SEQUENCE_SORT: &str = "output [sort [reverse {1..20000}]]";
 /// which is the widest fan-out the evaluator has.
 const FUNCTION_OVER_POOL: &str = "
     function: f A:s {
-        result: A + 0
+        result: [sum integers in A]
     }
     output [f 6d10]
 ";
 
 /// Comparing two pools, which sums both and then walks their cross product.
 const POOL_COMPARISON: &str = "output 5d10 < 5d10";
+
+/// Counting over a pool whose outcomes are symbols: the path that cannot be
+/// summed but is not an error, so it stays worth measuring on its own.
+const SYMBOL_POOL_COUNT: &str = "
+    enum: RESULT { A, B, C, D, E, F }
+    output [count {A} in 12d{A, B, C, D, E, F}]
+";
 
 /// A transform primitive, which rebuilds the pool once per explosion depth.
 const EXPLODE_POOL: &str = "output [explode 3d10]";
