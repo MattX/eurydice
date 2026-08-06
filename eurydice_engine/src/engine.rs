@@ -566,11 +566,19 @@ output [pick d3]";
 
     #[test]
     fn non_primitive_diagnostics_do_not_repeat_the_summary_as_a_label() {
-        for source in ["output [missing]", "enum: R { A, B } output A + B"] {
-            let report = Engine::new().run_with_diagnostics(source);
-            let error = report.error().unwrap();
-            assert_eq!(error.labels[0].message, None, "{source}");
-        }
+        let report = Engine::new().run_with_diagnostics("output [missing]");
+        assert_eq!(report.error().unwrap().labels[0].message, None);
+
+        // A label may still carry something the summary does not. Adding two
+        // symbols is reported at the value that cannot be added, which the
+        // summary has no room to name.
+        let report = Engine::new().run_with_diagnostics("enum: R { A, B } output A + B");
+        let error = report.error().unwrap();
+        assert_eq!(error.summary, "this operator requires numbers");
+        assert_eq!(
+            error.labels[0].message.as_deref(),
+            Some("values like `B` are not numbers")
+        );
 
         let operator = Engine::new().run_with_diagnostics("output d6 @ d6");
         let error = operator.error().unwrap();

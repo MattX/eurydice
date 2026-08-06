@@ -10,7 +10,7 @@ use miette::SourceSpan;
 use crate::{
     ast::{self, BinaryOp},
     diagnostic::{EvaluationFrame, SourceId},
-    value::{ElementType, ElementValue, RuntimeValue},
+    value::{ElementValue, RuntimeValue},
 };
 
 #[derive(Debug)]
@@ -29,7 +29,7 @@ pub struct PrimitiveArgumentError {
 pub enum SemanticErrorKind {
     /// An operator does not accept the types it was given.
     OperatorOperands,
-    /// Values whose outcome types cannot be combined were used together.
+    /// Values that cannot be combined were used together.
     OutcomeMismatch,
     /// A value that cannot be summed was used where a sum is required.
     NonAdditiveValue,
@@ -62,45 +62,33 @@ pub struct PrimitiveValueError {
     pub help: Option<String>,
 }
 
-/// Two outcome types that cannot share a collection.
+/// Two values whose shapes do not line up, found by an operation that needed
+/// them to.
 ///
-/// Outcomes may differ in kind — a number here, a symbol there — but not in
-/// shape, so this is always a scalar meeting a tuple, two tuples of different
-/// sizes, or the empty sum meeting something it cannot be added to.
+/// Values may differ in kind — a number here, a symbol there — and still share
+/// a sequence or a pool. What no operation can reconcile is a difference in
+/// *shape*: a scalar meeting a tuple, or two tuples of different sizes. Nothing
+/// checks for this when the collection is built, so the values themselves are
+/// what the diagnostic names.
 #[derive(Debug)]
-pub struct OutcomeMismatchError {
+pub struct ShapeMismatchError {
     pub range: SourceSpan,
-    pub context: OutcomeMismatchContext,
-    /// The outcome type the collection had already settled on.
-    pub first: OutcomeConflict,
-    /// The one that could not join it.
-    pub second: OutcomeConflict,
+    /// What needed the two to line up; completes "<action> requires summing ...".
+    pub action: &'static str,
+    pub first: ElementValue,
+    pub second: ElementValue,
 }
 
-/// One side of an [`OutcomeMismatchError`].
-#[derive(Debug)]
-pub struct OutcomeConflict {
-    pub outcome_type: ElementType,
-    /// The expression this outcome type came from, where the raise site can
-    /// name one. Results collected from a pool evaluation cannot.
-    pub range: Option<SourceSpan>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum OutcomeMismatchContext {
-    /// A `{...}` literal.
-    SequenceLiteral,
-    /// The results of one function evaluated once per multiset.
-    FunctionResults,
-}
-
-/// What had to be summed, and how much of it.
+/// What had to be added, and how much of it.
 #[derive(Debug, Clone, Copy)]
 pub enum NonAdditiveSubject {
     /// A pool of this many dice.
     Pool(u32),
     /// A sequence of this many values, such as one multiset of a pool.
     Sequence(usize),
+    /// A single value an operator was applied to, where no collection is
+    /// involved at all and there is nothing to count.
+    Operand,
 }
 
 /// A value that had to be summed, but whose parts cannot be added together.
@@ -227,7 +215,7 @@ pub enum RuntimeError {
 
     InvalidPrimitiveValue(Box<PrimitiveValueError>),
 
-    OutcomeMismatch(Box<OutcomeMismatchError>),
+    ShapeMismatch(Box<ShapeMismatchError>),
 
     NonAdditiveSum(Box<NonAdditiveSumError>),
 
@@ -261,7 +249,7 @@ impl RuntimeError {
             RuntimeError::NegativeArgumentToFunction { range, .. } => range.into(),
             RuntimeError::InvalidPrimitiveArguments(error) => (&error.range).into(),
             RuntimeError::InvalidPrimitiveValue(error) => (&error.range).into(),
-            RuntimeError::OutcomeMismatch(error) => (&error.range).into(),
+            RuntimeError::ShapeMismatch(error) => (&error.range).into(),
             RuntimeError::NonAdditiveSum(error) => (&error.range).into(),
             RuntimeError::InvalidRepeatExpression { range, .. } => range.into(),
             RuntimeError::MathError { range, .. } => range.into(),

@@ -6,9 +6,11 @@ use serde::Serialize;
 use crate::{
     ast::{self, StaticType},
     dice::{Pool, explode, reroll},
-    error::{PrimitiveArgumentError, PrimitiveArgumentsError, PrimitiveValueError},
-    eval::{ElementType, ElementValue, Function, RuntimeError, RuntimeValue, sum_pool},
-    value::materialize_comparable_pair,
+    error::{
+        NonAdditiveSubject, PrimitiveArgumentError, PrimitiveArgumentsError, PrimitiveValueError,
+    },
+    eval::{ElementValue, Function, RuntimeError, RuntimeValue, sum_pool},
+    value::{ElementMismatch, Mismatch, materialize_comparable_pair},
 };
 
 /// Evaluation context passed to every primitive, bundling the ambient settings
@@ -34,7 +36,6 @@ type PrimitiveExecutor =
 pub struct Primitive {
     pub identifier: &'static str,
     pub arg_types: &'static [Option<StaticType>],
-    pub accepts_non_numeric: bool,
     pub execute: PrimitiveExecutor,
 }
 
@@ -111,10 +112,11 @@ fn invalid_arguments(
 
 fn absolute_execute(
     args: &[RuntimeValue],
-    _ctx: PrimitiveCtx,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let arg = &args[0];
-    Ok(arg.map_numeric_outcomes(i32::abs))
+    args[0]
+        .map_numeric_outcomes(i32::abs)
+        .map_err(|mismatch| not_numeric_mismatch(ctx, 0, mismatch))
 }
 
 fn contains_execute(
@@ -125,13 +127,13 @@ fn contains_execute(
     let RuntimeValue::Element(needle) = needle else {
         unreachable!("contains needle shape is enforced by the evaluator")
     };
-    if let RuntimeValue::Pool(haystack, _) = haystack {
+    if let RuntimeValue::Pool(haystack) = haystack {
         return Ok(haystack.contains(&needle).into());
     }
     let result = match haystack {
         RuntimeValue::Element(haystack) => haystack == needle,
-        RuntimeValue::List(haystack, _) => haystack.iter().any(|value| value == &needle),
-        RuntimeValue::Pool(_, _) => unreachable!("pool haystack returned above"),
+        RuntimeValue::List(haystack) => haystack.iter().any(|value| value == &needle),
+        RuntimeValue::Pool(_) => unreachable!("pool haystack returned above"),
     };
     Ok(if result { 1.into() } else { 0.into() })
 }
@@ -141,10 +143,10 @@ fn count_execute(
     _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     let (needles, haystack) = materialize_comparable_pair(&args[0], &args[1]);
-    let RuntimeValue::List(needles, _) = needles else {
+    let RuntimeValue::List(needles) = needles else {
         unreachable!("count needle shape is enforced by the evaluator")
     };
-    if let RuntimeValue::Pool(haystack, _) = haystack {
+    if let RuntimeValue::Pool(haystack) = haystack {
         return Ok(haystack.count(&needles).into());
     }
     let mut needle_map = HashMap::new();
@@ -153,11 +155,11 @@ fn count_execute(
     }
     let count = match haystack {
         RuntimeValue::Element(haystack) => needle_map.get(&haystack).copied().unwrap_or(0),
-        RuntimeValue::List(haystack, _) => haystack
+        RuntimeValue::List(haystack) => haystack
             .iter()
             .map(|item| needle_map.get(item).copied().unwrap_or(0))
             .sum(),
-        RuntimeValue::Pool(_, _) => unreachable!("pool haystack returned above"),
+        RuntimeValue::Pool(_) => unreachable!("pool haystack returned above"),
     };
     Ok(count.into())
 }
@@ -173,16 +175,16 @@ fn transform_die(
     ctx: PrimitiveCtx,
     transform: DieTransform,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let RuntimeValue::Pool(d, _) = &args[0] else {
+    let RuntimeValue::Pool(d) = &args[0] else {
         panic!("wrong argument types to [{}]", ctx.identifier);
     };
     if d.is_empty() {
         return Ok(args[0].clone());
     }
-    let die = numeric_pool(d).sum().ordered_outcomes().to_vec();
+    let die = numeric_pool(d, ctx, 0)?.sum().ordered_outcomes().to_vec();
     let on = match on {
         None => vec![die.last().unwrap().0],
-        Some(RuntimeValue::List(cond, _)) => numeric_list(cond),
+        Some(RuntimeValue::List(cond)) => numeric_list(cond, ctx, 1)?,
         Some(_) => panic!("wrong argument types to [{}]", ctx.identifier),
     };
     Ok(Pool::from(transform(die, &on, ctx.explode_depth)).into())
@@ -223,8 +225,7 @@ fn keep_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d, _)) =
-        (&args[0], &args[1])
+    let (RuntimeValue::Element(ElementValue::Int(i)), RuntimeValue::Pool(d)) = (&args[0], &args[1])
     else {
         panic!("wrong argument types to [{}]", ctx.identifier);
     };
@@ -236,7 +237,9 @@ fn keep_execute(
         d.dimension() as usize,
         ctx.function_range,
     )?;
-    Ok(numeric_pool(d).sum_with_keep_list(&keep_list).into())
+    Ok(numeric_pool(d, ctx, 1)?
+        .sum_with_keep_list(&keep_list)
+        .into())
 }
 
 fn highest_execute(
@@ -302,10 +305,10 @@ fn lowest_of_execute(
 
 fn maximum_execute(
     args: &[RuntimeValue],
-    _ctx: PrimitiveCtx,
+    ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::Pool(d, _) = &args[0] {
-        Ok(numeric_pool(d)
+    if let RuntimeValue::Pool(d) = &args[0] {
+        Ok(numeric_pool(d, ctx, 0)?
             .sum()
             .ordered_outcomes()
             .last()
@@ -322,15 +325,15 @@ fn choose_execute(
     _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     if let (
-        RuntimeValue::Pool(first, first_type),
+        RuntimeValue::Pool(first),
         RuntimeValue::Element(ElementValue::Int(condition)),
-        RuntimeValue::Pool(second, second_type),
+        RuntimeValue::Pool(second),
     ) = (&args[0], &args[1], &args[2])
     {
         Ok(if *condition == 0 {
-            RuntimeValue::Pool(second.clone(), second_type.clone())
+            RuntimeValue::Pool(second.clone())
         } else {
-            RuntimeValue::Pool(first.clone(), first_type.clone())
+            RuntimeValue::Pool(first.clone())
         })
     } else {
         panic!("wrong argument types to [choose if else]");
@@ -342,10 +345,9 @@ fn reverse_execute(
     _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     match &args[0] {
-        RuntimeValue::List(lst, outcome_type) => Ok(RuntimeValue::List(
-            std::rc::Rc::new(lst.iter().rev().cloned().collect()),
-            outcome_type.clone(),
-        )),
+        RuntimeValue::List(lst) => Ok(RuntimeValue::List(std::rc::Rc::new(
+            lst.iter().rev().cloned().collect(),
+        ))),
         _ => unreachable!("argument coercion guarantees a sequence"),
     }
 }
@@ -354,21 +356,20 @@ fn sort_execute(
     args: &[RuntimeValue],
     ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
-    if let RuntimeValue::List(lst, outcome_type) = &args[0] {
-        let mut lst = (**lst).clone();
-        if ctx.lowest_first {
-            lst.sort_unstable();
-        } else {
-            lst.sort_unstable_by_key(|outcome| {
-                -outcome
-                    .as_int()
-                    .expect("sort primitive received a non-numeric sequence")
-            });
+    if let RuntimeValue::List(lst) = &args[0] {
+        // Sorting is defined on numbers, so a sequence holding anything else
+        // says so here rather than part-way through the comparison. Past that,
+        // `ElementValue`'s own order is numeric order, so the values are only
+        // looked at, never collected.
+        if let Some(value) = lst.iter().find(|v| v.as_int_or_identity().is_none()) {
+            return Err(not_numeric(ctx, 0, value));
         }
-        Ok(RuntimeValue::List(
-            std::rc::Rc::new(lst),
-            outcome_type.clone(),
-        ))
+        let mut lst = (**lst).clone();
+        lst.sort_unstable();
+        if !ctx.lowest_first {
+            lst.reverse();
+        }
+        Ok(RuntimeValue::List(std::rc::Rc::new(lst)))
     } else {
         panic!("wrong argument types to [sort]");
     }
@@ -401,7 +402,7 @@ fn tuple_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
             RuntimeValue::Element(ElementValue::Tuple(_)) => {
                 unreachable!("nested tuple arguments were rejected above")
             }
-            RuntimeValue::List(_, _) | RuntimeValue::Pool(_, _) => {
+            RuntimeValue::List(_) | RuntimeValue::Pool(_) => {
                 unreachable!("tuple arguments are coerced to elements")
             }
         })
@@ -489,13 +490,13 @@ fn integers_in(arg: &RuntimeValue, of_int: fn(i32) -> i32) -> RuntimeValue {
     };
     match arg {
         RuntimeValue::Element(value) => contribution(value).into(),
-        RuntimeValue::List(values, _) => values.iter().map(contribution).sum::<i32>().into(),
-        RuntimeValue::Pool(pool, _) => {
+        RuntimeValue::List(values) => values.iter().map(contribution).sum::<i32>().into(),
+        RuntimeValue::Pool(pool) => {
             let mapped = (**pool)
                 .clone()
                 .map_outcomes(|outcome| ElementValue::Int(contribution(&outcome)));
-            let summed = sum_pool(&mapped, &ElementType::Int).expect("an int pool is additive");
-            RuntimeValue::Pool(Rc::new(summed), ElementType::Int)
+            let summed = sum_pool(&mapped).expect("an int pool is additive");
+            RuntimeValue::Pool(Rc::new(summed))
         }
     }
 }
@@ -514,20 +515,61 @@ fn count_integers_execute(
     Ok(integers_in(&args[0], |_| 1))
 }
 
-fn numeric_pool(pool: &Pool<ElementValue>) -> Pool<i32> {
-    pool.clone().map_outcomes(|outcome| {
+/// Reports the value that stopped a primitive needing numbers.
+///
+/// Nothing vets an argument's contents before a primitive runs, so the
+/// primitives that only work on numbers find out here, at the first value that
+/// is not one.
+fn not_numeric(ctx: PrimitiveCtx, arg: usize, value: &ElementValue) -> RuntimeError {
+    invalid_arguments(
+        ctx,
+        "only works on numbers",
+        "`[sum integers in ...]` totals just the numeric values, and `print` shows a value \
+         without needing it to be numeric.",
+        vec![PrimitiveArgumentError {
+            name: argument_name(ctx.identifier, arg),
+            range: ctx.arg_ranges[arg].into(),
+            expected: "a number".to_string(),
+            value: RuntimeValue::Element(value.clone()),
+        }],
+    )
+}
+
+/// The same report as [`not_numeric`], for a mismatch an element operation
+/// already found.
+fn not_numeric_mismatch(ctx: PrimitiveCtx, arg: usize, mismatch: ElementMismatch) -> RuntimeError {
+    match mismatch.kind() {
+        Mismatch::NotNumeric { witness, .. } => not_numeric(ctx, arg, &witness.clone()),
+        Mismatch::Shapes { .. } => mismatch.into_error(
+            ctx.function_range,
+            "this function",
+            NonAdditiveSubject::Operand,
+        ),
+    }
+}
+
+fn numeric_pool(
+    pool: &Pool<ElementValue>,
+    ctx: PrimitiveCtx,
+    arg: usize,
+) -> Result<Pool<i32>, RuntimeError> {
+    pool.clone().try_map_outcomes(|outcome| {
         outcome
-            .as_int()
-            .expect("numeric primitive received a non-numeric pool")
+            .as_int_or_identity()
+            .ok_or_else(|| not_numeric(ctx, arg, &outcome))
     })
 }
 
-fn numeric_list(list: &[ElementValue]) -> Vec<i32> {
+fn numeric_list(
+    list: &[ElementValue],
+    ctx: PrimitiveCtx,
+    arg: usize,
+) -> Result<Vec<i32>, RuntimeError> {
     list.iter()
         .map(|outcome| {
             outcome
-                .as_int()
-                .expect("numeric primitive received a non-numeric sequence")
+                .as_int_or_identity()
+                .ok_or_else(|| not_numeric(ctx, arg, outcome))
         })
         .collect()
 }
@@ -538,7 +580,6 @@ macro_rules! define_primitives {
             $constant:ident:
             $name:literal,
             $arg_types:expr,
-            $accepts_non_numeric:literal,
             $execute:path,
             $signature:literal,
             $snippet:literal,
@@ -550,7 +591,6 @@ macro_rules! define_primitives {
             pub static $constant: Primitive = Primitive {
                 identifier: $name,
                 arg_types: $arg_types,
-                accepts_non_numeric: $accepts_non_numeric,
                 execute: $execute,
             };
         )+
@@ -573,7 +613,7 @@ macro_rules! define_primitives {
 
 define_primitives! {
     ABSOLUTE_PRIMITIVE:
-        "absolute {}", &[Some(StaticType::Int)], false, absolute_execute,
+        "absolute {}", &[Some(StaticType::Int)], absolute_execute,
         "[absolute N:n]", "absolute ${N}",
         "Returns the absolute value of N.", "/help/spec/#absolute-nn";
     // Keep SEQ uncoerced so the executor can distinguish a deterministic
@@ -581,7 +621,6 @@ define_primitives! {
     CONTAINS_PRIMITIVE:
         "{} contains {}",
         &[None, Some(StaticType::Int)],
-        true,
         contains_execute,
         "[SEQ:s contains N:n]", "${SEQ} contains ${N}",
         "Returns 1 when SEQ contains N, or 0 otherwise.", "/help/spec/#seqs-contains-nn";
@@ -590,7 +629,6 @@ define_primitives! {
     COUNT_PRIMITIVE:
         "count {} in {}",
         &[Some(StaticType::List), None],
-        true,
         count_execute,
         "[count NEEDLES:s in HAYSTACK:s]", "count ${NEEDLES} in ${HAYSTACK}",
         "Counts occurrences of every element of NEEDLES in HAYSTACK.", "/help/spec/#count-needless-in-haystacks";
@@ -600,62 +638,55 @@ define_primitives! {
     COUNT_INTEGERS_PRIMITIVE:
         "count integers in {}",
         &[None],
-        true,
         count_integers_execute,
         "[count integers in SEQ:s]", "count integers in ${SEQ}",
         "Counts the outcomes of SEQ that are integers.", "/help/spec/#-count-integers-in-seqs";
     SUM_INTEGERS_PRIMITIVE:
         "sum integers in {}",
         &[None],
-        true,
         sum_integers_execute,
         "[sum integers in SEQ:s]", "sum integers in ${SEQ}",
         "Sums the outcomes of SEQ that are integers, ignoring the rest.", "/help/spec/#-sum-integers-in-seqs";
     IS_INTEGER_PRIMITIVE:
-        "{} is integer", &[Some(StaticType::Int)], true, is_integer_execute,
+        "{} is integer", &[Some(StaticType::Int)], is_integer_execute,
         "[N:n is integer]", "${N} is integer",
         "Returns 1 when N is an integer, or 0 when it is a symbol or a tuple.", "/help/spec/#-nn-is-integer";
     EXPLODE_PRIMITIVE:
-        "explode {}", &[Some(StaticType::Pool)], false, explode_execute,
+        "explode {}", &[Some(StaticType::Pool)], explode_execute,
         "[explode POOL:d]", "explode ${POOL}",
         "Rerolls the highest outcome and adds it to the original roll.", "/help/spec/#explode-poold";
     HIGHEST_PRIMITIVE:
         "highest {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
-        false,
         highest_execute,
         "[highest COUNT:n of POOL:d]", "highest ${COUNT} of ${POOL}",
         "Sums the highest COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     LOWEST_PRIMITIVE:
         "lowest {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
-        false,
         lowest_execute,
         "[lowest COUNT:n of POOL:d]", "lowest ${COUNT} of ${POOL}",
         "Sums the lowest COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     MIDDLE_PRIMITIVE:
         "middle {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
-        false,
         middle_execute,
         "[middle COUNT:n of POOL:d]", "middle ${COUNT} of ${POOL}",
         "Sums the middle COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     HIGHEST_OF_PRIMITIVE:
         "highest of {} and {}",
         &[Some(StaticType::Int), Some(StaticType::Int)],
-        false,
         highest_of_execute,
         "[highest of FIRST:n and SECOND:n]", "highest of ${FIRST} and ${SECOND}",
         "Returns the greater of FIRST and SECOND.", "/help/spec/#highest-of-firstn-and-secondn-lowest-of-firstn-and-secondn";
     LOWEST_OF_PRIMITIVE:
         "lowest of {} and {}",
         &[Some(StaticType::Int), Some(StaticType::Int)],
-        false,
         lowest_of_execute,
         "[lowest of FIRST:n and SECOND:n]", "lowest of ${FIRST} and ${SECOND}",
         "Returns the lesser of FIRST and SECOND.", "/help/spec/#highest-of-firstn-and-secondn-lowest-of-firstn-and-secondn";
     MAXIMUM_PRIMITIVE:
-        "maximum of {}", &[Some(StaticType::Pool)], false, maximum_execute,
+        "maximum of {}", &[Some(StaticType::Pool)], maximum_execute,
         "[maximum of POOL:d]", "maximum of ${POOL}",
         "Returns the largest possible outcome of the summed POOL.", "/help/spec/#maximum-of-poold";
     CHOOSE_PRIMITIVE:
@@ -665,50 +696,47 @@ define_primitives! {
             Some(StaticType::Int),
             Some(StaticType::Pool),
         ],
-        true,
         choose_execute,
         "[choose FIRST:d if CONDITION:n else SECOND:d]", "choose ${FIRST} if ${CONDITION} else ${SECOND}",
         "Returns FIRST when CONDITION is nonzero, and SECOND otherwise.", "/help/spec/#-choose-firstd-if-conditionn-else-secondd";
     REVERSE_PRIMITIVE:
-        "reverse {}", &[Some(StaticType::List)], true, reverse_execute,
+        "reverse {}", &[Some(StaticType::List)], reverse_execute,
         "[reverse SEQUENCE:s]", "reverse ${SEQUENCE}",
         "Returns SEQUENCE in reverse order.", "/help/spec/#reverse-sequences";
     SORT_PRIMITIVE:
-        "sort {}", &[Some(StaticType::List)], false, sort_execute,
+        "sort {}", &[Some(StaticType::List)], sort_execute,
         "[sort SEQUENCE:s]", "sort ${SEQUENCE}",
         "Sorts SEQUENCE according to the position-order setting.", "/help/spec/#sort-sequences";
     EXPLODE_ON_PRIMITIVE:
         "explode {} on {}",
         &[Some(StaticType::Pool), Some(StaticType::List)],
-        false,
         explode_on_execute,
         "[explode POOL:d on COND:s]", "explode ${POOL} on ${COND}",
         "Rerolls and adds outcomes of POOL that are contained in COND.", "/help/spec/#explode-poold-on-conds";
     REROLL_PRIMITIVE:
-        "reroll {}", &[Some(StaticType::Pool)], false, reroll_execute,
+        "reroll {}", &[Some(StaticType::Pool)], reroll_execute,
         "[reroll POOL:d]", "reroll ${POOL}",
         "Replaces the highest outcome of POOL with a new roll.", "/help/spec/#-reroll-poold";
     REROLL_ON_PRIMITIVE:
         "reroll {} on {}",
         &[Some(StaticType::Pool), Some(StaticType::List)],
-        false,
         reroll_on_execute,
         "[reroll POOL:d on COND:s]", "reroll ${POOL} on ${COND}",
         "Replaces outcomes of POOL that are contained in COND with a new roll.", "/help/spec/#-reroll-poold-on-conds";
     TUPLE_2_PRIMITIVE:
-        "tuple {} {}", &[Some(StaticType::Int); 2], true, tuple_execute,
+        "tuple {} {}", &[Some(StaticType::Int); 2], tuple_execute,
         "[tuple A:n B:n]", "tuple ${A} ${B}",
         "Constructs a two-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     TUPLE_3_PRIMITIVE:
-        "tuple {} {} {}", &[Some(StaticType::Int); 3], true, tuple_execute,
+        "tuple {} {} {}", &[Some(StaticType::Int); 3], tuple_execute,
         "[tuple A:n B:n C:n]", "tuple ${A} ${B} ${C}",
         "Constructs a three-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     TUPLE_4_PRIMITIVE:
-        "tuple {} {} {} {}", &[Some(StaticType::Int); 4], true, tuple_execute,
+        "tuple {} {} {} {}", &[Some(StaticType::Int); 4], tuple_execute,
         "[tuple A:n B:n C:n D:n]", "tuple ${A} ${B} ${C} ${D}",
         "Constructs a four-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     FIELD_PRIMITIVE:
-        "field {} of {}", &[Some(StaticType::Int); 2], true, field_execute,
+        "field {} of {}", &[Some(StaticType::Int); 2], field_execute,
         "[field INDEX:n of TUPLE:n]", "field ${INDEX} of ${TUPLE}",
         "Returns the one-based INDEX field of TUPLE.", "/help/spec/#-field-indexn-of-tuplen";
 }
@@ -786,6 +814,15 @@ mod tests {
         Range { start: 0, end: 0 }
     }
 
+    /// The numbers in a sequence a test has just built, which it knows are all
+    /// numbers — unlike `numeric_list`, which exists to report when they are not.
+    fn ints(values: &[ElementValue]) -> Vec<i32> {
+        values
+            .iter()
+            .map(|value| value.as_int().expect("test sequence holds numbers"))
+            .collect()
+    }
+
     fn ctx(arg_ranges: &[Range], explode_depth: usize, lowest_first: bool) -> PrimitiveCtx<'_> {
         PrimitiveCtx {
             arg_ranges,
@@ -835,7 +872,7 @@ mod tests {
 
         let args = vec![pool_value(Pool::ndn(3, 6)), int_value(6)];
         let result = contains_execute(&args, ctx(&[], 0, false)).unwrap();
-        let RuntimeValue::Pool(result, _) = result else {
+        let RuntimeValue::Pool(result) = result else {
             panic!("Expected pool result");
         };
         assert_eq!(to_nat_list(result.ordered_outcomes()), [(0, 125), (1, 91)]);
@@ -854,7 +891,7 @@ mod tests {
         let haystack = Pool::from_list(3, (1..=6).collect());
         let args = vec![list_value(needles), pool_value(haystack)];
         let result = count_execute(&args, ctx(&[], 0, false)).unwrap();
-        let RuntimeValue::Pool(result, _) = result else {
+        let RuntimeValue::Pool(result) = result else {
             panic!("Expected pool result");
         };
         assert_eq!(
@@ -875,7 +912,7 @@ mod tests {
         let args = vec![pool_value(pool)];
         let result = explode_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 3s explode
-        if let RuntimeValue::Pool(result_pool, _) = result {
+        if let RuntimeValue::Pool(result_pool) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 9), (2, 9), (4, 3), (5, 3), (7, 1), (8, 1), (9, 1)]
@@ -892,7 +929,7 @@ mod tests {
         let ranges = vec![dummy_range(), dummy_range()];
         let result = highest_execute(&args, ctx(&ranges, 0, false)).unwrap();
         // Should keep the highest 2 dice from a 3d6 roll
-        if let RuntimeValue::Pool(result_pool, _) = result {
+        if let RuntimeValue::Pool(result_pool) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [
@@ -921,7 +958,7 @@ mod tests {
         let ranges = vec![dummy_range(), dummy_range()];
         let result = lowest_execute(&args, ctx(&ranges, 0, false)).unwrap();
         // Should keep the lowest 2 dice from a 3d6 roll
-        if let RuntimeValue::Pool(result_pool, _) = result {
+        if let RuntimeValue::Pool(result_pool) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [
@@ -950,7 +987,7 @@ mod tests {
         let ranges = vec![dummy_range(), dummy_range()];
         let result = middle_execute(&args, ctx(&ranges, 0, false)).unwrap();
         // Should keep the middle 1 die from a 3d6 roll
-        if let RuntimeValue::Pool(result_pool, _) = result {
+        if let RuntimeValue::Pool(result_pool) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 16), (2, 40), (3, 52), (4, 52), (5, 40), (6, 16)]
@@ -1005,7 +1042,7 @@ mod tests {
         let [output] = outputs.as_slice() else {
             panic!("Expected one pool output");
         };
-        let RuntimeValue::Pool(result, _) = &output.value else {
+        let RuntimeValue::Pool(result) = &output.value else {
             panic!("Expected one pool output");
         };
         assert_eq!(
@@ -1019,8 +1056,8 @@ mod tests {
         let list = vec![1, 2, 3, 4, 5];
         let args = vec![list_value(list)];
         let result = reverse_execute(&args, ctx(&[], 0, false)).unwrap();
-        if let RuntimeValue::List(reversed, _) = result {
-            assert_eq!(numeric_list(&reversed), vec![5, 4, 3, 2, 1]);
+        if let RuntimeValue::List(reversed) = result {
+            assert_eq!(ints(&reversed), vec![5, 4, 3, 2, 1]);
         } else {
             panic!("Expected list result");
         }
@@ -1033,8 +1070,8 @@ mod tests {
 
         // Test lowest first (ascending)
         let result = sort_execute(&args, ctx(&[], 0, true)).unwrap();
-        if let RuntimeValue::List(sorted, _) = result {
-            assert_eq!(numeric_list(&sorted), vec![1, 1, 3, 4, 5]);
+        if let RuntimeValue::List(sorted) = result {
+            assert_eq!(ints(&sorted), vec![1, 1, 3, 4, 5]);
         } else {
             panic!("Expected list result");
         }
@@ -1043,8 +1080,8 @@ mod tests {
         let list = vec![3, 1, 4, 1, 5];
         let args = vec![list_value(list)];
         let result = sort_execute(&args, ctx(&[], 0, false)).unwrap();
-        if let RuntimeValue::List(sorted, _) = result {
-            assert_eq!(numeric_list(&sorted), vec![5, 4, 3, 1, 1]);
+        if let RuntimeValue::List(sorted) = result {
+            assert_eq!(ints(&sorted), vec![5, 4, 3, 1, 1]);
         } else {
             panic!("Expected list result");
         }
@@ -1057,7 +1094,7 @@ mod tests {
         let args = vec![pool_value(pool), list_value(condition)];
         let result = explode_on_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 2s and 3s explode
-        if let RuntimeValue::Pool(result_pool, _) = result {
+        if let RuntimeValue::Pool(result_pool) = result {
             // 1 stays as 1, 2 explodes to 2+reroll, 3 explodes to 3+reroll
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
@@ -1083,7 +1120,7 @@ mod tests {
         let args = vec![pool_value(pool)];
         let result = reroll_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 3s reroll (without keeping the original value)
-        if let RuntimeValue::Pool(result_pool, _) = result {
+        if let RuntimeValue::Pool(result_pool) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 13), (2, 13), (3, 1)]
@@ -1100,7 +1137,7 @@ mod tests {
         let args = vec![pool_value(pool), list_value(condition)];
         let result = reroll_on_execute(&args, ctx(&[], 2, false)).unwrap();
         // Should return a pool where 1s and 4s reroll
-        if let RuntimeValue::Pool(result_pool, _) = result {
+        if let RuntimeValue::Pool(result_pool) = result {
             assert_eq!(
                 to_nat_list(result_pool.ordered_outcomes()),
                 [(1, 4), (2, 28), (3, 28), (4, 4)]

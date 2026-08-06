@@ -16,6 +16,7 @@ use malachite::Natural;
 use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::base::num::basic::traits::{One, Zero};
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 use std::rc::Rc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
 
@@ -174,38 +175,62 @@ where
         S: Clone + Hash + Eq,
         F: Fn(&S, &T, u32) -> S,
     {
+        let StateMapper { initial_state, f } = mapper;
+        let mapper = StateMapper {
+            initial_state,
+            f: |state: &S, outcome: &T, count| Ok::<_, Infallible>(f(state, outcome, count)),
+        };
+        match self.try_apply(mapper, keep_list) {
+            Ok(states) => states,
+            Err(never) => match never {},
+        }
+    }
+
+    /// [`Self::apply`] with a state function that can fail.
+    ///
+    /// The first failure abandons the walk, so the error names the outcome that
+    /// caused it rather than a state some way downstream of it.
+    pub fn try_apply<S, F, E>(
+        &self,
+        mapper: StateMapper<S, F>,
+        keep_list: &[bool],
+    ) -> Result<HashMap<S, Natural>, E>
+    where
+        S: Clone + Hash + Eq,
+        F: Fn(&S, &T, u32) -> Result<S, E>,
+    {
         debug_assert_eq!(
             keep_list.len(),
             self.dimension as usize,
             "`apply` called with keep list of incorrect length"
         );
         if self.is_empty() {
-            return [(mapper.initial_state.clone(), Natural::ONE)].into();
+            return Ok([(mapper.initial_state.clone(), Natural::ONE)].into());
         }
         let mut cache = HashMap::new();
         self.apply_inner(SubPool::initial(self), &mut cache, &mapper, keep_list)
     }
 
-    fn apply_inner<S, F>(
+    fn apply_inner<S, F, E>(
         &self,
         sub_pool: SubPool,
         cache: &mut HashMap<SubPool, HashMap<S, Natural>>,
         mapper: &StateMapper<S, F>,
         keep_list: &[bool],
-    ) -> HashMap<S, Natural>
+    ) -> Result<HashMap<S, Natural>, E>
     where
         S: Clone + Hash + Eq,
-        F: Fn(&S, &T, u32) -> S,
+        F: Fn(&S, &T, u32) -> Result<S, E>,
     {
         if let Some(value) = cache.get(&sub_pool) {
-            return value.clone();
+            return Ok(value.clone());
         }
         let new_remaining_outcomes = sub_pool.remaining_outcomes - 1;
         let (outcome, weight) = &self.ordered_outcomes[new_remaining_outcomes];
         let result = if new_remaining_outcomes == 0 {
             let num_kept = self.num_kept(keep_list, sub_pool, sub_pool.dimension);
             [(
-                (mapper.f)(&mapper.initial_state, outcome, num_kept),
+                (mapper.f)(&mapper.initial_state, outcome, num_kept)?,
                 weight.pow(sub_pool.dimension as u64),
             )]
             .into()
@@ -220,9 +245,10 @@ where
                     dimension: sub_pool.dimension - num_with_outcome,
                     remaining_outcomes: new_remaining_outcomes,
                 };
-                let sub_sub_pool_result = self.apply_inner(sub_sub_pool, cache, mapper, keep_list);
+                let sub_sub_pool_result =
+                    self.apply_inner(sub_sub_pool, cache, mapper, keep_list)?;
                 for (state, count) in sub_sub_pool_result {
-                    let inner_state = (mapper.f)(&state, outcome, num_kept);
+                    let inner_state = (mapper.f)(&state, outcome, num_kept)?;
                     // There were binom(self.n, num_with_outcome) ways to get this outcome,
                     // times weight^num_with_outcome if the weight is >1.
                     *result.entry(inner_state).or_default() += count
@@ -232,8 +258,10 @@ where
             }
             result
         };
+        // Only successful sub-walks are cached; a failure abandons the whole
+        // walk, so there is nothing for a later lookup to reuse.
         cache.insert(sub_pool, result.clone());
-        result
+        Ok(result)
     }
 
     fn num_kept(&self, keep_list: &[bool], sub_pool: SubPool, num_with_outcome: u32) -> u32 {
@@ -309,6 +337,19 @@ where
         self.sum_with_keep_list_by(&keep_list, identity, add_scaled)
     }
 
+    /// [`Self::sum_by`] with an addition that can fail.
+    pub(crate) fn try_sum_by<S, F, E>(&self, identity: S, add_scaled: F) -> Result<Pool<S>, E>
+    where
+        S: Clone + Eq + Hash + Ord,
+        F: Fn(&S, &T, u32) -> Result<S, E>,
+    {
+        if self.is_empty() {
+            return Ok(Pool::from_list(1, vec![identity]));
+        }
+        let keep_list = vec![true; self.dimension as usize];
+        self.try_sum_with_keep_list_by(&keep_list, identity, add_scaled)
+    }
+
     /// The generic counterpart of `sum_with_keep_list`.
     pub(crate) fn sum_with_keep_list_by<S, F>(
         &self,
@@ -334,6 +375,32 @@ where
         .collect()
     }
 
+    /// [`Self::sum_with_keep_list_by`] with an addition that can fail.
+    pub(crate) fn try_sum_with_keep_list_by<S, F, E>(
+        &self,
+        keep_list: &[bool],
+        identity: S,
+        add_scaled: F,
+    ) -> Result<Pool<S>, E>
+    where
+        S: Clone + Eq + Hash + Ord,
+        F: Fn(&S, &T, u32) -> Result<S, E>,
+    {
+        if self.is_empty() {
+            return Ok(Pool::from_list(1, vec![identity]));
+        }
+        Ok(self
+            .try_apply(
+                StateMapper {
+                    initial_state: identity,
+                    f: add_scaled,
+                },
+                keep_list,
+            )?
+            .into_iter()
+            .collect())
+    }
+
     pub fn multiset_iterator(&self) -> PoolMultisetIterator<'_, T> {
         PoolMultisetIterator::new(self)
     }
@@ -349,6 +416,19 @@ where
             .multiset_iterator()
             .map(|(outcome, ways)| (ways, f(&outcome).into_iter().collect()));
         Pool::from_mixture(components)
+    }
+
+    /// [`Self::flat_map`] with a mapping that can fail.
+    pub fn try_flat_map<U, F, E>(&self, f: F) -> Result<Pool<U>, E>
+    where
+        U: Clone + Ord,
+        F: Fn(&[T]) -> Result<BTreeMap<U, Natural>, E>,
+    {
+        let components = self
+            .multiset_iterator()
+            .map(|(outcome, ways)| Ok((ways, f(&outcome)?.into_iter().collect())))
+            .collect::<Result<Vec<_>, E>>()?;
+        Ok(Pool::from_mixture(components))
     }
 
     /// Maps multiset outcomes to a single value each.

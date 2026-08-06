@@ -96,8 +96,8 @@ fn enum_names_do_not_replace_or_get_reused_by_other_bindings() {
 #[test]
 fn rejects_enum_arithmetic_ordering_and_multidimensional_output() {
     for (program, expected) in [
-        ("enum: R { A, B } output A + B", "not defined"),
-        ("enum: R { A, B } output A < B", "not defined"),
+        ("enum: R { A, B } output A + B", "requires numbers"),
+        ("enum: R { A, B } output A < B", "requires numbers"),
         (
             "enum: R { A, B } output 2d{A, B}",
             "cannot be added together",
@@ -184,7 +184,6 @@ fn operations_that_would_sum_a_multidimensional_enum_pool_are_rejected() {
         "enum: R { A, B } output (0-1)d(d{A, B})",
         "enum: R { A, B } output d2 d {A, B}",
         "enum: R { A, B } output d2 d (2d{A, B})",
-        "enum: R { A, B } output 0d{A, B}",
         "enum: R { A, B } function: f S:s { result: S } output [f 2d{A, B}]",
         "enum: R { A, B } function: f D:d { result: D } output [f 2d{A, B}]",
         "enum: R { A, B } output [choose 2d{A, B} if 1 else 2d{A, B}]",
@@ -192,6 +191,19 @@ fn operations_that_would_sum_a_multidimensional_enum_pool_are_rejected() {
     ] {
         assert!(run(program).is_err(), "{program}");
     }
+}
+
+/// Rolling no dice adds nothing, so it never meets the faces at all: `0d{A, B}`
+/// is the empty sum, and displays as the `0` that `0d6` does. Nothing about the
+/// faces can make an empty sum fail, because nothing is ever added to it.
+#[test]
+fn rolling_no_enum_dice_yields_the_empty_sum() {
+    let (outputs, symbols) =
+        run("enum: R { A, B } output 0d{A, B}").expect("no dice, nothing to add");
+    assert_eq!(
+        Distribution::from_runtime(outputs[0].value.clone(), None, &symbols).probabilities,
+        vec![(vec![0], 1.0f64)]
+    );
 }
 
 /// Loosening pool construction must not loosen the operations that were already

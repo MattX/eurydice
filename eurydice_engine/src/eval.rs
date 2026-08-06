@@ -15,22 +15,19 @@ use crate::{
         SourceId, SourceRange, TraceBinding, WarningKind, missing_return_warning, preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
-    error::{
-        NonAdditiveSubject, NonAdditiveSumError, OutcomeConflict, OutcomeMismatchContext,
-        OutcomeMismatchError,
-    },
+    error::{NonAdditiveSubject, ShapeMismatchError},
     operators::{apply_binary_op, apply_unary_op},
     primitives::{
         EXPLODE_ON_PRIMITIVE, EXPLODE_PRIMITIVE, Primitive, REROLL_ON_PRIMITIVE, REROLL_PRIMITIVE,
         register_primitives,
     },
-    value::{display_requires_summing, non_numeric_field, sum_elements},
+    value::{display_requires_summing, sum_elements},
 };
 
 pub(crate) use crate::value::sum_pool;
 pub use crate::{
     error::{ArityMismatch, RuntimeError, SemanticErrorKind},
-    value::{ElementType, ElementValue, RuntimeValue, SymbolTable},
+    value::{ElementValue, RuntimeValue, SymbolTable},
 };
 
 /// Runtime bindings, organized as a stack of dynamically scoped function frames.
@@ -97,29 +94,19 @@ pub enum Function {
 #[derive(Debug, Clone)]
 pub struct UserFunction {
     definition: FunctionDefinition,
-    arg_types: Vec<Option<ResolvedArgType>>,
+    arg_types: Vec<Option<StaticType>>,
     source_id: SourceId,
 }
 
-#[derive(Debug, Clone)]
-struct ResolvedArgType {
-    shape: StaticType,
-    outcome: Option<ElementType>,
-}
-
 impl Function {
-    fn get_arg_types(&self) -> Vec<Option<ResolvedArgType>> {
+    /// The shape each argument is converted to, where the function names one.
+    ///
+    /// Shape is all a signature can ask for: `:n`, `:s` and `:d` say whether an
+    /// argument arrives as a single value, a sequence or a die, and nothing
+    /// says anything about what is inside it.
+    fn get_arg_types(&self) -> Vec<Option<StaticType>> {
         match self {
-            Function::Primitive(primitive) => primitive
-                .arg_types
-                .iter()
-                .map(|shape| {
-                    shape.map(|shape| ResolvedArgType {
-                        shape,
-                        outcome: (!primitive.accepts_non_numeric).then_some(ElementType::Int),
-                    })
-                })
-                .collect(),
+            Function::Primitive(primitive) => primitive.arg_types.to_vec(),
             Function::UserDefined(function) => function.arg_types.clone(),
         }
     }
@@ -485,16 +472,7 @@ impl Evaluator {
                 for arg in &fd.args {
                     self.validate_binding_name(&arg.value.name, arg.range)?;
                 }
-                let arg_types = fd
-                    .args
-                    .iter()
-                    .map(|arg| {
-                        arg.value.ty.map(|shape| ResolvedArgType {
-                            shape,
-                            outcome: None,
-                        })
-                    })
-                    .collect();
+                let arg_types = fd.args.iter().map(|arg| arg.value.ty).collect();
                 self.functions.insert(
                     fd.name.value.clone(),
                     Function::UserDefined(Rc::new(UserFunction {
@@ -522,8 +500,8 @@ impl Evaluator {
                 // summed here: the conversion in `output.rs` runs after evaluation and
                 // has no way to report an error.
                 let summed = match &value {
-                    RuntimeValue::Pool(pool, outcome_type) => Some(
-                        sum_pool(pool, outcome_type)
+                    RuntimeValue::Pool(pool) => Some(
+                        sum_pool(pool)
                             .map_err(|error| error.into_error(expr.range, "displaying a pool"))?,
                     ),
                     _ => None,
@@ -534,15 +512,17 @@ impl Evaluator {
                         .iter()
                         .map(|(outcome, _)| outcome)
                         .collect(),
-                    (RuntimeValue::List(values, _), None) => values.iter().collect(),
+                    (RuntimeValue::List(values), None) => values.iter().collect(),
                     (RuntimeValue::Element(value), None) => vec![value],
-                    (RuntimeValue::Pool(_, _), None) => {
+                    (RuntimeValue::Pool(_), None) => {
                         unreachable!("a pool value is always summed above")
                     }
                 };
+                // Every outcome agrees on its shape from here on, so the first
+                // one speaks for all of them.
                 reject_mixed_output_fields(&displayed, expr.range)?;
                 let field_names = if let Some(labels) = labeled {
-                    let ElementType::Tuple(fields) = value.outcome_type() else {
+                    let Some(ElementValue::Tuple(fields)) = displayed.first() else {
                         return Err(RuntimeError::LabelsOnNonTupleOutput {
                             range: labels.range.into(),
                             value_range: expr.range.into(),
@@ -575,10 +555,8 @@ impl Evaluator {
                 // Hand on the pool already summed above, so that displaying it
                 // does not repeat the summation.
                 let value = match (&value, summed) {
-                    (RuntimeValue::Pool(pool, outcome_type), Some(summed))
-                        if display_requires_summing(pool) =>
-                    {
-                        RuntimeValue::Pool(Rc::new(summed), outcome_type.clone())
+                    (RuntimeValue::Pool(pool), Some(summed)) if display_requires_summing(pool) => {
+                        RuntimeValue::Pool(Rc::new(summed))
                     }
                     _ => value,
                 };
@@ -646,7 +624,7 @@ impl Evaluator {
                 self.validate_binding_name(&variable.value, variable.range)?;
                 let range = self.evaluate(eval_context, range_expression)?;
                 let range = match range {
-                    RuntimeValue::List(range, _) => range,
+                    RuntimeValue::List(range) => range,
                     _ => {
                         return Err(RuntimeError::LoopOverNonSequence {
                             range: range_expression.range.into(),
@@ -725,44 +703,20 @@ impl Evaluator {
                     .iter()
                     .map(|item| self.evaluate_list_literal_item(eval_context, item))
                     .collect::<Result<Vec<_>, _>>()?;
-                let mut outcome: Option<ElementType> = None;
-                // The element that settled the shape, so a later one that
-                // disagrees can be shown against it.
-                let mut settled_by: Option<ast::Range> = None;
-                for (item, source) in items.iter().zip(list.items.iter()) {
-                    let item_type = item.outcome_type();
-                    let item_range = list_item_range(source);
-                    let settling = outcome.is_none();
-                    merge_outcome_type(
-                        &mut outcome,
-                        item_type,
-                        expression.range,
-                        OutcomeMismatchContext::SequenceLiteral,
-                        settled_by,
-                        Some(item_range),
-                    )?;
-                    if settling {
-                        settled_by = Some(item_range);
-                    }
-                }
-                let outcome = outcome.unwrap_or(ElementType::Uninhabited);
+                // A sequence holds whatever it was written with; nothing here
+                // asks the items to agree. An operation that later needs them
+                // to is where a disagreement surfaces.
                 let mut flattened = Vec::new();
-                for item in items {
-                    flattened.extend(item.to_list(1).map_err(|error| {
-                        error.into_error(expression.range, "flattening a pool into a sequence")
+                for (item, source) in items.iter().zip(list.items.iter()) {
+                    flattened.extend(item.to_list(1).map_err(|mismatch| {
+                        mismatch.into_error(
+                            list_item_range(source),
+                            "flattening a pool into a sequence",
+                            NonAdditiveSubject::Sequence(item.elements().len()),
+                        )
                     })?);
                 }
-                let elems = flattened
-                    .into_iter()
-                    .map(|value| {
-                        if outcome.is_empty_sum() {
-                            value
-                        } else {
-                            value.materialize_identity(&outcome)
-                        }
-                    })
-                    .collect();
-                Ok(RuntimeValue::List(Rc::new(elems), outcome))
+                Ok(RuntimeValue::List(Rc::new(flattened)))
             }
             Expression::FunctionCall { name, args } => {
                 let func = self
@@ -853,10 +807,9 @@ impl Evaluator {
                         });
                     }
                 };
-                Ok(RuntimeValue::List(
-                    Rc::new((start..=end).map(ElementValue::Int).collect()),
-                    ElementType::Int,
-                ))
+                Ok(RuntimeValue::List(Rc::new(
+                    (start..=end).map(ElementValue::Int).collect(),
+                )))
             }
         }?;
         let item_range = match &item.item {
@@ -865,11 +818,14 @@ impl Evaluator {
                 (start_expr.range.start, end_expr.range.end).into()
             }
         };
-        let outcome_type = base.outcome_type();
-        let elements = base
-            .to_list(repeat_count)
-            .map_err(|error| error.into_error(item_range, "flattening a pool into a sequence"))?;
-        Ok(RuntimeValue::List(Rc::new(elements), outcome_type))
+        let elements = base.to_list(repeat_count).map_err(|mismatch| {
+            mismatch.into_error(
+                item_range,
+                "flattening a pool into a sequence",
+                NonAdditiveSubject::Sequence(base.elements().len()),
+            )
+        })?;
+        Ok(RuntimeValue::List(Rc::new(elements)))
     }
 
     fn evaluate_function_call(
@@ -899,12 +855,10 @@ impl Evaluator {
         }
         for left_index in 0..args.len() {
             for right_index in left_index + 1..args.len() {
-                let samples_left = expected_types[left_index]
-                    .as_ref()
-                    .is_some_and(|expected| expected.shape != StaticType::Pool);
-                let samples_right = expected_types[right_index]
-                    .as_ref()
-                    .is_some_and(|expected| expected.shape != StaticType::Pool);
+                let samples_left =
+                    expected_types[left_index].is_some_and(|shape| shape != StaticType::Pool);
+                let samples_right =
+                    expected_types[right_index].is_some_and(|shape| shape != StaticType::Pool);
                 if samples_left
                     && samples_right
                     && same_pool(&args[left_index].value, &args[right_index].value)
@@ -921,27 +875,27 @@ impl Evaluator {
         let args = args
             .into_iter()
             .zip(expected_types.iter())
-            .map(|(arg, expected)| coerce_arg(arg.value, expected.as_ref(), arg.range))
+            .map(|(arg, expected)| coerce_arg(arg.value, *expected, arg.range))
             .collect::<Result<Vec<_>, _>>()?;
 
         // This vector will contain references to pools which match an int or list arguments. These
         // are the pools over which we need to iterate to get the argument values.
         let mut pools = Vec::new();
-        // Contains (index, is_element, outcome_type) for the corresponding pool.
+        // Contains (index, is_element) for the corresponding pool.
         let mut pool_iterator_info = Vec::new();
         for (i, (arg, expected_type)) in args.iter().zip(expected_types.iter()).enumerate() {
             let pool = match arg {
-                RuntimeValue::Pool(p, _) => Some(p),
+                RuntimeValue::Pool(p) => Some(p),
                 _ => None,
             };
-            if let (Some(p), Some(expected)) = (pool, expected_type) {
-                if !matches!(expected.shape, StaticType::Int | StaticType::List) {
+            if let (Some(p), Some(shape)) = (pool, expected_type) {
+                if !matches!(shape, StaticType::Int | StaticType::List) {
                     continue;
                 }
                 // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum,
                 // with outcomes of length 1.
                 pools.push(p);
-                pool_iterator_info.push((i, expected.shape == StaticType::Int, arg.outcome_type()));
+                pool_iterator_info.push((i, *shape == StaticType::Int));
             }
         }
 
@@ -956,16 +910,11 @@ impl Evaluator {
         let mut args = args.clone();
         let mut results = Vec::new();
         for (values, weight) in cross_product_iterator {
-            for ((i, is_element, outcome_type), value) in
-                pool_iterator_info.iter().zip(values.iter())
-            {
+            for ((i, is_element), value) in pool_iterator_info.iter().zip(values.iter()) {
                 if *is_element {
                     args[*i] = RuntimeValue::Element(value[0].clone());
                 } else {
-                    args[*i] = RuntimeValue::List(
-                        Rc::new(reverse_if(!self.lowest_first, value)),
-                        outcome_type.clone(),
-                    );
+                    args[*i] = RuntimeValue::List(Rc::new(reverse_if(!self.lowest_first, value)));
                 }
             }
             results.push((
@@ -974,55 +923,34 @@ impl Evaluator {
             ));
         }
 
+        // Each result becomes one distribution, and the distributions are
+        // mixed. Nothing requires the results to agree with each other: a call
+        // that returns a number for one multiset and a tuple for another
+        // produces a die that holds both, and it is displaying or summing that
+        // die which says they cannot be reconciled.
+        const COMBINING: &str = "combining the results of a function evaluated over a pool";
         let mut result_distributions = Vec::new();
-        let mut result_type: Option<ElementType> = None;
         for (result, weight) in results {
-            if let RuntimeValue::Pool(ref pool, _) = result {
+            if let RuntimeValue::Pool(ref pool) = result {
                 // The empty die is ignored in this context, but the empty list is not.
                 if pool.ordered_outcomes().is_empty() {
                     continue;
                 }
             }
-            let current_type = result.outcome_type();
-            merge_outcome_type(
-                &mut result_type,
-                current_type,
-                function.range,
-                OutcomeMismatchContext::FunctionResults,
-                None,
-                None,
-            )?;
-            match &result {
-                RuntimeValue::List(values, _) if !result.is_additive() && values.len() != 1 => {
-                    let witness = values
-                        .iter()
-                        .find(|value| !value.element_type().is_additive());
-                    return Err(RuntimeError::NonAdditiveSum(Box::new(
-                        NonAdditiveSumError {
-                            range: function.range.into(),
-                            action: "combining the results of a function evaluated over a pool",
-                            subject: NonAdditiveSubject::Sequence(values.len()),
-                            field: witness.and_then(non_numeric_field),
-                            witness: witness.cloned(),
-                        },
-                    )));
-                }
-                _ => {}
-            }
-            let summed = sum_pool(&result.to_pool(), &result.outcome_type()).map_err(|error| {
-                error.into_error(
+            let pool = result.to_pool().map_err(|mismatch| {
+                mismatch.into_error(
                     function.range,
-                    "combining the results of a function evaluated over a pool",
+                    COMBINING,
+                    NonAdditiveSubject::Sequence(result.elements().len()),
                 )
             })?;
+            let summed =
+                sum_pool(&pool).map_err(|error| error.into_error(function.range, COMBINING))?;
             result_distributions.push((weight, summed));
         }
-        let result_type = result_type.unwrap_or(ElementType::Int);
-        let result = RuntimeValue::Pool(
-            Rc::new(Pool::from_mixture(result_distributions)),
-            result_type.clone(),
-        );
-        Ok(result.materialize_identities(&result_type))
+        Ok(RuntimeValue::Pool(Rc::new(Pool::from_mixture(
+            result_distributions,
+        ))))
     }
 
     fn call_function(
@@ -1202,21 +1130,50 @@ fn rolls_dice(expression: &Expression) -> bool {
     }
 }
 
-/// Rejects an output whose outcomes disagree about what a field holds.
+/// Rejects an output whose outcomes cannot share one schema.
 ///
-/// A displayed distribution carries one schema per field position, so a field
-/// that is a number in one outcome and a symbol in another cannot be rendered.
-/// A distribution that is *all* symbols is an ordinary categorical output and
-/// is fine, which is why this reads the values: the outcome type only records
-/// whether everything is an `int`.
+/// A displayed distribution has one shape and one schema per field position, so
+/// this is the last chance to reject outcomes that do not agree on either — and
+/// the only one, since nothing on the way here required them to. Two things are
+/// rejected:
+///
+/// - outcomes of different *shapes*, a number in one and a tuple in another, or
+///   tuples of different arity. `{1, [tuple 1 2]}` is a perfectly good sequence
+///   that `print` will show; it just cannot be drawn as one distribution.
+/// - a field that is a number in one outcome and a symbol in another, which has
+///   no single way to be labelled. A field that is *all* symbols is an ordinary
+///   categorical output and is fine.
+///
+/// [`crate::output`] runs after evaluation and cannot report an error, so
+/// anything it would rather not meet has to be stopped here.
 fn reject_mixed_output_fields(
     outcomes: &[&ElementValue],
     range: ast::Range,
 ) -> Result<(), RuntimeError> {
-    let arity = match outcomes.first() {
-        Some(ElementValue::Tuple(fields)) => fields.len(),
-        _ => 1,
+    let shape_of = |outcome: &ElementValue| match outcome {
+        ElementValue::Tuple(fields) => Some(fields.len()),
+        _ => None,
     };
+    // The empty sum has no shape of its own — it takes the one around it — so
+    // it is not what settles the shape and never disagrees with it.
+    let shaped = |outcome: &&&ElementValue| !matches!(outcome, ElementValue::AdditiveIdentity);
+    let Some(first) = outcomes.iter().find(shaped) else {
+        return Ok(());
+    };
+    let shape = shape_of(first);
+    if let Some(other) = outcomes
+        .iter()
+        .filter(shaped)
+        .find(|outcome| shape_of(outcome) != shape)
+    {
+        return Err(RuntimeError::ShapeMismatch(Box::new(ShapeMismatchError {
+            range: range.into(),
+            action: "displaying a distribution",
+            first: (*first).clone(),
+            second: (*other).clone(),
+        })));
+    }
+    let arity = shape.unwrap_or(1);
     let mut seen = vec![(false, false); arity];
     for outcome in outcomes {
         let fields: &[ElementValue] = match outcome {
@@ -1264,111 +1221,46 @@ fn list_item_range(item: &ListItem) -> ast::Range {
     }
 }
 
-/// Widens `accumulated` to also describe `next`, or reports why it cannot.
+/// Converts an argument to the shape its parameter is declared with.
 ///
-/// `accumulated_range` and `next_range` name the expressions the two types came
-/// from, so the diagnostic can point at both; a caller that collects values
-/// with no source of their own passes `None`.
-fn merge_outcome_type(
-    accumulated: &mut Option<ElementType>,
-    next: ElementType,
-    range: ast::Range,
-    context: OutcomeMismatchContext,
-    accumulated_range: Option<ast::Range>,
-    next_range: Option<ast::Range>,
-) -> Result<(), RuntimeError> {
-    let merged = match accumulated.as_ref() {
-        None => next,
-        Some(current) => match current.merged_with(&next) {
-            Some(merged) => merged,
-            None => {
-                return Err(RuntimeError::OutcomeMismatch(Box::new(
-                    OutcomeMismatchError {
-                        range: range.into(),
-                        context,
-                        first: OutcomeConflict {
-                            outcome_type: current.clone(),
-                            range: accumulated_range.map(Into::into),
-                        },
-                        second: OutcomeConflict {
-                            outcome_type: next,
-                            range: next_range.map(Into::into),
-                        },
-                    },
-                )));
-            }
-        },
-    };
-    *accumulated = Some(merged);
-    Ok(())
-}
-
+/// Only the shape: `:n`, `:s` and `:d` say how a value arrives, never what it
+/// holds. The one conversion that can fail is summing, which a sequence or pool
+/// of values that cannot be added discovers here.
 fn coerce_arg(
-    mut arg: RuntimeValue,
-    expected: Option<&ResolvedArgType>,
+    arg: RuntimeValue,
+    expected: Option<StaticType>,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
     let Some(expected) = expected else {
         return Ok(arg);
     };
-    let mut actual_outcome = arg.outcome_type();
-    if let Some(required) = &expected.outcome {
-        if !actual_outcome.satisfies(required) {
-            return Err(RuntimeError::Semantic {
-                kind: SemanticErrorKind::OutcomeMismatch,
-                range: range.into(),
-                message: format!(
-                    "expected {}, found {}",
-                    required.display_name(),
-                    actual_outcome.display_name()
-                ),
-            });
-        }
-        arg = arg.materialize_identities(required);
-        actual_outcome = required.clone();
-    }
-    let coerced = match (arg, expected.shape) {
+    const SUMMING: &str = "passing a value to a parameter that expects a single value";
+    let coerced = match (arg, expected) {
         (value @ RuntimeValue::Element(_), StaticType::Int) => Ok(value),
         (RuntimeValue::Element(value), StaticType::List) => {
-            let outcome_type = value.element_type();
-            Ok(RuntimeValue::List(Rc::new(vec![value]), outcome_type))
+            Ok(RuntimeValue::List(Rc::new(vec![value])))
         }
         (RuntimeValue::Element(value), StaticType::Pool) => {
-            let outcome_type = value.element_type();
-            Ok(RuntimeValue::Pool(
-                Rc::new(Pool::from_list(1, vec![value])),
-                outcome_type,
-            ))
+            Ok(RuntimeValue::Pool(Rc::new(Pool::from_list(1, vec![value]))))
         }
-        (RuntimeValue::List(list, outcome_type), StaticType::Int)
-            if actual_outcome.is_additive() =>
-        {
-            Ok(RuntimeValue::Element(sum_elements(&list, &outcome_type)))
+        (RuntimeValue::List(list), StaticType::Int) => sum_elements(&list)
+            .map(RuntimeValue::Element)
+            .map_err(|mismatch| {
+                mismatch.into_error(range, SUMMING, NonAdditiveSubject::Sequence(list.len()))
+            }),
+        (value @ RuntimeValue::List(_), StaticType::List) => Ok(value),
+        (RuntimeValue::List(list), StaticType::Pool) => Ok(RuntimeValue::Pool(Rc::new(
+            Pool::from_list(1, (*list).clone()),
+        ))),
+        (RuntimeValue::Pool(pool), StaticType::Int) => {
+            let summed = sum_pool(&pool).map_err(|error| error.into_error(range, SUMMING))?;
+            Ok(RuntimeValue::Pool(Rc::new(summed)))
         }
-        (RuntimeValue::List(_, _), StaticType::Int) => Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::NonAdditiveValue,
-            range: range.into(),
-            message: "a non-additive sequence cannot be summed into a element".to_string(),
-        }),
-        (value @ RuntimeValue::List(_, _), StaticType::List) => Ok(value),
-        (RuntimeValue::List(list, outcome_type), StaticType::Pool) => Ok(RuntimeValue::Pool(
-            Rc::new(Pool::from_list(1, (*list).clone())),
-            outcome_type,
-        )),
-        (RuntimeValue::Pool(pool, outcome_type), StaticType::Int) => {
-            let summed = sum_pool(&pool, &outcome_type).map_err(|error| {
-                error.into_error(
-                    range,
-                    "passing a pool to a parameter that expects a single value",
-                )
-            })?;
-            Ok(RuntimeValue::Pool(Rc::new(summed), outcome_type))
-        }
-        (value @ RuntimeValue::Pool(_, _), _) => Ok(value),
+        (value @ RuntimeValue::Pool(_), _) => Ok(value),
     }?;
-    // Where an int is required and the empty sum is still unconstrained, it
-    // becomes the integer 0.
-    if expected.shape == StaticType::Int
+    // Where a single value is required and the empty sum has still met nothing
+    // to take its shape from, it becomes the integer 0.
+    if expected == StaticType::Int
         && matches!(
             coerced,
             RuntimeValue::Element(ElementValue::AdditiveIdentity)
@@ -1406,10 +1298,15 @@ fn interpolate_variable_names(
                 if valid_end {
                     result.push(']');
                 }
-            } else if let Some(mut value) = vars.get(&name) {
-                if matches!(value.outcome_type(), ElementType::AdditiveIdentity) {
-                    value = value.materialize_identities(&ElementType::Int);
-                }
+            } else if let Some(value) = vars.get(&name) {
+                // A name is prose, so the empty sum reads better as the `0` it
+                // stands for than as `𝑒`.
+                let value = match value {
+                    RuntimeValue::Element(ElementValue::AdditiveIdentity) => {
+                        RuntimeValue::Element(ElementValue::Int(0))
+                    }
+                    value => value,
+                };
                 result.push_str(&value.display(symbols).to_string());
             } else {
                 return Err(RuntimeError::UndefinedReference {
@@ -1435,7 +1332,7 @@ fn reverse_if<T: Clone>(should_reverse: bool, values: &[T]) -> Vec<T> {
 fn same_pool(left: &RuntimeValue, right: &RuntimeValue) -> bool {
     matches!(
         (left, right),
-        (RuntimeValue::Pool(left, _), RuntimeValue::Pool(right, _))
+        (RuntimeValue::Pool(left), RuntimeValue::Pool(right))
             if Rc::ptr_eq(left, right)
     )
 }
@@ -1452,7 +1349,7 @@ fn transform_depth_affects_result(identifier: &str, args: &[RuntimeValue]) -> bo
     if !bounded_by_depth.contains(&identifier) {
         return false;
     }
-    let Some(RuntimeValue::Pool(pool, _)) = args.first() else {
+    let Some(RuntimeValue::Pool(pool)) = args.first() else {
         return false;
     };
     if pool.ordered_outcomes().is_empty() {
@@ -1463,7 +1360,7 @@ fn transform_depth_affects_result(identifier: &str, args: &[RuntimeValue]) -> bo
         // every nonempty pool.
         return true;
     };
-    let RuntimeValue::List(condition, _) = condition else {
+    let RuntimeValue::List(condition) = condition else {
         return false;
     };
     pool.ordered_outcomes()
@@ -1554,10 +1451,6 @@ mod tests {
 
     #[test]
     fn additive_identity_becomes_zero_where_an_argument_must_be_an_int() {
-        let expected = ResolvedArgType {
-            shape: StaticType::Int,
-            outcome: None,
-        };
         let range = ast::Range { start: 0, end: 0 };
 
         for argument in [
@@ -1566,7 +1459,7 @@ mod tests {
             RuntimeValue::empty_list(),
         ] {
             assert_eq!(
-                coerce_arg(argument.clone(), Some(&expected), range).unwrap(),
+                coerce_arg(argument.clone(), Some(StaticType::Int), range).unwrap(),
                 RuntimeValue::Element(ElementValue::Int(0)),
                 "{:?}",
                 argument

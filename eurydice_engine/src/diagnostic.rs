@@ -6,12 +6,9 @@ use serde::Serialize;
 
 use crate::{
     ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
-    error::{
-        ArityMismatch, NonAdditiveSubject, OutcomeConflict, OutcomeMismatchContext, RuntimeError,
-        SemanticErrorKind,
-    },
+    error::{ArityMismatch, NonAdditiveSubject, RuntimeError, SemanticErrorKind},
     primitives::primitive_signature,
-    value::{ElementType, ElementValue, RuntimeValue, SymbolTable},
+    value::{ElementValue, RuntimeValue, SymbolTable},
 };
 
 /// Identifies one source submission within a stateful [`crate::Engine`].
@@ -137,63 +134,57 @@ fn describe_value(value: &RuntimeValue, symbols: &SymbolTable) -> String {
             format!("a `{}` value", symbols.set_of(*symbol).name)
         }
         RuntimeValue::Element(ElementValue::Tuple(_)) => "a tuple".to_string(),
-        RuntimeValue::List(values, outcome_type) => format!(
+        RuntimeValue::List(values) => format!(
             "a sequence of `{}` values",
-            describe_outcomes(values.iter(), outcome_type, symbols)
+            describe_outcomes(values.iter(), symbols)
         ),
-        RuntimeValue::Pool(pool, outcome_type) => format!(
+        RuntimeValue::Pool(pool) => format!(
             "a dice pool with `{}` outcomes",
             describe_outcomes(
                 pool.ordered_outcomes().iter().map(|(outcome, _)| outcome),
-                outcome_type,
                 symbols
             )
         ),
     }
 }
 
-/// Names a collection's outcome kinds for a diagnostic.
+/// Names the kinds of value a collection holds, read off the values.
 ///
-/// The outcome type only records whether every value is an `int`, so anything
-/// more specific — which declared sets a collection's symbols come from —
-/// is read back off the values themselves.
+/// Nothing records this anywhere, so a collection with no values has nothing to
+/// say about itself and reads as empty.
 fn describe_outcomes<'a>(
     values: impl IntoIterator<Item = &'a ElementValue>,
-    outcome_type: &ElementType,
-    symbols: &SymbolTable,
+    symbols: &'a SymbolTable,
 ) -> String {
-    if !matches!(outcome_type, ElementType::NotAllInt) {
-        return outcome_type.display_name();
-    }
-    let mut sets: Vec<&str> = Vec::new();
-    let mut has_int = false;
+    let mut kinds: Vec<&'a str> = Vec::new();
+    let push = |kinds: &mut Vec<&'a str>, kind: &'a str| {
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    };
     for value in values {
         match value {
-            ElementValue::Symbol(symbol) => {
-                let name = symbols.set_of(*symbol).name.as_str();
-                if !sets.contains(&name) {
-                    sets.push(name);
-                }
-            }
-            _ => has_int = true,
+            ElementValue::Symbol(symbol) => push(&mut kinds, symbols.set_of(*symbol).name.as_str()),
+            ElementValue::Tuple(_) => push(&mut kinds, "tuple"),
+            ElementValue::Int(_) | ElementValue::AdditiveIdentity => push(&mut kinds, "int"),
         }
     }
-    if has_int {
-        sets.insert(0, "int");
-    }
-    match sets.len() {
-        0 => outcome_type.display_name(),
-        _ => sets.join(" or "),
+    // Ints lead, so a mostly-numeric collection reads the way it did before
+    // symbols existed.
+    kinds.sort_by_key(|kind| *kind != "int");
+    match kinds.len() {
+        0 => "empty".to_string(),
+        _ => kinds.join(" or "),
     }
 }
 
-/// How a value is shaped, which is the only thing two outcomes of one
-/// collection can irreconcilably disagree about.
-fn shape_name(outcome_type: &ElementType) -> String {
-    match outcome_type {
-        ElementType::Tuple(fields) => format!("a tuple of {} fields", fields.len()),
-        ElementType::AdditiveIdentity | ElementType::Uninhabited => "the empty sum".to_string(),
-        ElementType::Int | ElementType::NotAllInt => "a single value".to_string(),
+/// How a value is shaped, which is the only thing two values an operation
+/// combines can irreconcilably disagree about.
+fn shape_name(value: &ElementValue) -> String {
+    match value {
+        ElementValue::Tuple(fields) => format!("a tuple of {} fields", fields.len()),
+        ElementValue::AdditiveIdentity => "the empty sum".to_string(),
+        ElementValue::Int(_) | ElementValue::Symbol(_) => "a single value".to_string(),
     }
 }
 
@@ -748,7 +739,7 @@ pub(crate) fn runtime_diagnostic(
                     symbols,
                 )],
             );
-            if matches!(value, RuntimeValue::Pool(_, _)) {
+            if matches!(value, RuntimeValue::Pool(_)) {
                 parts.help(
                     "A dice pool represents a distribution. Pass it through an `s` parameter to \
                      evaluate a function once for each possible roll.",
@@ -769,7 +760,7 @@ pub(crate) fn runtime_diagnostic(
                     symbols,
                 )],
             );
-            if matches!(value, RuntimeValue::Pool(_, _)) {
+            if matches!(value, RuntimeValue::Pool(_)) {
                 parts.help(
                     "To branch on each possible die result, put the condition in a function with \
                      an `n` parameter and pass the die to it.",
@@ -851,70 +842,41 @@ pub(crate) fn runtime_diagnostic(
             )],
         )
         .maybe_help(error.help.clone()),
-        RuntimeError::OutcomeMismatch(error) => {
-            let subject = match error.context {
-                OutcomeMismatchContext::SequenceLiteral => "A sequence",
-                OutcomeMismatchContext::FunctionResults => "A function evaluated over a pool",
-            };
-            let first = shape_name(&error.first.outcome_type);
-            let second = shape_name(&error.second.outcome_type);
-            let empty_sum = |conflict: &OutcomeConflict| conflict.outcome_type.is_empty_sum();
-            // Numbers and symbols mix freely, so the only irreconcilable
-            // difference is one of shape — or the empty sum, which takes the
-            // shape of whatever it is added to and so needs something addable.
-            let involves_empty_sum = empty_sum(&error.first) || empty_sum(&error.second);
-            let summary = if involves_empty_sum {
-                format!("{subject} cannot mix the empty sum with values that cannot be added")
-            } else {
-                format!("{subject} cannot mix {first} and {second}")
-            };
-            // Against the empty sum the shape is not the point — what matters
-            // is that the other value cannot be added at all.
-            let describe = |conflict: &OutcomeConflict, name: &str, settled: bool| match (
-                involves_empty_sum,
-                empty_sum(conflict),
-                settled,
-            ) {
-                (true, false, _) => "this cannot be added".to_string(),
-                (true, true, _) => "this is the empty sum".to_string(),
-                (false, _, true) => format!("this is {name}, which set the shape"),
-                (false, _, false) => format!("this is {name}"),
-            };
-            let labels = match (error.first.range, error.second.range) {
-                (Some(first_range), Some(second_range)) => vec![
-                    primary(&second_range, describe(&error.second, &second, false)),
-                    DiagnosticLabel {
-                        range: SourceRange {
-                            source: source_id,
-                            range: (&first_range).into(),
-                        },
-                        message: Some(describe(&error.first, &first, true)),
-                        style: LabelStyle::Secondary,
-                    },
-                ],
-                _ => vec![primary(
+        RuntimeError::ShapeMismatch(error) => {
+            let first = shape_name(&error.first);
+            let second = shape_name(&error.second);
+            let mut summary = format!("{first} and {second} cannot be combined");
+            summary[..1].make_ascii_uppercase();
+            DiagnosticParts::new(
+                "type.outcome_mismatch",
+                summary,
+                vec![primary(
                     &error.range,
-                    format!("one result is {first}, another is {second}"),
+                    format!(
+                        "{} needs them to line up, but `{}` is {first} and `{}` is {second}",
+                        error.action,
+                        error.first.display(symbols),
+                        error.second.display(symbols)
+                    ),
                 )],
-            };
-            DiagnosticParts::new("type.outcome_mismatch", summary, labels).help(
-                if involves_empty_sum {
-                    "The empty sum stands in for a value of whatever type it is added to, so it \
-                     can only share a collection with values that can be added."
-                } else {
-                    "Values sharing a sequence or a pool may be numbers or symbols, but they must \
-                     all be single values, or all tuples of the same size."
-                },
+            )
+            .help(
+                "Values may be numbers or symbols and still share a sequence or a pool, but an \
+                 operation that combines them needs them to be all single values, or all tuples \
+                 of the same size.",
             )
         }
         RuntimeError::NonAdditiveSum(error) => {
             let (subject, parts_of_it) = match error.subject {
                 NonAdditiveSubject::Pool(dimension) => {
-                    (format!("a pool of {dimension} dice"), "outcomes")
+                    (Some(format!("a pool of {dimension} dice")), "outcomes")
                 }
                 NonAdditiveSubject::Sequence(length) => {
-                    (format!("a sequence of {length} values"), "values")
+                    (Some(format!("a sequence of {length} values")), "values")
                 }
+                // No collection is involved, so the witness *is* the subject
+                // and the label alone carries it.
+                NonAdditiveSubject::Operand => (None, "values"),
             };
             let label = match (&error.witness, error.field) {
                 (Some(witness), Some(field)) => format!(
@@ -927,12 +889,16 @@ pub(crate) fn runtime_diagnostic(
                 ),
                 (None, _) => format!("these {parts_of_it} cannot be added together"),
             };
-            DiagnosticParts::new(
-                "type.non_additive_value",
-                format!(
+            let summary = match subject {
+                Some(subject) => format!(
                     "{} requires summing {subject}, but they cannot be added together",
                     error.action
                 ),
+                None => format!("{} requires numbers", error.action),
+            };
+            DiagnosticParts::new(
+                "type.non_additive_value",
+                summary,
                 vec![primary(&error.range, label)],
             )
             .help(match error.field {

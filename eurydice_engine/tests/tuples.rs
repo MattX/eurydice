@@ -72,8 +72,10 @@ fn rejects_invalid_tuple_operations() {
         "output [tuple 1 2] / 0",
         "output [tuple 2147483647 0] + [tuple 1 0]",
         "enum: RESULT { A } output [tuple 1 A] * 2",
+        // `0d6` has faces, so its sum is the `0` they are shaped like, and `0`
+        // is not a tuple. A die with *no* faces is a different matter: see
+        // `a_die_with_no_faces_is_the_identity_whatever_it_meets`.
         "output 0d6 + [tuple 1 2]",
-        "output 2d{1:0} + [tuple 1 2]",
         "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]}",
         // A tuple with an enum field is not additive, so summing it is an error
         // however the sum is reached.
@@ -84,6 +86,25 @@ fn rejects_invalid_tuple_operations() {
         assert!(
             diagnostic(program).is_some(),
             "expected error for {program}"
+        );
+    }
+}
+
+/// A die with no faces contributes nothing to a sum, so adding it to a tuple
+/// gives the tuple back — whichever way the faceless die was written.
+///
+/// This is the one place a die's faces do settle a shape: `0d6` has faces, so
+/// rolling none of them still yields the `0` they are shaped like, and `0` and
+/// a tuple cannot be added. With no faces at all there is nothing to take a
+/// shape from, and the empty sum takes the tuple's.
+#[test]
+fn a_die_with_no_faces_is_the_identity_whatever_it_meets() {
+    let (outputs, symbols) = run("output 2d{} + [tuple 1 2] output 2d{1:0} + [tuple 1 2]")
+        .expect("a die with no faces adds nothing");
+    for output in &outputs {
+        assert_eq!(
+            Distribution::from_runtime(output.value.clone(), None, &symbols).probabilities,
+            vec![(vec![1, 2], 1.0)]
         );
     }
 }

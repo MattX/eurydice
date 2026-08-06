@@ -5,12 +5,32 @@ use std::rc::Rc;
 use crate::{
     ast::{self, BinaryOp, UnaryOp, WithRange},
     dice::Pool,
-    error::{RuntimeError, SemanticErrorKind},
+    error::{NonAdditiveSubject, RuntimeError, SemanticErrorKind},
     value::{
-        ElementType, ElementValue, RuntimeValue, expect_int, materialize_comparable_pair,
-        sum_elements, sum_pool,
+        ElementMismatch, ElementOpError, ElementValue, PoolSumFailure, RuntimeValue, sum_elements,
+        sum_pool,
     },
 };
+
+/// Turns a failed element operation into a runtime error.
+///
+/// Arithmetic that overflowed is the operation's own fault and reads as a math
+/// error; values the operation is not defined for name the value at fault.
+fn op_error_at(range: ast::Range, action: &'static str) -> impl Fn(ElementOpError) -> RuntimeError {
+    move |error| match error {
+        ElementOpError::Math(message) => RuntimeError::MathError {
+            range: range.into(),
+            message,
+        },
+        ElementOpError::Mismatch(mismatch) => {
+            mismatch.into_error(range, action, NonAdditiveSubject::Operand)
+        }
+    }
+}
+
+fn op_error<T>(op: &WithRange<T>, action: &'static str) -> impl Fn(ElementOpError) -> RuntimeError {
+    op_error_at(op.range, action)
+}
 
 pub(crate) fn apply_unary_op(
     op: &WithRange<UnaryOp>,
@@ -18,21 +38,12 @@ pub(crate) fn apply_unary_op(
 ) -> Result<RuntimeValue, RuntimeError> {
     match op.value {
         UnaryOp::D => make_d(None, operand, op.range),
-        UnaryOp::Negate if !operand.is_additive() => Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::OperatorOperands,
-            range: op.range.into(),
-            message: format!("operator {} is not defined for this element type", op.value),
-        }),
-        UnaryOp::Invert if !operand.is_numeric_compatible() => Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::OperatorOperands,
-            range: op.range.into(),
-            message: format!("operator {} is not defined for this element type", op.value),
-        }),
-        UnaryOp::Negate => negate_value(operand).map_err(|message| RuntimeError::MathError {
-            range: op.range.into(),
-            message,
-        }),
-        UnaryOp::Invert => Ok(operand.map_numeric_outcomes(|o| if o == 0 { 1 } else { 0 })),
+        UnaryOp::Negate => negate_value(operand).map_err(op_error(op, "negating a value")),
+        UnaryOp::Invert => operand
+            .map_numeric_outcomes(|o| if o == 0 { 1 } else { 0 })
+            .map_err(|mismatch| {
+                mismatch.into_error(op.range, "inverting a value", NonAdditiveSubject::Operand)
+            }),
         UnaryOp::Length => Ok(match operand {
             RuntimeValue::Element(ElementValue::AdditiveIdentity) => 1.into(),
             RuntimeValue::Element(ElementValue::Int(i)) => i32::try_from(i.abs().to_string().len())
@@ -42,92 +53,51 @@ pub(crate) fn apply_unary_op(
             RuntimeValue::Element(ElementValue::Tuple(fields)) => i32::try_from(fields.len())
                 .expect("tuple length fits in i32")
                 .into(),
-            RuntimeValue::List(list, _) => i32::try_from(list.len())
+            RuntimeValue::List(list) => i32::try_from(list.len())
                 .expect("vector length fits in i32")
                 .into(),
-            RuntimeValue::Pool(d, _) => i32::try_from(d.dimension())
+            RuntimeValue::Pool(d) => i32::try_from(d.dimension())
                 .expect("vector length fits in i32")
                 .into(),
         }),
     }
 }
 
-fn negate_value(value: &RuntimeValue) -> Result<RuntimeValue, String> {
+fn negate_value(value: &RuntimeValue) -> Result<RuntimeValue, ElementOpError> {
     match value {
         RuntimeValue::Element(value) => Ok(RuntimeValue::Element(value.checked_neg()?)),
-        RuntimeValue::List(values, outcome_type) => Ok(RuntimeValue::Element(
-            sum_elements(values, outcome_type).checked_neg()?,
-        )),
-        RuntimeValue::Pool(pool, outcome_type) => Ok(RuntimeValue::Pool(
-            Rc::new(
-                (**pool)
-                    .clone()
-                    .try_map_outcomes(|outcome| outcome.checked_neg())?,
-            ),
-            outcome_type.clone(),
-        )),
+        RuntimeValue::List(values) => {
+            Ok(RuntimeValue::Element(sum_elements(values)?.checked_neg()?))
+        }
+        RuntimeValue::Pool(pool) => Ok(RuntimeValue::Pool(Rc::new(
+            (**pool)
+                .clone()
+                .try_map_outcomes(|outcome| outcome.checked_neg())?,
+        ))),
     }
 }
 
-fn math_result_type(op: BinaryOp, left: &ElementType, right: &ElementType) -> Option<ElementType> {
-    let left = left.summed_type();
-    let right = right.summed_type();
-    match op {
-        BinaryOp::Add | BinaryOp::Sub => left.merged_with(&right).filter(ElementType::is_additive),
-        BinaryOp::Mul
-            if matches!(left, ElementType::Tuple(_))
-                && left.is_additive()
-                && matches!(right, ElementType::Int | ElementType::AdditiveIdentity) =>
-        {
-            Some(left)
-        }
-        BinaryOp::Mul
-            if matches!(right, ElementType::Tuple(_))
-                && right.is_additive()
-                && matches!(left, ElementType::Int | ElementType::AdditiveIdentity) =>
-        {
-            Some(right)
-        }
-        BinaryOp::Mul
-            if matches!(left, ElementType::Int | ElementType::AdditiveIdentity)
-                && matches!(right, ElementType::Int | ElementType::AdditiveIdentity) =>
-        {
-            left.merged_with(&right)
-        }
-        BinaryOp::Div
-            if matches!(right, ElementType::Int | ElementType::AdditiveIdentity)
-                && left.is_additive() =>
-        {
-            Some(left)
-        }
-        BinaryOp::Pow | BinaryOp::Or | BinaryOp::And
-            if matches!(left, ElementType::Int | ElementType::AdditiveIdentity)
-                && matches!(right, ElementType::Int | ElementType::AdditiveIdentity) =>
-        {
-            Some(ElementType::Int)
-        }
-        _ => None,
-    }
+/// The integer an operand must be for the operators that only accept numbers.
+fn require_int(value: &ElementValue) -> Result<i32, ElementOpError> {
+    value
+        .as_int_or_identity()
+        .ok_or_else(|| ElementMismatch::not_numeric(value).into())
 }
 
 fn apply_element_math(
     op: BinaryOp,
     left: &ElementValue,
     right: &ElementValue,
-) -> Result<ElementValue, String> {
+) -> Result<ElementValue, ElementOpError> {
     match op {
         BinaryOp::Pow => {
-            let left = left.materialize_identity(&ElementType::Int);
-            let right = right.materialize_identity(&ElementType::Int);
-            let (ElementValue::Int(left), ElementValue::Int(right)) = (left, right) else {
-                unreachable!("power operands were type checked")
-            };
+            let (left, right) = (require_int(left)?, require_int(right)?);
             if right < 0 {
-                Err(format!("Cannot raise {} to negative power {}", left, right))
+                Err(format!("Cannot raise {} to negative power {}", left, right).into())
             } else {
                 left.checked_pow(right.unsigned_abs())
                     .map(ElementValue::Int)
-                    .ok_or_else(|| format!("Power overflow: {} ^ {}", left, right))
+                    .ok_or_else(|| format!("Power overflow: {} ^ {}", left, right).into())
             }
         }
         BinaryOp::Add => match (left, right) {
@@ -156,18 +126,16 @@ fn apply_element_math(
             | (ElementValue::Int(_), ElementValue::AdditiveIdentity) => {
                 Ok(ElementValue::AdditiveIdentity)
             }
-            (ElementValue::AdditiveIdentity, ElementValue::Tuple(_)) => Ok(right
-                .element_type()
+            // Scaling a tuple by the empty sum zeroes it, which needs the
+            // tuple's own shape and so fails if any field is not a number.
+            (ElementValue::AdditiveIdentity, tuple @ ElementValue::Tuple(_))
+            | (tuple @ ElementValue::Tuple(_), ElementValue::AdditiveIdentity) => tuple
                 .additive_identity()
-                .expect("additive tuple")),
-            (ElementValue::Tuple(_), ElementValue::AdditiveIdentity) => Ok(left
-                .element_type()
-                .additive_identity()
-                .expect("additive tuple")),
+                .ok_or_else(|| ElementMismatch::not_numeric(tuple).into()),
             (ElementValue::Int(left), ElementValue::Int(right)) => left
                 .checked_mul(*right)
                 .map(ElementValue::Int)
-                .ok_or_else(|| format!("Multiplication overflow: {} * {}", left, right)),
+                .ok_or_else(|| format!("Multiplication overflow: {} * {}", left, right).into()),
             (ElementValue::Tuple(_), ElementValue::Int(element)) => left.try_map_ints(&|value| {
                 value
                     .checked_mul(*element)
@@ -178,20 +146,19 @@ fn apply_element_math(
                     .checked_mul(value)
                     .ok_or_else(|| format!("Multiplication overflow: {} * {}", element, value))
             }),
-            _ => unreachable!("multiplication operands were type checked"),
+            // Two tuples have no product, and a symbol has none either.
+            (left, _) if !left.is_additive() => Err(ElementMismatch::not_numeric(left).into()),
+            (_, right) if !right.is_additive() => Err(ElementMismatch::not_numeric(right).into()),
+            (left, right) => Err(ElementMismatch::shapes(left, right).into()),
         },
         BinaryOp::Div => {
-            let divisor = right.materialize_identity(&ElementType::Int);
-            let ElementValue::Int(divisor) = divisor else {
-                unreachable!("division divisor was type checked")
-            };
+            let divisor = require_int(right)?;
             if divisor == 0 {
-                // The dividend is additive here, so it names itself without
-                // needing the symbol table to render it.
                 return Err(match left {
                     ElementValue::Int(value) => format!("Cannot divide {value} by zero"),
                     _ => "Cannot divide by zero".to_string(),
-                });
+                }
+                .into());
             }
             if matches!(left, ElementValue::AdditiveIdentity) {
                 return Ok(ElementValue::AdditiveIdentity);
@@ -203,11 +170,7 @@ fn apply_element_math(
             })
         }
         BinaryOp::Or | BinaryOp::And => {
-            let left = left.materialize_identity(&ElementType::Int);
-            let right = right.materialize_identity(&ElementType::Int);
-            let (ElementValue::Int(left), ElementValue::Int(right)) = (left, right) else {
-                unreachable!("logical operands were type checked")
-            };
+            let (left, right) = (require_int(left)?, require_int(right)?);
             let result = match op {
                 BinaryOp::Or => left != 0 || right != 0,
                 BinaryOp::And => left != 0 && right != 0,
@@ -224,34 +187,31 @@ fn apply_math_op(
     left: &RuntimeValue,
     right: &RuntimeValue,
 ) -> Result<RuntimeValue, RuntimeError> {
-    let result_type = math_result_type(op.value, &left.outcome_type(), &right.outcome_type())
-        .ok_or_else(|| RuntimeError::Semantic {
-            kind: SemanticErrorKind::OperatorOperands,
-            range: op.range.into(),
-            message: format!(
-                "operator {} is not defined for these element types",
-                op.value
-            ),
-        })?;
+    // A sequence is one value where it meets arithmetic, so it is summed
+    // first; a sequence that cannot be summed says so here, at its own values.
     let sum_sequence = |operand: &RuntimeValue| match operand {
-        RuntimeValue::List(values, outcome_type) => {
-            RuntimeValue::Element(sum_elements(values, outcome_type))
+        RuntimeValue::List(values) => {
+            sum_elements(values)
+                .map(RuntimeValue::Element)
+                .map_err(|mismatch| {
+                    mismatch.into_error(
+                        op.range,
+                        "this operator",
+                        NonAdditiveSubject::Sequence(values.len()),
+                    )
+                })
         }
-        _ => operand.clone(),
+        _ => Ok(operand.clone()),
     };
-    let left = sum_sequence(left);
-    let right = sum_sequence(right);
+    let left = sum_sequence(left)?;
+    let right = sum_sequence(right)?;
     broadcast_binary(
         &left,
         &right,
         |left, right| {
-            apply_element_math(op.value, left, right).map_err(|message| RuntimeError::MathError {
-                range: op.range.into(),
-                message,
-            })
+            apply_element_math(op.value, left, right).map_err(op_error(op, "this operator"))
         },
         |_, _| unreachable!("mathematical sequences are summed before broadcasting"),
-        result_type,
         op.range,
     )
 }
@@ -263,24 +223,10 @@ pub(crate) fn apply_binary_op(
     right: &RuntimeValue,
     lowest_first: bool,
 ) -> Result<RuntimeValue, RuntimeError> {
-    if matches!(
-        op.value,
-        BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
-    ) && (!left.is_numeric_compatible() || !right.is_numeric_compatible())
-    {
-        return Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::OperatorOperands,
-            range: op.range.into(),
-            message: format!(
-                "operator {} is not defined for these element types",
-                op.value
-            ),
-        });
-    }
     match &op.value {
         BinaryOp::D => make_d(Some(left), right, op.range),
         BinaryOp::At => {
-            if !left.is_numeric_compatible() {
+            if left.non_numeric().is_some() {
                 return Err(RuntimeError::Semantic {
                     kind: SemanticErrorKind::OperatorOperands,
                     range: op.range.into(),
@@ -288,12 +234,21 @@ pub(crate) fn apply_binary_op(
                 });
             }
             let left = match left {
-                RuntimeValue::Element(ElementValue::AdditiveIdentity) => Rc::new(vec![0]),
-                RuntimeValue::Element(ElementValue::Int(i)) => Rc::new(vec![*i]),
-                RuntimeValue::List(lst, _) => {
-                    Rc::new(lst.iter().map(expect_int).collect::<Vec<_>>())
-                }
-                RuntimeValue::Pool(_, _) => {
+                RuntimeValue::Element(value) => Rc::new(vec![
+                    value
+                        .as_int_or_identity()
+                        .expect("positions were checked to be numbers"),
+                ]),
+                RuntimeValue::List(lst) => Rc::new(
+                    lst.iter()
+                        .map(|value| {
+                            value
+                                .as_int_or_identity()
+                                .expect("positions were checked to be numbers")
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                RuntimeValue::Pool(_) => {
                     return Err(RuntimeError::InvalidArgumentToOperator {
                         operator_range: op.range.into(),
                         op: op.value,
@@ -302,19 +257,15 @@ pub(crate) fn apply_binary_op(
                         value: left.clone(),
                     });
                 }
-                RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
-                    unreachable!()
-                }
+            };
+            let sum_failed = |mismatch: ElementMismatch, len: usize| {
+                mismatch.into_error(
+                    op.range,
+                    "selecting several positions",
+                    NonAdditiveSubject::Sequence(len),
+                )
             };
             match right {
-                RuntimeValue::Element(ElementValue::AdditiveIdentity) => {
-                    Ok(RuntimeValue::Element(select_positions(
-                        &left,
-                        &[ElementValue::Int(0)],
-                        &ElementType::Int,
-                        lowest_first,
-                    )))
-                }
                 RuntimeValue::Element(ElementValue::Int(i)) => {
                     let digits = i
                         .abs()
@@ -328,33 +279,18 @@ pub(crate) fn apply_binary_op(
                             )
                         })
                         .collect::<Vec<_>>();
-                    Ok(RuntimeValue::Element(select_positions(
-                        &left,
-                        &digits,
-                        &ElementType::Int,
-                        lowest_first,
-                    )))
+                    select_positions(&left, &digits, lowest_first)
+                        .map(RuntimeValue::Element)
+                        .map_err(|mismatch| sum_failed(mismatch, digits.len()))
                 }
-                RuntimeValue::List(lst, outcome_type) if right.is_additive() => Ok(
-                    RuntimeValue::Element(select_positions(&left, lst, outcome_type, false)),
-                ),
-                RuntimeValue::Pool(p, outcome_type) if right.is_additive() => {
-                    Ok(RuntimeValue::Pool(
-                        Rc::new(select_in_dice(&left, p, outcome_type, lowest_first)),
-                        outcome_type.clone(),
-                    ))
+                RuntimeValue::Element(ElementValue::AdditiveIdentity) => {
+                    select_positions(&left, &[ElementValue::Int(0)], lowest_first)
+                        .map(RuntimeValue::Element)
+                        .map_err(|mismatch| sum_failed(mismatch, 1))
                 }
-                RuntimeValue::List(lst, _) => {
-                    if left.len() != 1 {
-                        return Err(RuntimeError::Semantic {
-                            kind: SemanticErrorKind::NonAdditiveValue,
-                            range: op.range.into(),
-                            message:
-                                "selecting multiple non-additive positions would require summing \
-                                 their values"
-                                    .to_string(),
-                        });
-                    }
+                // One position needs no addition, so it can pick out a value
+                // that could never have been summed with anything.
+                RuntimeValue::List(lst) if left.len() == 1 => {
                     let index = left[0];
                     if index < 1 || index > i32::try_from(lst.len()).unwrap_or(i32::MAX) {
                         return Err(RuntimeError::Semantic {
@@ -367,12 +303,25 @@ pub(crate) fn apply_binary_op(
                         lst[usize::try_from(index - 1).unwrap()].clone(),
                     ))
                 }
-                RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_))
-                | RuntimeValue::Pool(_, _) => Err(RuntimeError::Semantic {
-                    kind: SemanticErrorKind::OperatorOperands,
-                    range: op.range.into(),
-                    message: "positional selection is not defined for this value".to_string(),
-                }),
+                RuntimeValue::List(lst) => select_positions(&left, lst, false)
+                    .map(RuntimeValue::Element)
+                    .map_err(|mismatch| sum_failed(mismatch, lst.len())),
+                RuntimeValue::Pool(p) => select_in_dice(&left, p, lowest_first)
+                    .map(|pool| RuntimeValue::Pool(Rc::new(pool)))
+                    .map_err(|mismatch| {
+                        mismatch.into_error(
+                            op.range,
+                            "selecting several positions",
+                            NonAdditiveSubject::Pool(p.dimension()),
+                        )
+                    }),
+                RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
+                    Err(RuntimeError::Semantic {
+                        kind: SemanticErrorKind::OperatorOperands,
+                        range: op.range.into(),
+                        message: "positional selection is not defined for this value".to_string(),
+                    })
+                }
             }
         }
         BinaryOp::Pow
@@ -415,17 +364,16 @@ pub(crate) fn apply_binary_op(
     }
 }
 
+/// Sums the values at `indices`, seeded with the identity so the first one
+/// selected settles the shape. Out-of-range indices select nothing.
 fn select_positions(
     indices: &[i32],
     values: &[ElementValue],
-    outcome_type: &ElementType,
     lowest_first: bool,
-) -> ElementValue {
-    indices.iter().fold(
-        outcome_type
-            .additive_identity()
-            .expect("position selection requires additive outcomes"),
-        |sum, &index| {
+) -> Result<ElementValue, ElementMismatch> {
+    indices
+        .iter()
+        .try_fold(ElementValue::AdditiveIdentity, |sum, &index| {
             let selected = index
                 .checked_sub(1)
                 .and_then(|index| usize::try_from(index).ok())
@@ -438,17 +386,18 @@ fn select_positions(
                     }
                 })
                 .and_then(|index| values.get(index));
-            selected.map_or(sum.clone(), |value| sum.add_scaled(value, 1))
-        },
-    )
+            match selected {
+                Some(value) => sum.add_scaled(value, 1),
+                None => Ok(sum),
+            }
+        })
 }
 
 fn select_in_dice(
     indices: &[i32],
     pool: &Pool<ElementValue>,
-    outcome_type: &ElementType,
     lowest_first: bool,
-) -> Pool<ElementValue> {
+) -> Result<Pool<ElementValue>, ElementMismatch> {
     let dimension = usize::try_from(pool.dimension()).expect("usize is at least 32 bits");
     let mut keep_list = vec![false; dimension];
     for &index in indices {
@@ -463,11 +412,9 @@ fn select_in_dice(
         };
         keep_list[index] = true;
     }
-    pool.sum_with_keep_list_by(
+    pool.try_sum_with_keep_list_by(
         &keep_list,
-        outcome_type
-            .additive_identity()
-            .expect("position selection requires additive outcomes"),
+        ElementValue::AdditiveIdentity,
         ElementValue::add_scaled,
     )
 }
@@ -483,37 +430,55 @@ fn broadcast_binary(
     right: &RuntimeValue,
     element_op: impl Fn(&ElementValue, &ElementValue) -> Result<ElementValue, RuntimeError>,
     list_list_op: impl Fn(&[ElementValue], &[ElementValue]) -> Result<ElementValue, RuntimeError>,
-    result_type: ElementType,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
+    // Broadcasting over a sequence sums the results, so the results have to be
+    // summable; that is discovered here rather than predicted beforehand.
+    let sum_results = |results: &[ElementValue]| {
+        sum_elements(results).map_err(|mismatch| {
+            mismatch.into_error(
+                range,
+                "combining the results of an operator over a sequence",
+                NonAdditiveSubject::Sequence(results.len()),
+            )
+        })
+    };
     match (left, right) {
         (RuntimeValue::Element(left), RuntimeValue::Element(right)) => {
             return Ok(RuntimeValue::Element(element_op(left, right)?));
         }
-        (RuntimeValue::List(left, _), RuntimeValue::List(right, _)) => {
+        (RuntimeValue::List(left), RuntimeValue::List(right)) => {
             return Ok(RuntimeValue::Element(list_list_op(left, right)?));
         }
-        (RuntimeValue::List(left, _), RuntimeValue::Element(right)) => {
+        (RuntimeValue::List(left), RuntimeValue::Element(right)) => {
             let results = left
                 .iter()
                 .map(|left| element_op(left, right))
                 .collect::<Result<Vec<_>, _>>()?;
-            return Ok(RuntimeValue::Element(sum_elements(&results, &result_type)));
+            return Ok(RuntimeValue::Element(sum_results(&results)?));
         }
-        (RuntimeValue::Element(left), RuntimeValue::List(right, _)) => {
+        (RuntimeValue::Element(left), RuntimeValue::List(right)) => {
             let results = right
                 .iter()
                 .map(|right| element_op(left, right))
                 .collect::<Result<Vec<_>, _>>()?;
-            return Ok(RuntimeValue::Element(sum_elements(&results, &result_type)));
+            return Ok(RuntimeValue::Element(sum_results(&results)?));
         }
-        (RuntimeValue::Pool(_, _), _) | (_, RuntimeValue::Pool(_, _)) => {}
+        (RuntimeValue::Pool(_), _) | (_, RuntimeValue::Pool(_)) => {}
     }
 
-    let left_pool = sum_pool(&left.to_pool(), &left.outcome_type())
-        .map_err(|error| error.into_error(range, "comparing pools"))?;
-    let right_pool = sum_pool(&right.to_pool(), &right.outcome_type())
-        .map_err(|error| error.into_error(range, "comparing pools"))?;
+    let to_summed_pool = |value: &RuntimeValue| {
+        let pool = value.to_pool().map_err(|mismatch| {
+            mismatch.into_error(
+                range,
+                "comparing pools",
+                NonAdditiveSubject::Sequence(value.elements().len()),
+            )
+        })?;
+        sum_pool(&pool).map_err(|error| error.into_error(range, "comparing pools"))
+    };
+    let left_pool = to_summed_pool(left)?;
+    let right_pool = to_summed_pool(right)?;
     let components = left_pool
         .ordered_outcomes()
         .iter()
@@ -525,10 +490,7 @@ fn broadcast_binary(
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
 
-    Ok(RuntimeValue::Pool(
-        Rc::new(Pool::from_mixture(components)),
-        result_type,
-    ))
+    Ok(RuntimeValue::Pool(Rc::new(Pool::from_mixture(components))))
 }
 
 fn comp_binary_op(
@@ -538,24 +500,28 @@ fn comp_binary_op(
     list_comp: impl Fn(&[i32], &[i32]) -> i32,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
-    let left = left.materialize_identities(&ElementType::Int);
-    let right = right.materialize_identities(&ElementType::Int);
+    // Ordering is only defined on numbers, so each value is asked for one as it
+    // is reached.
+    let number = |value: &ElementValue| {
+        value
+            .as_int_or_identity()
+            .ok_or_else(|| ElementMismatch::not_numeric(value))
+            .map_err(|mismatch| {
+                mismatch.into_error(range, "comparing values", NonAdditiveSubject::Operand)
+            })
+    };
+    let numbers =
+        |values: &[ElementValue]| values.iter().map(number).collect::<Result<Vec<_>, _>>();
     broadcast_binary(
-        &left,
-        &right,
-        |left, right| {
-            Ok(ElementValue::Int(int_comp(
-                expect_int(left),
-                expect_int(right),
-            )))
-        },
+        left,
+        right,
+        |left, right| Ok(ElementValue::Int(int_comp(number(left)?, number(right)?))),
         |left, right| {
             Ok(ElementValue::Int(list_comp(
-                &left.iter().map(expect_int).collect::<Vec<_>>(),
-                &right.iter().map(expect_int).collect::<Vec<_>>(),
+                &numbers(left)?,
+                &numbers(right)?,
             )))
         },
-        ElementType::Int,
         range,
     )
 }
@@ -566,14 +532,25 @@ fn equality_binary_op(
     equal: bool,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
-    let (left, right) = materialize_comparable_pair(left, right);
-    let compare = |a: &ElementValue, b: &ElementValue| i32::from((a == b) == equal);
+    // Equality is total: values of different kinds are simply never equal, so
+    // nothing here can fail. The empty sum is the one value that compares
+    // across shapes, standing for the zero of whatever it is held against.
+    let compare =
+        |a: &ElementValue, b: &ElementValue| i32::from(a.equals_with_identity(b) == equal);
     broadcast_binary(
-        &left,
-        &right,
+        left,
+        right,
         |left, right| Ok(ElementValue::Int(compare(left, right))),
-        |left, right| Ok(ElementValue::Int(i32::from((left == right) == equal))),
-        ElementType::Int,
+        |left, right| {
+            Ok(ElementValue::Int(i32::from(
+                (left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right.iter())
+                        .all(|(left, right)| left.equals_with_identity(right)))
+                    == equal,
+            )))
+        },
         range,
     )
 }
@@ -588,19 +565,27 @@ enum DRightSide {
     Pool(Rc<Pool<ElementValue>>),
 }
 
-fn normalize_dice_count(arg: &RuntimeValue) -> DiceCount {
+/// A dice count must be a number; this is where one that is not says so.
+fn normalize_dice_count(arg: &RuntimeValue) -> Result<DiceCount, ElementMismatch> {
+    let number = |value: &ElementValue| {
+        value
+            .as_int_or_identity()
+            .ok_or_else(|| ElementMismatch::not_numeric(value))
+    };
     match arg {
-        RuntimeValue::Element(ElementValue::AdditiveIdentity) => DiceCount::Int(0),
-        RuntimeValue::Element(ElementValue::Int(i)) => DiceCount::Int(*i),
-        RuntimeValue::List(list, _) => DiceCount::Int(list.iter().map(expect_int).sum()),
-        RuntimeValue::Pool(pool, _) => DiceCount::Pool(Rc::new(
+        RuntimeValue::Element(value) => Ok(DiceCount::Int(number(value)?)),
+        RuntimeValue::List(list) => Ok(DiceCount::Int(
+            list.iter()
+                .map(number)
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .sum(),
+        )),
+        RuntimeValue::Pool(pool) => Ok(DiceCount::Pool(Rc::new(
             (**pool)
                 .clone()
-                .map_outcomes(|outcome| expect_int(&outcome)),
-        )),
-        RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
-            unreachable!("non-numeric values are rejected before numeric operations")
-        }
+                .try_map_outcomes(|outcome| number(&outcome))?,
+        ))),
     }
 }
 
@@ -610,15 +595,16 @@ fn make_d(
     right: &RuntimeValue,
     range: ast::Range,
 ) -> Result<RuntimeValue, RuntimeError> {
-    if left.is_some_and(|value| !value.is_numeric_compatible()) {
-        return Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::OperatorOperands,
-            range: range.into(),
-            message: "only numeric values can be used as dice counts".to_string(),
-        });
-    }
-    let repeat = left.map_or(DiceCount::Int(1), normalize_dice_count);
-    let outcome_type = right.outcome_type();
+    let repeat = match left {
+        Some(left) => normalize_dice_count(left).map_err(|mismatch| {
+            mismatch.into_error(
+                range,
+                "using a value as a dice count",
+                NonAdditiveSubject::Sequence(left.elements().len()),
+            )
+        })?,
+        None => DiceCount::Int(1),
+    };
     let right = match right {
         RuntimeValue::Element(ElementValue::AdditiveIdentity) => {
             DRightSide::List(vec![ElementValue::Int(0)])
@@ -632,8 +618,8 @@ fn make_d(
                 DRightSide::List((*sides..=-1).map(ElementValue::Int).collect())
             }
         }
-        RuntimeValue::List(list, _) => DRightSide::List((**list).clone()),
-        RuntimeValue::Pool(d, _) => DRightSide::Pool(Rc::clone(d)),
+        RuntimeValue::List(list) => DRightSide::List((**list).clone()),
+        RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
         RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
             return Err(RuntimeError::Semantic {
                 kind: SemanticErrorKind::OperatorOperands,
@@ -643,52 +629,28 @@ fn make_d(
             });
         }
     };
-    // A negative dice count negates every face, which non-additive outcomes cannot do.
-    // Checked here so the `checked_neg` calls below stay total. For a pool dice count
-    // this tests faces rather than sums, which is conservative but has no false
-    // negatives: a negative sum implies a negative face.
-    let negates = match &repeat {
-        DiceCount::Int(i) => *i < 0,
-        DiceCount::Pool(p) => p.ordered_outcomes().iter().any(|(count, _)| *count < 0),
-    };
-    if negates && !outcome_type.is_additive() {
-        return Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::NonAdditiveValue,
-            range: range.into(),
-            message: format!(
-                "a negative dice count negates the outcomes, which {} values do not support",
-                outcome_type.display_name()
-            ),
-        });
-    }
+    // A negative dice count negates every face; a face that cannot be negated
+    // says so from inside `checked_neg`, rather than being predicted here.
+    let negate = |mismatch: ElementOpError| op_error_at(range, "negating a die's faces")(mismatch);
     let result: RuntimeValue = match (repeat, right) {
-        (DiceCount::Int(i), DRightSide::List(list)) => RuntimeValue::Pool(
-            Rc::new(
-                make_pool(i, list).map_err(|message| RuntimeError::MathError {
-                    range: range.into(),
-                    message,
-                })?,
-            ),
-            outcome_type.clone(),
-        ),
+        (DiceCount::Int(i), DRightSide::List(list)) => {
+            RuntimeValue::Pool(Rc::new(make_pool(i, list).map_err(negate)?))
+        }
         (DiceCount::Int(i), DRightSide::Pool(p)) => {
             let mut new_pool = (*p).clone();
             if i < 0 {
                 new_pool = new_pool
                     .try_map_outcomes(|outcome| outcome.checked_neg())
-                    .map_err(|message| RuntimeError::MathError {
-                        range: range.into(),
-                        message,
-                    })?;
+                    .map_err(negate)?;
             }
             new_pool.set_dimension(new_pool.dimension() * i.unsigned_abs());
-            RuntimeValue::Pool(Rc::new(new_pool), outcome_type.clone())
+            RuntimeValue::Pool(Rc::new(new_pool))
         }
         (DiceCount::Pool(left_p), right) => {
             let left_p = (*left_p).sum();
             let right = match right {
                 DRightSide::List(list) => Pool::from_list(1, list),
-                DRightSide::Pool(p) => sum_pool(&p, &outcome_type).map_err(|error| {
+                DRightSide::Pool(p) => sum_pool(&p).map_err(|error| {
                     error.into_error(range, "rolling a variable number of dice")
                 })?,
             };
@@ -701,67 +663,44 @@ fn make_d(
                     right
                         .clone()
                         .try_map_outcomes(|outcome| outcome.checked_neg())
-                        .map_err(|message| RuntimeError::MathError {
-                            range: range.into(),
-                            message,
-                        })?,
+                        .map_err(negate)?,
                 )
             } else {
                 None
             };
-            // `flat_map` sums each duplicated pool, and its closure cannot fail, so
-            // check up front that every multiplier leaves a summable dimension. The
-            // guard above already rejected negative multipliers for these outcomes.
-            let unsummable = (!outcome_type.is_additive() && !right.ordered_outcomes().is_empty())
-                .then(|| {
-                    left_p
-                        .ordered_outcomes()
-                        .iter()
-                        .find(|(multiplier, _)| multiplier.unsigned_abs() != 1)
-                })
-                .flatten();
-            if let Some((multiplier, _)) = unsummable {
-                return Err(RuntimeError::Semantic {
-                    kind: SemanticErrorKind::NonAdditiveValue,
-                    range: range.into(),
-                    message: format!(
-                        "rolling {multiplier} dice requires summing them, and {} outcomes \
-                         cannot be added together",
-                        outcome_type.display_name()
-                    ),
-                });
-            }
-            // At this point both |left_p| and |right| have a count of 1.
-            // For each outcome in the left pool, sum the right pool with itself k times
-            RuntimeValue::Pool(
-                Rc::new(left_p.flat_map(|count| {
-                    debug_assert_eq!(
-                        count.len(),
-                        1,
-                        "summed distribution has count of {}",
-                        count.len()
-                    );
-                    let multiplier = count[0];
-                    let mut dup_right = if multiplier < 0 {
-                        negated_right
-                            .clone()
-                            .expect("negative outcomes have a negated right-hand pool")
-                    } else {
-                        right.clone()
-                    };
-                    dup_right.set_dimension(dup_right.dimension() * multiplier.unsigned_abs());
-                    sum_pool(&dup_right, &outcome_type)
-                        .expect("summable dimensions were checked above")
-                        .into()
-                })),
-                outcome_type.clone(),
-            )
+            // Each multiplier duplicates the right-hand pool and sums it, so a
+            // face that cannot be added stops the walk at the first multiplier
+            // that needs more than one die.
+            RuntimeValue::Pool(Rc::new(
+                left_p
+                    .try_flat_map(|count| {
+                        debug_assert_eq!(
+                            count.len(),
+                            1,
+                            "summed distribution has count of {}",
+                            count.len()
+                        );
+                        let multiplier = count[0];
+                        let mut dup_right = if multiplier < 0 {
+                            negated_right
+                                .clone()
+                                .expect("negative outcomes have a negated right-hand pool")
+                        } else {
+                            right.clone()
+                        };
+                        dup_right.set_dimension(dup_right.dimension() * multiplier.unsigned_abs());
+                        Ok(sum_pool(&dup_right)?.into())
+                    })
+                    .map_err(|error: PoolSumFailure| {
+                        error.into_error(range, "rolling a variable number of dice")
+                    })?,
+            ))
         }
     };
     Ok(result)
 }
 
-fn make_pool(n: i32, sides: Vec<ElementValue>) -> Result<Pool<ElementValue>, String> {
+fn make_pool(n: i32, sides: Vec<ElementValue>) -> Result<Pool<ElementValue>, ElementOpError> {
     let sides = if n < 0 {
         sides
             .into_iter()

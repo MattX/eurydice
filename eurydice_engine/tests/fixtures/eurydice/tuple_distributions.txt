@@ -28,6 +28,8 @@ output A + B named "added tuple dice"
 output 0d{[tuple 1 2], [tuple 3 4]} named "zero tuple dice"
 output -2d{[tuple 1 0], [tuple 0 1]} named "negative tuple dice"
 
+\\\ A die with no faces has no values, and so nothing to say it would have
+\\\ produced tuples: it renders as one empty field rather than two.
 output d{[tuple 5 6]:0} named "typed empty tuple"
 
 EMPTY: 2d{}
@@ -89,7 +91,7 @@ output [maybe tuple d{0, 1}] named "merged identity and tuple"
 0,-2,25
 
 "typed empty tuple"
-#,#,%
+#,%
 
 "left identities"
 #,#,%

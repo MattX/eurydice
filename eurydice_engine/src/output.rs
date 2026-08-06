@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::fmt::Write;
 
 use crate::dice::Pool;
-use crate::eval::{ElementType, ElementValue, RuntimeValue, SymbolTable, sum_pool};
+use crate::eval::{ElementValue, RuntimeValue, SymbolTable, sum_pool};
 use crate::value::display_requires_summing;
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,26 +39,19 @@ impl Distribution {
         symbols: &SymbolTable,
     ) -> Self {
         match value {
-            RuntimeValue::Element(value) => {
-                let outcome_type = value.element_type();
-                pool_output(
-                    &Pool::from_list(1, vec![value]),
-                    &outcome_type,
-                    false,
-                    field_names,
-                    symbols,
-                )
-            }
-            RuntimeValue::List(values, outcome_type) => pool_output(
-                &Pool::from_list(1, values.to_vec()),
-                &outcome_type,
+            RuntimeValue::Element(value) => pool_output(
+                &Pool::from_list(1, vec![value]),
                 false,
                 field_names,
                 symbols,
             ),
-            RuntimeValue::Pool(pool, outcome_type) => {
-                pool_output(&pool, &outcome_type, true, field_names, symbols)
-            }
+            RuntimeValue::List(values) => pool_output(
+                &Pool::from_list(1, values.to_vec()),
+                false,
+                field_names,
+                symbols,
+            ),
+            RuntimeValue::Pool(pool) => pool_output(&pool, true, field_names, symbols),
         }
     }
 }
@@ -160,27 +153,38 @@ fn field_renders(
         .collect()
 }
 
+/// Renders a distribution, whose outcomes the evaluator has already checked
+/// share one shape — see `reject_mixed_output_fields`. That is what lets the
+/// first outcome speak for the arity, and what keeps `FieldRender` total.
 fn pool_output(
     pool: &Pool<ElementValue>,
-    outcome_type: &ElementType,
     sum: bool,
     field_names: Option<Vec<String>>,
     symbols: &SymbolTable,
 ) -> Distribution {
     let pool = if sum && display_requires_summing(pool) {
-        sum_pool(pool, outcome_type).expect("output values are checked by the evaluator")
+        sum_pool(pool).expect("output values are checked by the evaluator")
     } else {
         pool.clone()
     };
-    let unresolved = outcome_type.is_empty_sum();
-    let outcome_type = outcome_type.defaulted();
-    let pool = if unresolved {
-        pool.map_outcomes(|value| value.materialize_identity(&outcome_type))
-    } else {
-        pool
+    // The empty sum has no shape, so the shape comes from an outcome that does;
+    // the evaluator has already checked they all agree on it. Giving the
+    // identity that shape here is what lets one die of tuples and one truncated
+    // recursion share a distribution.
+    let shape = pool
+        .ordered_outcomes()
+        .iter()
+        .map(|(outcome, _)| outcome)
+        .find(|outcome| !matches!(outcome, ElementValue::AdditiveIdentity))
+        .cloned();
+    let pool = match &shape {
+        Some(shape) => pool.map_outcomes(|outcome| outcome.materialize_identity_like(shape)),
+        None => pool,
     };
-    let arity = match &outcome_type {
-        ElementType::Tuple(field_types) => field_types.len(),
+    let is_tuple = matches!(shape, Some(ElementValue::Tuple(_)));
+    let arity = match &shape {
+        Some(ElementValue::Tuple(fields)) => fields.len(),
+        // Nothing but empty sums, or no outcomes at all: a single int field.
         _ => 1,
     };
     let renders = field_renders(pool.ordered_outcomes(), arity, symbols);
@@ -189,11 +193,7 @@ fn pool_output(
             .iter()
             .map(|render| render.schema(symbols))
             .collect(),
-        field_names: if matches!(outcome_type, ElementType::Tuple(_)) {
-            field_names
-        } else {
-            None
-        },
+        field_names: if is_tuple { field_names } else { None },
         probabilities: to_probabilities_generic(pool.ordered_outcomes())
             .into_iter()
             .map(|(value, probability)| {

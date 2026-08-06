@@ -53,6 +53,41 @@ fn error(program: &str) -> EngineDiagnostic {
 /// The die this feature exists for, declared as a list and as a pool.
 const DIE: &str = "enum: SPECIAL { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
 
+/// Nothing inspects a sequence until an operation needs to. A thousand-element
+/// sequence with one symbol near the end is built without complaint, and it is
+/// summing it that fails — naming the value that could not be added, not the
+/// sequence that held it.
+#[test]
+fn a_long_sequence_fails_at_the_value_that_cannot_be_added() {
+    let program = "enum: R { ODD_ONE_OUT } SEQ: {1..998, ODD_ONE_OUT, 1000}";
+
+    // Building and inspecting it is fine, and it really is 1000 long.
+    assert_eq!(
+        probabilities(&format!("{program} output #SEQ")),
+        vec![vec![(vec![1000], 1.0f64)]]
+    );
+
+    // Summing it is not, and the error names the element at fault rather than
+    // stopping at the literal that holds it.
+    for summing in [
+        format!("{program} output SEQ + 0"),
+        format!("{program} function: total S:n {{ result: S }} output [total SEQ]"),
+    ] {
+        let diagnostic = error(&summing);
+        assert_eq!(diagnostic.code, "type.non_additive_value", "{summing}");
+        assert!(
+            diagnostic.summary.contains("a sequence of 1000 values"),
+            "{}",
+            diagnostic.summary
+        );
+        assert_eq!(
+            diagnostic.labels[0].message.as_deref(),
+            Some("values like `ODD_ONE_OUT` are not numbers"),
+            "{summing}"
+        );
+    }
+}
+
 #[test]
 fn lists_and_pools_can_mix_numbers_and_symbols() {
     // Six equally likely faces, three of which contribute nothing to a sum.
@@ -188,10 +223,20 @@ fn tuples_carry_a_mixed_field_through_construction_and_projection() {
     assert!(error.contains("field 1 of this distribution"), "{error}");
 }
 
-/// Unions stop at the scalar level: nothing reconciles a scalar with a tuple,
-/// or two tuple arities, and there is no way to take such a value apart.
+/// A sequence holds whatever it was written with. Mixing a scalar and a tuple
+/// is only a problem for an operation that has to combine them — and the two
+/// that always do are summing and displaying.
 #[test]
-fn shapes_do_not_mix() {
+fn shapes_mix_freely_until_something_has_to_combine_them() {
+    // Building one is fine, and `print` shows it as it is.
+    for program in [
+        "X: {1, [tuple 1 2]} print X",
+        "X: {[tuple 1 2], [tuple 1 2 3]} print X",
+        "enum: R { A } X: {A, [tuple 1 2]} print X",
+    ] {
+        assert!(run(program).is_ok(), "{program}");
+    }
+
     for program in [
         "output {1, [tuple 1 2]}",
         "output {[tuple 1 2], [tuple 1 2 3]}",
@@ -199,69 +244,60 @@ fn shapes_do_not_mix() {
         "output d{1, [tuple 1 2]}",
         "function: f X:n { if X { result: 1 } result: [tuple 1 2] } output [f d{0, 1}]",
     ] {
-        // The wording depends on where the two shapes met; the code does not.
+        // The wording depends on what had to combine them; the code does not.
         assert_eq!(error(program).code, "type.outcome_mismatch", "{program}");
     }
 }
 
-/// The shapes that could not be reconciled are named, and both the element
-/// that set the shape and the one that broke it are pointed at.
+/// The shapes that could not be combined are named, and so are the two values
+/// that had them — which is what the error can point at now that no expression
+/// is at fault for holding them together.
 #[test]
-fn a_shape_mismatch_names_both_shapes_and_elements() {
-    let source = "output {[tuple 1 2], 7, [tuple 1 2 3]}";
-    let diagnostic = error(source);
+fn a_shape_mismatch_names_both_shapes_and_values() {
+    let diagnostic = error("output {[tuple 1 2], 7, [tuple 1 2 3]}");
     assert_eq!(
         diagnostic.summary,
-        "A sequence cannot mix a tuple of 2 fields and a single value"
+        "A tuple of 2 fields and a single value cannot be combined"
     );
-    // The second element broke the shape, so it is what the error points at.
     let primary = diagnostic
         .labels
         .iter()
         .find(|label| label.style == LabelStyle::Primary)
         .expect("a primary label");
-    assert_eq!(primary.message.as_deref(), Some("this is a single value"));
-    assert_eq!(
-        &source[primary.range.range.start..primary.range.range.end],
-        "7"
+    let message = primary.message.as_deref().expect("a labelled primary");
+    assert!(message.contains("displaying a distribution"), "{message}");
+    assert!(
+        message.contains("`(1, 2)` is a tuple of 2 fields"),
+        "{message}"
     );
-
-    let secondary = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.style == LabelStyle::Secondary)
-        .expect("a secondary label");
-    assert_eq!(
-        secondary.message.as_deref(),
-        Some("this is a tuple of 2 fields, which set the shape")
-    );
-    assert_eq!(
-        &source[secondary.range.range.start..secondary.range.range.end],
-        "[tuple 1 2]"
-    );
+    assert!(message.contains("`7` is a single value"), "{message}");
 
     // Arity is named too, not just "tuple".
     assert_eq!(
         error("output {[tuple 1 2], [tuple 1 2 3]}").summary,
-        "A sequence cannot mix a tuple of 2 fields and a tuple of 3 fields"
+        "A tuple of 2 fields and a tuple of 3 fields cannot be combined"
     );
 }
 
-/// Results collected from a pool evaluation have no source of their own, so
-/// that one label names the shapes on the call instead.
+/// A function returning different shapes for different multisets builds a die
+/// that holds both. Displaying it is what cannot be done, and the error names
+/// the two outcomes rather than the call.
 #[test]
-fn mismatched_function_results_name_the_shapes() {
+fn mismatched_function_results_are_reported_when_displayed() {
     let diagnostic =
         error("function: f X:n { if X { result: 1 } result: [tuple 1 2] } output [f d{0, 1}]");
-    // `d{0, 1}` reaches the `[tuple 1 2]` branch first, so that is the shape
-    // the later `1` fails to join.
     assert_eq!(
         diagnostic.summary,
-        "A function evaluated over a pool cannot mix a tuple of 2 fields and a single value"
+        "A single value and a tuple of 2 fields cannot be combined"
     );
-    assert_eq!(
-        diagnostic.labels[0].message.as_deref(),
-        Some("one result is a tuple of 2 fields, another is a single value")
+    let message = diagnostic.labels[0]
+        .message
+        .as_deref()
+        .expect("a labelled primary");
+    assert!(message.contains("`1` is a single value"), "{message}");
+    assert!(
+        message.contains("`(1, 2)` is a tuple of 2 fields"),
+        "{message}"
     );
 }
 
@@ -308,22 +344,26 @@ fn a_non_additive_sum_names_the_offending_value() {
     );
 }
 
-/// The empty sum has no shape of its own, so its mismatch is described as an
-/// addition problem rather than a shape problem.
+/// The empty sum has no shape of its own, so it shares a sequence with anything
+/// at all. It settles into the `0` it stands for the moment something numeric
+/// is alongside it, and only a symbol beside it makes the *output* impossible —
+/// as a mixed field, not as a mismatched shape.
 #[test]
-fn the_empty_sum_reports_what_it_cannot_be_added_to() {
-    let diagnostic = error("enum: R { A } X: {} + {} output {X, A}");
+fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
     assert_eq!(
-        diagnostic.summary,
-        "A sequence cannot mix the empty sum with values that cannot be added"
+        probabilities("X: {} + {} output {X, 1}"),
+        vec![vec![(vec![0], 0.5f64), (vec![1], 0.5f64)]]
     );
-    let messages: Vec<_> = diagnostic
-        .labels
-        .iter()
-        .map(|label| label.message.as_deref().unwrap())
-        .collect();
-    assert!(messages.contains(&"this cannot be added"), "{messages:?}");
-    assert!(messages.contains(&"this is the empty sum"), "{messages:?}");
+
+    let diagnostic = error("enum: R { A } X: {} + {} output {X, A}");
+    assert_eq!(diagnostic.code, "type.outcome_mismatch");
+    assert!(
+        diagnostic
+            .summary
+            .contains("numbers in some outcomes and symbols in others"),
+        "{}",
+        diagnostic.summary
+    );
 }
 
 /// `output` needs one schema per field, so a field cannot be a number in one
