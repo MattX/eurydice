@@ -7,8 +7,8 @@ use std::{
 
 use crate::{
     ast::{
-        self, BareListItem, EnumDefinition, Expression, FunctionDefinition, ListItem,
-        PositionOrder, SetParam, Statement, StaticType, WithRange,
+        self, BareListItem, Expression, FunctionDefinition, ListItem, PositionOrder, SetParam,
+        Statement, StaticType, WithRange,
     },
     diagnostic::{
         DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame, LabelStyle,
@@ -136,31 +136,11 @@ impl EvalContext {
     }
 }
 
-/// What a name already refers to, when a binding tries to reuse it.
-#[derive(Debug, Clone, Copy)]
-enum EnumIdentifierKind {
-    Set,
-    Symbol,
-}
-
-impl std::fmt::Display for EnumIdentifierKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EnumIdentifierKind::Set => write!(f, "symbol set"),
-            EnumIdentifierKind::Symbol => write!(f, "symbol"),
-        }
-    }
-}
-
 pub struct Evaluator {
     env: ValEnv,
     outputs: Vec<EvaluatedOutput>,
     functions: HashMap<String, Function>,
     symbols: SymbolTable,
-    /// Declared set names and symbol names, kept separately from the symbol
-    /// table because they exist only to police the shared namespace.
-    enums: HashSet<String>,
-    enum_members: HashSet<String>,
     explode_depth: usize,
     recursion_depth: usize,
     lowest_first: bool,
@@ -195,8 +175,6 @@ impl Evaluator {
             outputs: Vec::new(),
             functions,
             symbols: SymbolTable::default(),
-            enums: HashSet::new(),
-            enum_members: HashSet::new(),
             explode_depth: 2,
             recursion_depth: 10,
             lowest_first: false,
@@ -335,38 +313,28 @@ impl Evaluator {
         std::mem::take(&mut self.outputs)
     }
 
-    fn enum_identifier_kind(&self, name: &str) -> Option<EnumIdentifierKind> {
-        if self.enums.contains(name) {
-            Some(EnumIdentifierKind::Set)
-        } else if self.enum_members.contains(name) {
-            Some(EnumIdentifierKind::Symbol)
-        } else {
-            None
-        }
-    }
-
     /// Rejects a name that a declaration has already claimed.
     ///
     /// Assignments, loop variables and function parameters all bind a variable,
     /// and a declared name is unavailable to all three, so they report it the
     /// same way. Which one it was is shown by where the diagnostic points.
     fn validate_binding_name(&self, name: &str, range: ast::Range) -> Result<(), RuntimeError> {
-        let Some(identifier_kind) = self.enum_identifier_kind(name) else {
+        if !self.symbols.contains(name) {
             return Ok(());
-        };
+        }
         Err(RuntimeError::Semantic {
             kind: SemanticErrorKind::BindingConflict,
             range: range.into(),
             message: format!(
-                "`{name}` is a declared {identifier_kind}, so it cannot be used as a variable name"
+                "`{name}` is a declared symbol, so it cannot be used as a variable name"
             ),
         })
     }
 
-    fn define_enum(
+    fn define_symbols(
         &mut self,
         eval_context: &EvalContext,
-        definition: &EnumDefinition,
+        members: &[WithRange<String>],
         statement_range: ast::Range,
     ) -> Result<(), RuntimeError> {
         if eval_context.recursion_depth != 0 || eval_context.block_depth != 0 {
@@ -376,48 +344,12 @@ impl Evaluator {
                 message: "enum declarations are only allowed at the top level".to_string(),
             });
         }
-        if let Some(kind) = self.enum_identifier_kind(&definition.name.value) {
-            return Err(RuntimeError::Semantic {
-                kind: SemanticErrorKind::BindingConflict,
-                range: definition.name.range.into(),
-                message: format!(
-                    "enum {} conflicts with an existing enum {kind}",
-                    definition.name.value
-                ),
-            });
-        }
-        if self.env.contains(&definition.name.value) {
-            return Err(RuntimeError::Semantic {
-                kind: SemanticErrorKind::BindingConflict,
-                range: definition.name.range.into(),
-                message: format!("{} is already bound as a variable", definition.name.value),
-            });
-        }
-
-        let mut seen = HashSet::new();
-        for member in &definition.members {
-            if !seen.insert(member.value.as_str()) {
+        for member in members {
+            if self.symbols.contains(&member.value) {
                 return Err(RuntimeError::Semantic {
                     kind: SemanticErrorKind::BindingConflict,
                     range: member.range.into(),
-                    message: format!("enum member {} is already defined", member.value),
-                });
-            }
-            if member.value == definition.name.value {
-                return Err(RuntimeError::Semantic {
-                    kind: SemanticErrorKind::BindingConflict,
-                    range: member.range.into(),
-                    message: format!("enum member {} conflicts with its enum type", member.value),
-                });
-            }
-            if let Some(kind) = self.enum_identifier_kind(&member.value) {
-                return Err(RuntimeError::Semantic {
-                    kind: SemanticErrorKind::BindingConflict,
-                    range: member.range.into(),
-                    message: format!(
-                        "enum member {} conflicts with an existing enum {kind}",
-                        member.value
-                    ),
+                    message: format!("symbol {} is already defined", member.value),
                 });
             }
             if self.env.contains(&member.value) {
@@ -427,24 +359,12 @@ impl Evaluator {
                     message: format!("{} is already bound as a variable", member.value),
                 });
             }
-        }
-
-        let member_names = definition
-            .members
-            .iter()
-            .map(|member| member.value.clone())
-            .collect::<Vec<_>>();
-        let indices = self
-            .symbols
-            .define_set(definition.name.value.clone(), &member_names);
-        for (member, symbol) in definition.members.iter().zip(indices) {
+            let symbol = self.symbols.define(member.value.clone());
             self.env.insert(
                 member.value.clone(),
                 RuntimeValue::Element(ElementValue::Symbol(symbol)),
             );
-            self.enum_members.insert(member.value.clone());
         }
-        self.enums.insert(definition.name.value.clone());
         Ok(())
     }
 
@@ -482,8 +402,8 @@ impl Evaluator {
                     })),
                 );
             }
-            Statement::EnumDefinition(definition) => {
-                self.define_enum(eval_context, definition, statement.range)?;
+            Statement::SymbolDefinitions(members) => {
+                self.define_symbols(eval_context, members, statement.range)?;
             }
             Statement::Output {
                 expr,

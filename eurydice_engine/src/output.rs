@@ -21,13 +21,10 @@ pub struct Distribution {
 /// field the value is the member's ordinal, and the labels here map it back to
 /// a display name. Hoisting the schema up here keeps the (potentially large)
 /// list of outcomes free of repeated enum metadata.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum FieldSchema {
     Int,
-    Enum {
-        enum_name: String,
-        labels: Vec<String>,
-    },
+    Enum { labels: Vec<String> },
 }
 
 impl Distribution {
@@ -60,30 +57,26 @@ impl Distribution {
 /// position rather than from the outcome type.
 ///
 /// The type only records whether a field is all `int`s, which is not enough to
-/// label a symbol field: the names and the declared sets live on the values.
+/// label a symbol field: symbol names live in the evaluator's symbol table.
 enum FieldRender {
     Int,
-    /// The declared sets present at this position, in declaration order. Their
-    /// members are concatenated to form the field's labels, so a symbol's wire
-    /// value is its ordinal plus its set's offset in that concatenation.
-    Symbols(Vec<usize>),
+    /// The symbols observed at this position, in declaration order. Their
+    /// position in this vector is the field's serialized value.
+    Symbols(Vec<u32>),
 }
 
 impl FieldRender {
     /// The wire value for one field of one outcome.
-    fn ordinal(&self, field: &ElementValue, symbols: &SymbolTable) -> i32 {
+    fn ordinal(&self, field: &ElementValue) -> i32 {
         match (self, field) {
             (_, ElementValue::AdditiveIdentity) => 0,
             (_, ElementValue::Int(value)) => *value,
-            (FieldRender::Symbols(sets), ElementValue::Symbol(symbol)) => {
-                let set = symbols.set_index(*symbol);
-                let offset: usize = sets
-                    .iter()
-                    .take_while(|present| **present != set)
-                    .map(|present| symbols.members(symbols.set(*present)).len())
-                    .sum();
-                i32::try_from(offset).expect("label count fits in i32") + symbols.ordinal(*symbol)
-            }
+            (FieldRender::Symbols(present), ElementValue::Symbol(symbol)) => i32::try_from(
+                present
+                    .binary_search(symbol)
+                    .expect("every rendered symbol was collected from the outcomes"),
+            )
+            .expect("label count fits in i32"),
             (FieldRender::Int, ElementValue::Symbol(_)) => {
                 unreachable!("a field mixing ints and symbols is rejected by the evaluator")
             }
@@ -96,19 +89,10 @@ impl FieldRender {
     fn schema(&self, symbols: &SymbolTable) -> FieldSchema {
         match self {
             FieldRender::Int => FieldSchema::Int,
-            FieldRender::Symbols(sets) => FieldSchema::Enum {
-                // Several sets in one field is rare, and joining their names
-                // keeps the wire format — and the frontend's grouping of
-                // outputs by enum name — unchanged for the common single-set
-                // case.
-                enum_name: sets
+            FieldRender::Symbols(present) => FieldSchema::Enum {
+                labels: present
                     .iter()
-                    .map(|set| symbols.set(*set).name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" | "),
-                labels: sets
-                    .iter()
-                    .flat_map(|set| symbols.members(symbols.set(*set)).iter().cloned())
+                    .map(|symbol| symbols.name(*symbol).to_string())
                     .collect(),
             },
         }
@@ -120,12 +104,8 @@ impl FieldRender {
 /// `arity` is fixed for a distribution, so every outcome contributes one value
 /// per position; a position with no symbols renders as `int`, which is also
 /// what an empty distribution falls back to.
-fn field_renders(
-    outcomes: &[(ElementValue, Natural)],
-    arity: usize,
-    symbols: &SymbolTable,
-) -> Vec<FieldRender> {
-    let mut sets_by_field: Vec<Vec<usize>> = vec![Vec::new(); arity];
+fn field_renders(outcomes: &[(ElementValue, Natural)], arity: usize) -> Vec<FieldRender> {
+    let mut symbols_by_field: Vec<Vec<u32>> = vec![Vec::new(); arity];
     for (outcome, _) in outcomes {
         let fields: &[ElementValue] = match outcome {
             ElementValue::Tuple(fields) => fields,
@@ -133,21 +113,20 @@ fn field_renders(
         };
         for (position, field) in fields.iter().enumerate() {
             if let ElementValue::Symbol(symbol) = field {
-                let set = symbols.set_index(*symbol);
-                let sets = &mut sets_by_field[position];
-                if let Err(index) = sets.binary_search(&set) {
-                    sets.insert(index, set);
+                let present = &mut symbols_by_field[position];
+                if let Err(index) = present.binary_search(symbol) {
+                    present.insert(index, *symbol);
                 }
             }
         }
     }
-    sets_by_field
+    symbols_by_field
         .into_iter()
-        .map(|sets| {
-            if sets.is_empty() {
+        .map(|present| {
+            if present.is_empty() {
                 FieldRender::Int
             } else {
-                FieldRender::Symbols(sets)
+                FieldRender::Symbols(present)
             }
         })
         .collect()
@@ -198,7 +177,7 @@ fn pool_output(
         // Nothing but empty sums, or no outcomes at all: a single int field.
         _ => 1,
     };
-    let renders = field_renders(pool.ordered_outcomes(), arity, symbols);
+    let renders = field_renders(pool.ordered_outcomes(), arity);
     Distribution {
         fields: renders
             .iter()
@@ -216,7 +195,7 @@ fn pool_output(
                     fields
                         .iter()
                         .zip(renders.iter())
-                        .map(|(field, render)| render.ordinal(field, symbols))
+                        .map(|(field, render)| render.ordinal(field))
                         .collect(),
                     probability,
                 )

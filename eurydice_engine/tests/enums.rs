@@ -38,24 +38,16 @@ fn error_summary(program: &str) -> String {
 fn declared_names_cannot_be_bound_as_variables() {
     for (program, expected) in [
         (
-            "enum: RESULT { MISS, HIT } MISS: 3",
+            "enum { MISS, HIT } MISS: 3",
             "`MISS` is a declared symbol, so it cannot be used as a variable name",
         ),
         (
-            "enum: RESULT { MISS, HIT } loop MISS over {1} { output 1 }",
+            "enum { MISS, HIT } loop MISS over {1} { output 1 }",
             "`MISS` is a declared symbol, so it cannot be used as a variable name",
         ),
         (
-            "enum: RESULT { MISS, HIT } function: f MISS:n { result: 1 }",
+            "enum { MISS, HIT } function: f MISS:n { result: 1 }",
             "`MISS` is a declared symbol, so it cannot be used as a variable name",
-        ),
-        (
-            "enum: RESULT { MISS, HIT } RESULT: 3",
-            "`RESULT` is a declared symbol set, so it cannot be used as a variable name",
-        ),
-        (
-            "enum: RESULT { MISS, HIT } loop RESULT over {1} { output 1 }",
-            "`RESULT` is a declared symbol set, so it cannot be used as a variable name",
         ),
     ] {
         assert_eq!(error_summary(program), expected, "{program}");
@@ -63,8 +55,8 @@ fn declared_names_cannot_be_bound_as_variables() {
 
     // The span covers the name and nothing else, wherever it appears.
     for (program, name) in [
-        ("enum: R { A } A : 1", "A"),
-        ("enum: R { A } loop A over {1} { output 1 }", "A"),
+        ("enum { A } A : 1", "A"),
+        ("enum { A } loop A over {1} { output 1 }", "A"),
     ] {
         let diagnostic = Engine::new()
             .run_with_diagnostics(program)
@@ -81,27 +73,36 @@ fn declared_names_cannot_be_bound_as_variables() {
 }
 
 #[test]
-fn enum_names_do_not_replace_or_get_reused_by_other_bindings() {
+fn symbol_declarations_do_not_replace_or_reuse_other_bindings() {
     for program in [
-        "RESULT: 1 enum: RESULT { MISS }",
-        "enum: RESULT { RESULT }",
-        "enum: RESULT { MISS } enum: OTHER { RESULT }",
-        "enum: RESULT { MISS } function: f RESULT:n { result: RESULT }",
-        "enum: RESULT { MISS } loop RESULT over {1} { output RESULT }",
+        "A: 1 enum: A",
+        "enum: A enum: A",
+        "enum { A, A }",
+        "enum: A function: f A:n { result: A }",
+        "enum: A loop A over {1} { output A }",
     ] {
         assert!(run(program).is_err(), "{program}");
     }
 }
 
 #[test]
+fn grouped_declarations_are_sugar_for_individual_symbols() {
+    let render = |program: &str| {
+        let (outputs, symbols) = run(program).expect("program runs");
+        Distribution::from_runtime(outputs[0].value.clone(), None, &symbols)
+    };
+    let grouped = render("enum { A, B, C } output d{A, B, C}");
+    let individual = render("enum: A enum: B enum: C output d{A, B, C}");
+    assert_eq!(grouped.fields, individual.fields);
+    assert_eq!(grouped.probabilities, individual.probabilities);
+}
+
+#[test]
 fn rejects_enum_arithmetic_ordering_and_multidimensional_output() {
     for (program, expected) in [
-        ("enum: R { A, B } output A + B", "requires numbers"),
-        ("enum: R { A, B } output A < B", "requires numbers"),
-        (
-            "enum: R { A, B } output 2d{A, B}",
-            "cannot be added together",
-        ),
+        ("enum { A, B } output A + B", "requires numbers"),
+        ("enum { A, B } output A < B", "requires numbers"),
+        ("enum { A, B } output 2d{A, B}", "cannot be added together"),
     ] {
         let error = error_summary(program);
         assert!(error.contains(expected), "{error}");
@@ -113,7 +114,7 @@ fn rejects_enum_arithmetic_ordering_and_multidimensional_output() {
 #[test]
 fn multidimensional_enum_pools_are_usable_without_being_summed() {
     let (outputs, symbols) = run(r#"
-        enum: R { MISS, HIT }
+        enum { MISS, HIT }
         function: hits S:s { result: [count {HIT} in S] }
         output [hits 2d{MISS, HIT}]
         output [count {HIT} in 2d{MISS, HIT}]
@@ -145,7 +146,7 @@ fn enum_multisets_are_ordered_by_declaration_and_respect_position_order() {
     let program = |setting: &str| {
         format!(
             r#"
-            enum: R {{ MISS, HIT }}
+            enum {{ MISS, HIT }}
             function: first S:s {{ result: 1@S }}
             {setting}
             output [first 3d{{MISS, HIT}}]
@@ -173,21 +174,21 @@ fn enum_multisets_are_ordered_by_declaration_and_respect_position_order() {
 #[test]
 fn operations_that_would_sum_a_multidimensional_enum_pool_are_rejected() {
     for program in [
-        "enum: R { A, B } output 2d{A, B}",
-        "enum: R { A, B } output {2d{A, B}}",
-        "enum: R { A, B } output {2d{A, B}:2}",
-        "enum: R { A, B } function: f X:n { result: X } output [f 2d{A, B}]",
-        "enum: R { A, B } output 2d{A, B} = A",
-        "enum: R { A, B } output A != 2d{A, B}",
-        "enum: R { A, B } output -2d{A, B}",
-        "enum: R { A, B } output (0-2)d{A, B}",
-        "enum: R { A, B } output (0-1)d(d{A, B})",
-        "enum: R { A, B } output d2 d {A, B}",
-        "enum: R { A, B } output d2 d (2d{A, B})",
-        "enum: R { A, B } function: f S:s { result: S } output [f 2d{A, B}]",
-        "enum: R { A, B } function: f D:d { result: D } output [f 2d{A, B}]",
-        "enum: R { A, B } output [choose 2d{A, B} if 1 else 2d{A, B}]",
-        "enum: R { A, B } function: g X:n { result: 2d{A, B} } output [g d2]",
+        "enum { A, B } output 2d{A, B}",
+        "enum { A, B } output {2d{A, B}}",
+        "enum { A, B } output {2d{A, B}:2}",
+        "enum { A, B } function: f X:n { result: X } output [f 2d{A, B}]",
+        "enum { A, B } output 2d{A, B} = A",
+        "enum { A, B } output A != 2d{A, B}",
+        "enum { A, B } output -2d{A, B}",
+        "enum { A, B } output (0-2)d{A, B}",
+        "enum { A, B } output (0-1)d(d{A, B})",
+        "enum { A, B } output d2 d {A, B}",
+        "enum { A, B } output d2 d (2d{A, B})",
+        "enum { A, B } function: f S:s { result: S } output [f 2d{A, B}]",
+        "enum { A, B } function: f D:d { result: D } output [f 2d{A, B}]",
+        "enum { A, B } output [choose 2d{A, B} if 1 else 2d{A, B}]",
+        "enum { A, B } function: g X:n { result: 2d{A, B} } output [g d2]",
     ] {
         assert!(run(program).is_err(), "{program}");
     }
@@ -198,8 +199,7 @@ fn operations_that_would_sum_a_multidimensional_enum_pool_are_rejected() {
 /// faces can make an empty sum fail, because nothing is ever added to it.
 #[test]
 fn rolling_no_enum_dice_yields_the_empty_sum() {
-    let (outputs, symbols) =
-        run("enum: R { A, B } output 0d{A, B}").expect("no dice, nothing to add");
+    let (outputs, symbols) = run("enum { A, B } output 0d{A, B}").expect("no dice, nothing to add");
     assert_eq!(
         Distribution::from_runtime(outputs[0].value.clone(), None, &symbols).probabilities,
         vec![(vec![0], 1.0f64)]
@@ -211,14 +211,14 @@ fn rolling_no_enum_dice_yields_the_empty_sum() {
 #[test]
 fn multidimensional_enum_pools_do_not_gain_ordering_or_arithmetic() {
     for program in [
-        "enum: R { A, B } output 1@2d{A, B}",
-        "enum: R { A, B } output [sort {A, B}]",
-        "enum: R { A, B } output [highest 1 of 2d{A, B}]",
-        "enum: R { A, B } output [lowest 1 of 2d{A, B}]",
-        "enum: R { A, B } output [maximum of 2d{A, B}]",
-        "enum: R { A, B } output [explode 2d{A, B}]",
-        "enum: R { A, B } output 2d{A, B} < A",
-        "enum: R { A, B } output 2d{A, B} + A",
+        "enum { A, B } output 1@2d{A, B}",
+        "enum { A, B } output [sort {A, B}]",
+        "enum { A, B } output [highest 1 of 2d{A, B}]",
+        "enum { A, B } output [lowest 1 of 2d{A, B}]",
+        "enum { A, B } output [maximum of 2d{A, B}]",
+        "enum { A, B } output [explode 2d{A, B}]",
+        "enum { A, B } output 2d{A, B} < A",
+        "enum { A, B } output 2d{A, B} + A",
     ] {
         assert!(run(program).is_err(), "{program}");
     }
@@ -226,22 +226,19 @@ fn multidimensional_enum_pools_do_not_gain_ordering_or_arithmetic() {
 
 #[test]
 fn rejects_nested_declarations() {
-    let nested = error_summary("if 1 { enum: RESULT { A } }");
+    let nested = error_summary("if 1 { enum { A } }");
     assert!(nested.contains("top level"), "{nested}");
 }
 
-/// Declared sets name a domain; they are not separate types. Symbols from two
-/// sets share one outcome type, so they can share a collection — and the
-/// display picks up both sets' labels.
+/// Independently declared symbols share one outcome type and can share a
+/// collection. The display includes the symbols that actually occur.
 #[test]
-fn symbols_from_different_sets_share_one_outcome_type() {
-    let (mut outputs, symbols) =
-        run("enum: A_TYPE { A } enum: B_TYPE { B } output {A, B}").expect("program runs");
+fn independently_declared_symbols_share_one_outcome_type() {
+    let (mut outputs, symbols) = run("enum: A enum: B output {A, B}").expect("program runs");
     let distribution = Distribution::from_runtime(outputs.remove(0).value, None, &symbols);
-    let FieldSchema::Enum { enum_name, labels } = &distribution.fields[0] else {
+    let FieldSchema::Enum { labels } = &distribution.fields[0] else {
         panic!("expected a symbol field");
     };
-    assert_eq!(enum_name, "A_TYPE | B_TYPE");
     assert_eq!(labels, &["A", "B"]);
     assert_eq!(
         distribution.probabilities,
@@ -249,15 +246,15 @@ fn symbols_from_different_sets_share_one_outcome_type() {
     );
 }
 
-/// Equality is total: symbols from different sets are simply never equal.
+/// Equality is total: independently declared symbols are simply never equal.
 #[test]
-fn equality_aware_operations_are_total_across_sets() {
+fn equality_aware_operations_are_total_across_symbols() {
     for program in [
-        "enum: A_TYPE { A } enum: B_TYPE { B } output A = B",
-        "enum: A_TYPE { A } enum: B_TYPE { B } output [{A} contains B]",
-        "enum: A_TYPE { A } enum: B_TYPE { B } output [d{A} contains B]",
-        "enum: A_TYPE { A } enum: B_TYPE { B } output [count {A} in {B}]",
-        "enum: A_TYPE { A } enum: B_TYPE { B } output [count {A} in d{B}]",
+        "enum { A } enum { B } output A = B",
+        "enum { A } enum { B } output [{A} contains B]",
+        "enum { A } enum { B } output [d{A} contains B]",
+        "enum { A } enum { B } output [count {A} in {B}]",
+        "enum { A } enum { B } output [count {A} in d{B}]",
     ] {
         let (outputs, symbols) = run(program).expect("program runs");
         let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
@@ -269,8 +266,7 @@ fn equality_aware_operations_are_total_across_sets() {
     }
 
     // Inequality is the complement, not an error.
-    let (outputs, symbols) =
-        run("enum: A_TYPE { A } enum: B_TYPE { B } output A != B").expect("program runs");
+    let (outputs, symbols) = run("enum { A } enum { B } output A != B").expect("program runs");
     assert_eq!(
         Distribution::from_runtime(outputs[0].value.clone(), None, &symbols).probabilities,
         vec![(vec![1], 1.0)]
@@ -279,29 +275,37 @@ fn equality_aware_operations_are_total_across_sets() {
 
 #[test]
 fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
-    let (mut outputs, symbols) = run("enum: RESULT { MISS, HIT } output d{MISS, HIT}").unwrap();
+    let (mut outputs, symbols) = run("enum { MISS, HIT } output d{MISS, HIT}").unwrap();
     let output = Distribution::from_runtime(outputs.remove(0).value, None, &symbols);
     assert_eq!(output.probabilities.len(), 2);
-    let FieldSchema::Enum { enum_name, labels } = &output.fields[0] else {
+    let FieldSchema::Enum { labels } = &output.fields[0] else {
         panic!("expected enum field");
     };
-    assert_eq!(enum_name, "RESULT");
     assert_eq!(labels, &["MISS", "HIT"]);
+}
+
+#[test]
+fn serialized_symbol_fields_only_include_observed_values() {
+    let (mut outputs, symbols) = run("enum { A, B, C } output d{A, B}").unwrap();
+    let output = Distribution::from_runtime(outputs.remove(0).value, None, &symbols);
+    let FieldSchema::Enum { labels } = &output.fields[0] else {
+        panic!("expected enum field");
+    };
+    assert_eq!(labels, &["A", "B"]);
 }
 
 #[test]
 fn serialized_tuple_distribution_hoists_field_schema() {
     let (mut outputs, symbols) =
-        run("enum: RESULT { MISS, HIT } A: d2 B: d{MISS, HIT} output [tuple A B]").unwrap();
+        run("enum { MISS, HIT } A: d2 B: d{MISS, HIT} output [tuple A B]").unwrap();
     let dist = Distribution::from_runtime(outputs.remove(0).value, None, &symbols);
     assert!(dist.field_names.is_none());
 
     // The per-field schema is stored once, not repeated on each outcome.
     assert!(matches!(dist.fields[0], FieldSchema::Int));
-    let FieldSchema::Enum { enum_name, labels } = &dist.fields[1] else {
+    let FieldSchema::Enum { labels } = &dist.fields[1] else {
         panic!("expected enum field schema");
     };
-    assert_eq!(enum_name, "RESULT");
     assert_eq!(labels, &["MISS", "HIT"]);
 
     // Every outcome is a raw i32 vector matching the field count, and the

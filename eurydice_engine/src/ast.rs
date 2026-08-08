@@ -50,7 +50,7 @@ pub enum Statement {
         value: WithRange<Expression>,
     },
     FunctionDefinition(FunctionDefinition),
-    EnumDefinition(EnumDefinition),
+    SymbolDefinitions(Vec<WithRange<String>>),
     Output {
         expr: WithRange<Expression>,
         named: Option<WithRange<String>>,
@@ -74,12 +74,6 @@ pub enum Statement {
         expr: WithRange<Expression>,
         named: Option<WithRange<String>>,
     },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct EnumDefinition {
-    pub name: WithRange<String>,
-    pub members: Vec<WithRange<String>>,
 }
 
 /// Optional presentation metadata parsed after an `output` expression.

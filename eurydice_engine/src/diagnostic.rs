@@ -125,25 +125,20 @@ pub(crate) fn preview_value(value: &RuntimeValue, symbols: &SymbolTable) -> Stri
     }
 }
 
-fn describe_value(value: &RuntimeValue, symbols: &SymbolTable) -> String {
+fn describe_value(value: &RuntimeValue) -> String {
     match value {
         RuntimeValue::Element(ElementValue::AdditiveIdentity | ElementValue::Int(_)) => {
             "an integer".to_string()
         }
-        RuntimeValue::Element(ElementValue::Symbol(symbol)) => {
-            format!("a `{}` value", symbols.set_of(*symbol).name)
-        }
+        RuntimeValue::Element(ElementValue::Symbol(_)) => "a symbol".to_string(),
         RuntimeValue::Element(ElementValue::Tuple(_)) => "a tuple".to_string(),
         RuntimeValue::List(values) => format!(
             "a sequence of `{}` values",
-            describe_outcomes(values.iter(), symbols)
+            describe_outcomes(values.iter())
         ),
         RuntimeValue::Pool(pool) => format!(
             "a dice pool with `{}` outcomes",
-            describe_outcomes(
-                pool.ordered_outcomes().iter().map(|(outcome, _)| outcome),
-                symbols
-            )
+            describe_outcomes(pool.ordered_outcomes().iter().map(|(outcome, _)| outcome))
         ),
     }
 }
@@ -152,19 +147,16 @@ fn describe_value(value: &RuntimeValue, symbols: &SymbolTable) -> String {
 ///
 /// Nothing records this anywhere, so a collection with no values has nothing to
 /// say about itself and reads as empty.
-fn describe_outcomes<'a>(
-    values: impl IntoIterator<Item = &'a ElementValue>,
-    symbols: &'a SymbolTable,
-) -> String {
-    let mut kinds: Vec<&'a str> = Vec::new();
-    let push = |kinds: &mut Vec<&'a str>, kind: &'a str| {
+fn describe_outcomes<'a>(values: impl IntoIterator<Item = &'a ElementValue>) -> String {
+    let mut kinds = Vec::new();
+    let push = |kinds: &mut Vec<&str>, kind: &'static str| {
         if !kinds.contains(&kind) {
             kinds.push(kind);
         }
     };
     for value in values {
         match value {
-            ElementValue::Symbol(symbol) => push(&mut kinds, symbols.set_of(*symbol).name.as_str()),
+            ElementValue::Symbol(_) => push(&mut kinds, "symbol"),
             ElementValue::Tuple(_) => push(&mut kinds, "tuple"),
             ElementValue::Int(_) | ElementValue::AdditiveIdentity => push(&mut kinds, "int"),
         }
@@ -210,7 +202,7 @@ fn type_mismatch_label(
         message: Some(format!(
             "`{}` is {}; expected {expected}",
             preview_value(value, symbols),
-            describe_value(value, symbols)
+            describe_value(value)
         )),
         style: LabelStyle::Primary,
     }
@@ -226,7 +218,7 @@ fn argument_mismatch_message(
 ) -> String {
     format!(
         "`{name}` is {}: `{}`; expected {expected}",
-        describe_value(value, symbols),
+        describe_value(value),
         preview_value(value, symbols)
     )
 }
@@ -785,7 +777,7 @@ pub(crate) fn runtime_diagnostic(
                     format!(
                         "`{}` is {}",
                         preview_value(value, symbols),
-                        describe_value(value, symbols)
+                        describe_value(value)
                     ),
                 ),
             ],

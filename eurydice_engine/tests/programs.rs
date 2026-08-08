@@ -3,7 +3,7 @@
 //! AnyDice compatibility fixtures retain AnyDice's numeric summary line:
 //! `"name",mean,stddev,min,max`. Eurydice-native fixtures use just `"name"`,
 //! followed by one header per output field and a final `%` column. `#` is an
-//! integer field, enum fields use their enum name, and labeled tuple fields use
+//! integer field, `Symbol` marks an enum field, and labeled tuple fields use
 //! their labels. Outcome rows contain rendered field values and a percentage.
 
 use approx::relative_ne;
@@ -385,7 +385,7 @@ fn create_distribution_result(name: &str, distribution: Distribution) -> Distrib
             .iter()
             .map(|field| match field {
                 FieldSchema::Int => "#".to_owned(),
-                FieldSchema::Enum { enum_name, .. } => enum_name.clone(),
+                FieldSchema::Enum { .. } => "Symbol".to_owned(),
             })
             .collect()
     });

@@ -469,9 +469,9 @@ output [pick d3]";
     #[test]
     fn equality_primitives_count_no_matches_across_outcome_types() {
         for source in [
-            "enum: R { A, B } output [{A} contains 1]",
-            "enum: R { A, B } output [count {A} in {1}]",
-            "enum: R { A, B } output [count {1} in 2d{A, B}]",
+            "enum { A, B } output [{A} contains 1]",
+            "enum { A, B } output [count {A} in {1}]",
+            "enum { A, B } output [count {1} in 2d{A, B}]",
             "output [{[tuple 1, 2]} contains 1]",
         ] {
             let mut engine = Engine::new();
@@ -572,7 +572,7 @@ output [pick d3]";
         // A label may still carry something the summary does not. Adding two
         // symbols is reported at the value that cannot be added, which the
         // summary has no room to name.
-        let report = Engine::new().run_with_diagnostics("enum: R { A, B } output A + B");
+        let report = Engine::new().run_with_diagnostics("enum { A, B } output A + B");
         let error = report.error().unwrap();
         assert_eq!(error.summary, "this operator requires numbers");
         assert_eq!(

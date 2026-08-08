@@ -66,41 +66,34 @@ describe('csvExport', () => {
       expect(lines[9]).toBe('9,0,0.037037037037');
     });
 
-    it('separates incompatible output types into ordered blocks', () => {
+    it('combines numeric and symbolic outputs into one categorical block', () => {
       const mixed: NamedDistribution[] = [
         ['attack', scalarDistribution(
           [[0, 0.25], [1, 0.75]],
-          { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT'] },
+          { kind: 'enum', labels: ['MISS', 'HIT'] },
         )],
         testDistributions[0],
         ['defend', scalarDistribution(
-          [[1, 1]],
-          { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT'] },
+          [[0, 1]],
+          { kind: 'enum', labels: ['HIT'] },
         )],
         ['weather', scalarDistribution(
           [[0, 1]],
-          { kind: 'enum', enumName: 'WEATHER', labels: ['SUN', 'RAIN'] },
+          { kind: 'enum', labels: ['SUN'] },
         )],
       ];
 
       expect(generateSpreadsheetCSV(mixed)).toBe([
-        'RESULT',
-        'Outcome,attack,defend',
-        'MISS,0.25,0',
-        'HIT,0.75,1',
-        '',
-        'Numeric outcomes',
-        'Outcome,output 1',
-        '2,0.111111111111',
-        '3,0.222222222222',
-        '4,0.333333333333',
-        '5,0.222222222222',
-        '6,0.111111111111',
-        '',
-        'WEATHER',
-        'Outcome,weather',
-        'SUN,1',
-        'RAIN,0',
+        'Outcomes',
+        'Outcome,attack,output 1,defend,weather',
+        '2,0,0.111111111111,0,0',
+        '3,0,0.222222222222,0,0',
+        '4,0,0.333333333333,0,0',
+        '5,0,0.222222222222,0,0',
+        '6,0,0.111111111111,0,0',
+        'MISS,0.25,0,0,0',
+        'HIT,0.75,0,1,0',
+        'SUN,0,0,0,1',
       ].join('\n'));
     });
 
@@ -186,7 +179,7 @@ describe('csvExport', () => {
     it('omits categorical outputs', () => {
       const categorical: NamedDistribution = ['attack', scalarDistribution(
         [[0, 0.25], [1, 0.75]],
-        { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT'] },
+        { kind: 'enum', labels: ['MISS', 'HIT'] },
       )];
       const result = generateAnyDiceFormatCSV([
         categorical,
@@ -254,7 +247,7 @@ describe('csvExport', () => {
       ['joint', {
           fields: [
             { kind: 'int' as const },
-            { kind: 'enum' as const, enumName: 'R', labels: ['MISS', 'HIT'] },
+            { kind: 'enum' as const, labels: ['MISS', 'HIT'] },
           ],
           probabilities: [
             [[1, 1], 0.4],
@@ -269,7 +262,7 @@ describe('csvExport', () => {
       const lines = result.split('\n');
 
       expect(lines[0]).toBe('joint');
-      expect(lines[1]).toBe('Field 1,R,Probability');
+      expect(lines[1]).toBe('Field 1,Field 2,Probability');
       // Rows are emitted in lexicographic outcome order with enum labels.
       expect(lines[2]).toBe('1,MISS,0.1');
       expect(lines[3]).toBe('1,HIT,0.4');

@@ -3,7 +3,7 @@ import {
   NamedScalarDistribution,
   isNamedScalarDistribution,
 } from "../util";
-import { partitionDistributions } from "./chartData";
+import { categoricalOutcomes, categoricalProbabilities } from "./chartData";
 import { computeTupleRows, fieldName } from "./tupleData";
 
 export function escapeCSVField(field: string): string {
@@ -50,6 +50,29 @@ function generateWideBlock(
   return rows.join("\n");
 }
 
+function generateCategoricalWideBlock(
+  distributions: NamedScalarDistribution[]
+): string {
+  const probabilities = distributions.map(([, distribution]) =>
+    categoricalProbabilities(distribution)
+  );
+  const rows = [
+    "Outcomes",
+    ["Outcome", ...distributions.map(([name]) => escapeCSVField(name))].join(","),
+  ];
+  for (const { key, label } of categoricalOutcomes(distributions)) {
+    rows.push(
+      [
+        escapeCSVField(label),
+        ...probabilities.map((distribution) =>
+          (distribution.get(key) ?? 0).toString()
+        ),
+      ].join(",")
+    );
+  }
+  return rows.join("\n");
+}
+
 /** One CSV block per tuple: a field-per-column joint table. */
 function generateTupleBlock([name, distribution]: NamedDistribution): string {
   const header = [
@@ -69,43 +92,29 @@ export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
   const tuples = outputs.filter(
     ([, distribution]) => distribution.fields.length > 1
   );
-  const { sections } = partitionDistributions(distributions);
-
-  const blocks = sections
-    .map((section) => {
-      if (section.kind === "numeric") {
-        const outcomes = Array.from(
-          new Set(
-            section.distributions.flatMap(([, distribution]) =>
-              distribution.probabilities.map(([[outcome]]) => outcome)
-            )
-          )
-        ).sort((a, b) => a - b);
-        return generateWideBlock(
-          "Numeric outcomes",
-          section.distributions,
-          outcomes,
-          (outcome) => outcome.toString()
-        );
-      }
-
-      const probabilityOutcomes = section.group.distributions.flatMap(
-        ([, distribution]) =>
+  const hasSymbols = distributions.some(
+    ([, distribution]) => distribution.fields[0].kind === "enum"
+  );
+  const blocks: string[] = [];
+  if (distributions.length > 0 && hasSymbols) {
+    blocks.push(generateCategoricalWideBlock(distributions));
+  } else if (distributions.length > 0) {
+    const outcomes = Array.from(
+      new Set(
+        distributions.flatMap(([, distribution]) =>
           distribution.probabilities.map(([[outcome]]) => outcome)
-      );
-      const outcomes = Array.from(
-        new Set([
-          ...section.group.labels.map((_, index) => index),
-          ...probabilityOutcomes,
-        ])
-      ).sort((a, b) => a - b);
-      return generateWideBlock(
-        section.group.enumName,
-        section.group.distributions,
+        )
+      )
+    ).sort((a, b) => a - b);
+    blocks.push(
+      generateWideBlock(
+        "Numeric outcomes",
+        distributions,
         outcomes,
-        (outcome) => section.group.labels[outcome] ?? outcome.toString()
-      );
-    });
+        (outcome) => outcome.toString()
+      )
+    );
+  }
 
   return [...blocks, ...tuples.map(generateTupleBlock)].join("\n\n");
 }

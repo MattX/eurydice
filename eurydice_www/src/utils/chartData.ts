@@ -1,21 +1,10 @@
 import { ChartData } from "chart.js";
-import { NamedScalarDistribution } from "../util";
+import { FieldSchema, NamedScalarDistribution, ScalarDistribution } from "../util";
 
-export interface EnumDistributionGroup {
-  enumName: string;
-  labels: string[];
-  distributions: NamedScalarDistribution[];
+export interface CategoricalOutcome {
+  key: string;
+  label: string;
 }
-
-export interface PartitionedDistributions {
-  numeric: NamedScalarDistribution[];
-  enumGroups: EnumDistributionGroup[];
-  sections: OutputSection[];
-}
-
-export type OutputSection =
-  | { kind: "numeric"; distributions: NamedScalarDistribution[] }
-  | { kind: "enum"; group: EnumDistributionGroup };
 
 export enum DisplayMode {
   Distribution,
@@ -87,53 +76,60 @@ export class ColorGenerator {
   }
 }
 
-export function partitionDistributions(
-  distributions: NamedScalarDistribution[]
-): PartitionedDistributions {
-  const numeric: NamedScalarDistribution[] = [];
-  const enumGroups = new Map<string, EnumDistributionGroup>();
-  const sections: OutputSection[] = [];
-  let hasNumericSection = false;
-
-  for (const namedDistribution of distributions) {
-    const [, distribution] = namedDistribution;
-    const field = distribution.fields[0];
-    if (field.kind === "int") {
-      if (!hasNumericSection) {
-        sections.push({ kind: "numeric", distributions: numeric });
-        hasNumericSection = true;
-      }
-      numeric.push(namedDistribution);
-      continue;
-    }
-
-    let group = enumGroups.get(field.enumName);
-    if (group === undefined) {
-      group = {
-        enumName: field.enumName,
-        labels: field.labels,
-        distributions: [],
-      };
-      enumGroups.set(field.enumName, group);
-      sections.push({ kind: "enum", group });
-    }
-    group.distributions.push(namedDistribution);
-  }
-
-  return {
-    numeric,
-    enumGroups: Array.from(enumGroups.values()),
-    sections,
-  };
+function categoricalKey(field: FieldSchema, outcome: number): string {
+  return field.kind === "int"
+    ? `int:${outcome}`
+    : `symbol:${field.labels[outcome] ?? outcome}`;
 }
 
-export function numericOutcomeRange(
+/** Numeric outcomes first, then observed symbols in their first displayed order. */
+export function categoricalOutcomes(
+  distributions: NamedScalarDistribution[]
+): CategoricalOutcome[] {
+  const integers = new Set<number>();
+  const symbols = new Map<string, string>();
+  for (const [, distribution] of distributions) {
+    const field = distribution.fields[0];
+    if (field.kind === "int") {
+      for (const [[outcome]] of distribution.probabilities) {
+        integers.add(outcome);
+      }
+    } else {
+      // Symbol labels are a dense dictionary of the values observed in this
+      // field, so there is no separate declared domain to filter here.
+      for (const label of field.labels) {
+        symbols.set(`symbol:${label}`, label);
+      }
+    }
+  }
+  return [
+    ...Array.from(integers)
+      .sort((a, b) => a - b)
+      .map((value) => ({ key: `int:${value}`, label: value.toString() })),
+    ...Array.from(symbols, ([key, label]) => ({ key, label })),
+  ];
+}
+
+export function categoricalProbabilities(
+  distribution: ScalarDistribution
+): Map<string, number> {
+  const field = distribution.fields[0];
+  const probabilities = new Map<string, number>();
+  for (const [[outcome], probability] of distribution.probabilities) {
+    const key = categoricalKey(field, outcome);
+    probabilities.set(key, (probabilities.get(key) ?? 0) + probability);
+  }
+  return probabilities;
+}
+
+/** Dense numeric range used by the line chart, or null for categorical data. */
+export function numericChartOutcomeRange(
   distributions: NamedScalarDistribution[]
 ): number | null {
-  const numeric = distributions.filter(
-    ([, distribution]) => distribution.fields[0].kind === "int"
-  );
-  const outcomes = numeric.flatMap(([, distribution]) =>
+  if (distributions.some(([, distribution]) => distribution.fields[0].kind === "enum")) {
+    return null;
+  }
+  const outcomes = distributions.flatMap(([, distribution]) =>
     distribution.probabilities.map(([[outcome]]) => outcome)
   );
   if (outcomes.length === 0) return null;
@@ -141,25 +137,19 @@ export function numericOutcomeRange(
 }
 
 export function prepareCategoricalChartData(
-  group: EnumDistributionGroup,
+  distributions: NamedScalarDistribution[],
   isDarkMode = false
 ): ChartData<"bar", number[], string> {
+  const outcomes = categoricalOutcomes(distributions);
   const colorGenerator = new ColorGenerator(isDarkMode);
   return {
-    labels: group.labels,
-    datasets: group.distributions.map(([name, distribution]) => {
-      const probabilities = new Map(
-        distribution.probabilities.map(([[outcome], probability]) => [
-          outcome,
-          probability,
-        ])
-      );
+    labels: outcomes.map(({ label }) => label),
+    datasets: distributions.map(([name, distribution]) => {
+      const probabilities = categoricalProbabilities(distribution);
       const color = colorGenerator.nextColor();
       return {
         label: name,
-        data: group.labels.map((_, outcome) =>
-          (probabilities.get(outcome) ?? 0) * 100
-        ),
+        data: outcomes.map(({ key }) => (probabilities.get(key) ?? 0) * 100),
         backgroundColor: color,
         borderColor: color,
         borderWidth: 1,
@@ -219,7 +209,7 @@ export function prepareChartData(
     });
   }
   return {
-    labels: range.map((x) => outcomeLabel(chartData, x)),
+    labels: range.map(String),
     datasets,
   };
 }
@@ -257,7 +247,7 @@ function prepareTransposedChartData(
     
     const color = colorGenerator.nextColor();
     datasets.push({
-      label: outcomeLabel(chartData, outcome),
+      label: outcome.toString(),
       data,
       borderColor: color,
       backgroundColor: color,
@@ -268,16 +258,4 @@ function prepareTransposedChartData(
     labels: distributionNames,
     datasets,
   };
-}
-
-function outcomeLabel(
-  chartData: NamedScalarDistribution[],
-  outcome: number
-): string {
-  for (const [, distribution] of chartData) {
-    const field = distribution.fields[0];
-    const label = field.kind === "enum" ? field.labels[outcome] : undefined;
-    if (label !== undefined) return label;
-  }
-  return outcome.toString();
 }

@@ -3,11 +3,11 @@ import { Distribution, FieldSchema, ScalarDistribution } from "../util";
 /**
  * Wire representation of an output distribution, as serialized by the engine. serde
  * encodes `FieldSchema::Int` as the bare string "Int" and the struct
- * variant as `{ Enum: { enum_name, labels } }`.
+ * variant as `{ Enum: { labels } }`.
  */
 export type WireFieldSchema =
   | "Int"
-  | { Enum: { enum_name: string; labels: string[] } };
+  | { Enum: { labels: string[] } };
 
 export interface WireDistribution {
   fields: WireFieldSchema[];
@@ -21,7 +21,6 @@ export function normalizeFieldSchema(
   if (wire === "Int") return { kind: "int" };
   return {
     kind: "enum",
-    enumName: wire.Enum.enum_name,
     labels: wire.Enum.labels,
   };
 }
@@ -49,8 +48,6 @@ export function fieldValueLabel(
 export function fieldName(dist: Distribution, index: number): string {
   const explicit = dist.fieldNames?.[index];
   if (explicit !== undefined) return explicit;
-  const schema = dist.fields[index];
-  if (schema.kind === "enum") return schema.enumName;
   return `Field ${index + 1}`;
 }
 
@@ -62,9 +59,9 @@ export interface FieldAxis {
 }
 
 /**
- * The ordered set of values a field ranges over. Enum fields always show every
- * member; integer fields fill the observed range so gaps render as empty cells,
- * matching the 1-D numeric chart.
+ * The ordered set of values a field ranges over. Enum schemas contain the
+ * values observed in the distribution; integer fields fill the observed range
+ * so gaps render as empty cells, matching the 1-D numeric chart.
  */
 export function fieldAxis(
   schema: FieldSchema,

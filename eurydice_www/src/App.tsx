@@ -11,7 +11,7 @@ import Header from "./components/Header";
 import { DarkModeSwitcher } from "./components/DarkModeSwitcher";
 import EurydiceWorker from "./worker?worker";
 import { Toaster } from "react-hot-toast";
-import { numericOutcomeRange } from "./utils/chartData";
+import { numericChartOutcomeRange } from "./utils/chartData";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   currentSource,
@@ -102,8 +102,10 @@ function AppInner() {
         );
         const chartData = distributions.filter(isNamedScalarDistribution);
 
-        // Categorical outcomes use enum member ordinals, not a numeric axis.
-        const range = numericOutcomeRange(chartData);
+        // The numeric chart fills every integer between its endpoints. The
+        // categorical chart only shows observed outcomes, so it needs no range
+        // limit even when one of those outcomes is a large integer.
+        const range = numericChartOutcomeRange(chartData);
         if (range !== null && range >= 5000) {
           setOutput(
             distributions.filter(

@@ -215,7 +215,6 @@ mod tests {
             fields: vec![
                 FieldSchema::Int,
                 FieldSchema::Enum {
-                    enum_name: "RESULT".into(),
                     labels: vec!["MISS".into(), "HIT".into()],
                 },
             ],

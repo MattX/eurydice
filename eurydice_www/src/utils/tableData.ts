@@ -1,10 +1,31 @@
 import { NamedScalarDistribution, ScalarDistribution } from "../util";
-import { DisplayMode } from "./chartData";
+import {
+  categoricalOutcomes,
+  categoricalProbabilities,
+  DisplayMode,
+} from "./chartData";
 
 export interface TableRowData {
-  outcome: number;
+  outcome: number | string;
   outcomeLabel: string;
   values: string[];
+}
+
+/** Table rows for a categorical chart containing numeric and symbol outputs. */
+export function computeCategoricalTableData(
+  distributions: NamedScalarDistribution[]
+): TableRowData[] {
+  const probabilities = distributions.map(([, distribution]) =>
+    categoricalProbabilities(distribution)
+  );
+  return categoricalOutcomes(distributions).map(({ key, label }) => ({
+    outcome: key,
+    outcomeLabel: label,
+    values: probabilities.map((distribution) => {
+      const probability = (distribution.get(key) ?? 0) * 100;
+      return probability > 0 ? `${probability.toFixed(2)}%` : "-";
+    }),
+  }));
 }
 
 export interface DistributionStatistics {
@@ -44,15 +65,9 @@ export function computeTableData(
   sortedOutcomes: number[]
 ): TableRowData[] {
   return sortedOutcomes.map((outcome) => {
-    const enumLabel = distributions
-      .map(([, distribution]) => {
-        const field = distribution.fields[0];
-        return field.kind === "enum" ? field.labels[outcome] : undefined;
-      })
-      .find((label) => label !== undefined);
     const row = {
       outcome,
-      outcomeLabel: enumLabel ?? outcome.toString(),
+      outcomeLabel: outcome.toString(),
       values: [] as string[],
     };
     distributions.forEach(([, distribution]) => {

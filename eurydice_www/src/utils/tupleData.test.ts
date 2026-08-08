@@ -15,7 +15,7 @@ import {
 const jointIntEnum: Distribution = {
   fields: [
     { kind: "int" },
-    { kind: "enum", enumName: "RESULT", labels: ["MISS", "HIT"] },
+    { kind: "enum", labels: ["MISS", "HIT"] },
   ],
   probabilities: [
     [[1, 0], 0.1],
@@ -29,27 +29,27 @@ describe("tupleData normalization", () => {
   it("normalizes wire field schemas", () => {
     expect(normalizeFieldSchema("Int")).toEqual({ kind: "int" });
     expect(
-      normalizeFieldSchema({ Enum: { enum_name: "R", labels: ["A", "B"] } })
-    ).toEqual({ kind: "enum", enumName: "R", labels: ["A", "B"] });
+      normalizeFieldSchema({ Enum: { labels: ["A", "B"] } })
+    ).toEqual({ kind: "enum", labels: ["A", "B"] });
   });
 
   it("passes distribution probabilities through", () => {
     const dist = normalizeDistribution({
-      fields: ["Int", { Enum: { enum_name: "R", labels: ["A"] } }],
+      fields: ["Int", { Enum: { labels: ["A"] } }],
       field_names: ["Count", "Result"],
       probabilities: [[[1, 0], 1]],
     });
-    expect(dist.fields[1]).toEqual({ kind: "enum", enumName: "R", labels: ["A"] });
+    expect(dist.fields[1]).toEqual({ kind: "enum", labels: ["A"] });
     expect(dist.fieldNames).toEqual(["Count", "Result"]);
   });
 
   it("uses the same wire shape for scalar distributions", () => {
     const dist = normalizeDistribution({
-      fields: [{ Enum: { enum_name: "R", labels: ["A", "B"] } }],
+      fields: [{ Enum: { labels: ["A", "B"] } }],
       probabilities: [[[1], 1]],
     });
     expect(dist.fields).toEqual([
-      { kind: "enum", enumName: "R", labels: ["A", "B"] },
+      { kind: "enum", labels: ["A", "B"] },
     ]);
     expect(dist.probabilities).toEqual([[[1], 1]]);
   });
@@ -58,7 +58,7 @@ describe("tupleData normalization", () => {
 describe("tupleData labels and axes", () => {
   it("prefers explicit field names and otherwise uses existing defaults", () => {
     expect(fieldName(jointIntEnum, 0)).toBe("Field 1");
-    expect(fieldName(jointIntEnum, 1)).toBe("RESULT");
+    expect(fieldName(jointIntEnum, 1)).toBe("Field 2");
     expect(
       fieldName({ ...jointIntEnum, fieldNames: ["Roll", "Outcome"] }, 1)
     ).toBe("Outcome");
@@ -67,7 +67,7 @@ describe("tupleData labels and axes", () => {
   it("labels enum fields by member name and ints by value", () => {
     expect(fieldValueLabel({ kind: "int" }, 7)).toBe("7");
     expect(
-      fieldValueLabel({ kind: "enum", enumName: "R", labels: ["MISS", "HIT"] }, 1)
+      fieldValueLabel({ kind: "enum", labels: ["MISS", "HIT"] }, 1)
     ).toBe("HIT");
   });
 
@@ -75,13 +75,13 @@ describe("tupleData labels and axes", () => {
     expect(fieldAxis({ kind: "int" }, [2, 4]).values).toEqual([2, 3, 4]);
   });
 
-  it("uses every enum member for enum axes", () => {
+  it("uses every observed symbol in the field dictionary", () => {
     const axis = fieldAxis(
-      { kind: "enum", enumName: "R", labels: ["A", "B", "C"] },
-      [0, 2]
+      { kind: "enum", labels: ["A", "C"] },
+      [0, 1]
     );
-    expect(axis.values).toEqual([0, 1, 2]);
-    expect(axis.labels).toEqual(["A", "B", "C"]);
+    expect(axis.values).toEqual([0, 1]);
+    expect(axis.labels).toEqual(["A", "C"]);
   });
 });
 
@@ -95,7 +95,7 @@ describe("tupleData marginals", () => {
     expect(marginal0.fields).toEqual([{ kind: "int" }]);
 
     expect(marginal1.fields).toEqual([
-      { kind: "enum", enumName: "RESULT", labels: ["MISS", "HIT"] },
+      { kind: "enum", labels: ["MISS", "HIT"] },
     ]);
     const byValue = new Map(
       marginal1.probabilities.map(([[value], probability]) => [

@@ -1,6 +1,6 @@
 //! Runtime values and their element-type behavior.
 
-use std::{fmt::Write, rc::Rc};
+use std::{collections::HashSet, fmt::Write, rc::Rc};
 
 use malachite::{Natural, base::num::basic::traits::One};
 
@@ -8,48 +8,32 @@ use crate::ast;
 use crate::dice::Pool;
 use crate::error::{NonAdditiveSubject, NonAdditiveSumError, RuntimeError, ShapeMismatchError};
 
-/// One `enum:` declaration: a named domain of symbols.
-///
-/// Sets exist for display only. They carry no typing power: every symbol has
-/// the same element type whatever set it was declared in.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SymbolSet {
-    pub name: String,
-    /// Global index of this set's first member. A set's members are contiguous.
-    first: u32,
-    len: u32,
-}
-
 /// Every symbol declared so far, in declaration order.
 ///
-/// Symbol values are bare indices into this table, so the table is the only
-/// place that knows a symbol's name and the set it came from. Keeping it out of
-/// the values means an outcome is a plain `u32`: no reference counting in the
-/// Icepool inner loops, and a derived `Ord` that already sorts symbols in
-/// declaration order.
+/// Symbol values are bare indices into this table. Keeping names out of values
+/// means an outcome is a plain `u32`: no reference counting in the Icepool
+/// inner loops, and a derived `Ord` that already sorts symbols in declaration
+/// order.
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
     names: Vec<String>,
-    /// Parallel to `names`: which set each symbol belongs to.
-    sets_by_symbol: Vec<u32>,
-    sets: Vec<SymbolSet>,
+    declared: HashSet<String>,
 }
 
 impl SymbolTable {
-    /// Declares a set, returning the global index of each member in order.
-    pub(crate) fn define_set(&mut self, name: String, members: &[String]) -> Vec<u32> {
-        let first = u32::try_from(self.names.len()).expect("symbol count fits in u32");
-        let set = u32::try_from(self.sets.len()).expect("set count fits in u32");
-        self.sets.push(SymbolSet {
-            name,
-            first,
-            len: u32::try_from(members.len()).expect("member count fits in u32"),
-        });
-        for member in members {
-            self.names.push(member.clone());
-            self.sets_by_symbol.push(set);
-        }
-        (first..first + u32::try_from(members.len()).expect("member count fits in u32")).collect()
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.declared.contains(name)
+    }
+
+    /// Declares one symbol and returns its global index in declaration order.
+    pub(crate) fn define(&mut self, name: String) -> u32 {
+        let symbol = u32::try_from(self.names.len()).expect("symbol count fits in u32");
+        assert!(
+            self.declared.insert(name.clone()),
+            "symbol is declared once"
+        );
+        self.names.push(name);
+        symbol
     }
 
     pub fn name(&self, symbol: u32) -> &str {
@@ -57,35 +41,6 @@ impl SymbolTable {
             .get(usize::try_from(symbol).expect("symbol index fits in usize"))
             .map(String::as_str)
             .unwrap_or("<?>")
-    }
-
-    pub fn set_of(&self, symbol: u32) -> &SymbolSet {
-        &self.sets[self.set_index(symbol)]
-    }
-
-    /// Which declared set a symbol belongs to. Sets are numbered in
-    /// declaration order, so this doubles as their display order.
-    pub fn set_index(&self, symbol: u32) -> usize {
-        let set = self.sets_by_symbol[usize::try_from(symbol).expect("symbol index fits in usize")];
-        usize::try_from(set).expect("set index fits in usize")
-    }
-
-    pub fn set(&self, index: usize) -> &SymbolSet {
-        &self.sets[index]
-    }
-
-    /// The names of every member of `set`, in declaration order.
-    pub fn members(&self, set: &SymbolSet) -> &[String] {
-        let first = usize::try_from(set.first).expect("symbol index fits in usize");
-        let len = usize::try_from(set.len).expect("member count fits in usize");
-        &self.names[first..first + len]
-    }
-
-    /// The ordinal of `symbol` within its own set, which is what an output's
-    /// field values are expressed in.
-    pub fn ordinal(&self, symbol: u32) -> i32 {
-        let set = self.set_of(symbol);
-        i32::try_from(symbol - set.first).expect("member count fits in i32")
     }
 }
 
@@ -785,13 +740,11 @@ impl From<Pool> for RuntimeValue {
 mod tests {
     use super::*;
 
-    /// A table holding one declared set, `ATTACK_RESULT { MISS, HIT }`.
+    /// A table holding the declared symbols `MISS` and `HIT`.
     pub(crate) fn attack_result() -> SymbolTable {
         let mut symbols = SymbolTable::default();
-        symbols.define_set(
-            "ATTACK_RESULT".to_string(),
-            &["MISS".to_string(), "HIT".to_string()],
-        );
+        symbols.define("MISS".to_string());
+        symbols.define("HIT".to_string());
         symbols
     }
 
@@ -1009,7 +962,6 @@ mod tests {
     fn symbols_are_named_by_the_table() {
         let symbols = attack_result();
         assert_eq!(enum_value(1).display(&symbols).to_string(), "HIT");
-        assert_eq!(symbols.set_of(1).name, "ATTACK_RESULT");
-        assert_eq!(symbols.ordinal(1), 1);
+        assert_eq!(symbols.name(0), "MISS");
     }
 }

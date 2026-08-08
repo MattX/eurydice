@@ -8,7 +8,7 @@ A: d2
 B: d2
 output [tuple A B] named "lifted constructor"
 
-enum: RESULT { MISS, HIT }
+enum { MISS, HIT }
 T: [tuple 3 HIT]
 output T named "tuple with enum"
 output [field 2 of T] named "projected enum"
@@ -68,11 +68,11 @@ output [tuple 1 2] labeled "", "" named "empty labels"
 2,2,25
 
 "tuple with enum"
-#,RESULT,%
+#,Symbol,%
 3,HIT,100
 
 "projected enum"
-RESULT,%
+Symbol,%
 HIT,100
 
 "tuple equality"

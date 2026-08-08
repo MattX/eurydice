@@ -3,8 +3,8 @@ import {
   DisplayMode,
   prepareChartData,
   prepareCategoricalChartData,
-  partitionDistributions,
-  numericOutcomeRange,
+  categoricalOutcomes,
+  numericChartOutcomeRange,
   ColorGenerator,
   partialSums,
 } from './chartData';
@@ -238,64 +238,57 @@ describe('chartData', () => {
     const mixedDistributions: [string, ScalarDistribution][] = [
       ['numeric', scalarDistribution([[1, 1]])],
       ['attack', scalarDistribution(
-        [[0, 0.25], [2, 0.75]],
-        { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT', 'CRITICAL'] },
+        [[0, 0.25], [1, 0.75]],
+        { kind: 'enum', labels: ['MISS', 'HIT'] },
       )],
       ['defend', scalarDistribution(
-        [[1, 1]],
-        { kind: 'enum', enumName: 'RESULT', labels: ['MISS', 'HIT', 'CRITICAL'] },
+        [[0, 1]],
+        { kind: 'enum', labels: ['HIT'] },
       )],
       ['weather', scalarDistribution(
         [[0, 1]],
-        { kind: 'enum', enumName: 'WEATHER', labels: ['SUN', 'RAIN'] },
+        { kind: 'enum', labels: ['SUN'] },
       )],
     ];
 
-    it('partitions numeric outputs and groups enum outputs by type in input order', () => {
-      const result = partitionDistributions(mixedDistributions);
+    it('combines numeric and symbolic outputs on one categorical axis', () => {
+      const result = prepareCategoricalChartData(mixedDistributions);
 
-      expect(result.numeric.map(([name]) => name)).toEqual(['numeric']);
-      expect(result.enumGroups.map((group) => group.enumName)).toEqual(['RESULT', 'WEATHER']);
-      expect(result.enumGroups[0].distributions.map(([name]) => name)).toEqual(['attack', 'defend']);
-      expect(result.sections.map((section) =>
-        section.kind === 'numeric' ? 'numeric' : section.group.enumName
-      )).toEqual(['numeric', 'RESULT', 'WEATHER']);
+      expect(result.labels).toEqual(['1', 'MISS', 'HIT', 'SUN']);
+      expect(result.datasets[0].data).toEqual([100, 0, 0, 0]);
+      expect(result.datasets[1].data).toEqual([0, 25, 75, 0]);
+      expect(result.datasets[2].data).toEqual([0, 0, 100, 0]);
+      expect(result.datasets[3].data).toEqual([0, 0, 0, 100]);
     });
 
-    it('orders sections by the first output of each compatible type', () => {
-      const reordered = [
-        mixedDistributions[1],
-        mixedDistributions[3],
-        mixedDistributions[0],
-        mixedDistributions[2],
-      ];
-      const { sections } = partitionDistributions(reordered);
-
-      expect(sections.map((section) =>
-        section.kind === 'numeric' ? 'numeric' : section.group.enumName
-      )).toEqual(['RESULT', 'WEATHER', 'numeric']);
+    it('deduplicates the same observed symbol across local dictionaries', () => {
+      expect(categoricalOutcomes(mixedDistributions).map(({ label }) => label))
+        .toEqual(['1', 'MISS', 'HIT', 'SUN']);
     });
 
-    it('uses declaration order and fills missing enum members with zero', () => {
-      const { enumGroups } = partitionDistributions(mixedDistributions);
-      const result = prepareCategoricalChartData(enumGroups[0]);
-
-      expect(result.labels).toEqual(['MISS', 'HIT', 'CRITICAL']);
-      expect(result.datasets[0].data).toEqual([25, 0, 75]);
-      expect(result.datasets[1].data).toEqual([0, 100, 0]);
-    });
-
-    it('ignores enum ordinals when calculating the numeric display range', () => {
+    it('keeps integer and symbol identities separate', () => {
       const distributions: [string, ScalarDistribution][] = [
-        ['numeric', scalarDistribution([[10, 0.5], [20, 0.5]])],
-        ['enum', scalarDistribution(
-          [[0, 0.5], [10000, 0.5]],
-          { kind: 'enum', enumName: 'LARGE_ENUM', labels: ['FIRST'] },
-        )],
+        ['numeric', scalarDistribution([[0, 1]])],
+        ['symbol', scalarDistribution([[0, 1]], { kind: 'enum', labels: ['ZERO'] })],
+      ];
+      const result = prepareCategoricalChartData(distributions);
+      expect(result.labels).toEqual(['0', 'ZERO']);
+      expect(result.datasets[0].data).toEqual([100, 0]);
+      expect(result.datasets[1].data).toEqual([0, 100]);
+    });
+
+    it('only limits the dense numeric chart', () => {
+      const numeric: [string, ScalarDistribution][] = [
+        ['numeric', scalarDistribution([[0, 0.5], [10000, 0.5]])],
+      ];
+      const categorical: [string, ScalarDistribution] = [
+        'symbol',
+        scalarDistribution([[0, 1]], { kind: 'enum', labels: ['FIRST'] }),
       ];
 
-      expect(numericOutcomeRange(distributions)).toBe(10);
-      expect(numericOutcomeRange([distributions[1]])).toBeNull();
+      expect(numericChartOutcomeRange(numeric)).toBe(10000);
+      expect(numericChartOutcomeRange([...numeric, categorical])).toBeNull();
+      expect(numericChartOutcomeRange([categorical])).toBeNull();
     });
   });
 

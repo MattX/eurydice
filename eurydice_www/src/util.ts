@@ -5,7 +5,7 @@
  */
 export type FieldSchema =
   | { kind: "int" }
-  | { kind: "enum"; enumName: string; labels: string[] };
+  | { kind: "enum"; labels: string[] };
 
 /**
  * The canonical representation of every output distribution. A scalar has one

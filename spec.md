@@ -76,7 +76,7 @@ Type    = Element | list [Element] | pool [Element]
 There are three kinds of element values:
 
 * `int`: values of this type hold a 32-bit signed integer
-* _symbols_: non-numeric values, declared in named sets, which can be used to represent discrete outcomes, booleans, etc.
+* _symbols_: declared non-numeric values which can be used to represent discrete outcomes, booleans, etc.
 * _tuples_: fixed-size, ordered products of two to four `int` or symbol fields. Tuple types are structural: the type of a tuple is determined by the number and types of its fields. Tuples do not nest.
 
 Two kinds of collections are built on these:
@@ -99,7 +99,7 @@ Mixing is allowed at the scalar level only. Every outcome of a collection must h
 A tuple's individual fields are scalars, so a collection of tuples may well disagree about a field:
 
 ```
-enum: SPECIAL { TIMES_TWO }
+enum { TIMES_TWO }
 DIE: d{0:2, 1:2, 2, TIMES_TWO}
 PAIR: [tuple DIE 1]   \ field 1 is sometimes an int, sometimes a symbol \
 ```
@@ -135,17 +135,20 @@ An element value is _additive_ when it has a ✓ in the `+` row: an `int`, or a 
 
 ### ⊕ Symbols
 
-Symbols are declared at the top level, in named sets:
+Symbols are declared at the top level, individually or in groups:
 
 ```
-enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
+enum: MISS
+enum: HIT
+enum: CRITICALHIT
+
+\ equivalent shorthand \
+enum { MISS, HIT, CRITICALHIT }
 ```
 
-The set name and its members use variable-identifier syntax. A set must contain at least one member. Variables, set names, and symbol names all share a namespace. It is an error to declare a set whose name or any of whose member names equals that of a declared variable. Conversely, it is an error to declare a variable whose name collides with a set name or a symbol name.
+Symbol names use variable-identifier syntax. Variables and symbol names share a namespace. It is an error to declare a symbol whose name equals that of a declared variable. Conversely, it is an error to declare a variable whose name is that same as a symbol name.
 
-A declared set names a _domain_, not a type. All symbols share one element type, whichever set they were declared in, so symbols from two sets may appear in one collection and comparing them is not an error — they are simply never equal. A set determines how its members are displayed, and where they fall in the iteration order.
-
-Symbols have an _iteration order_, namely the order in which they are declared, across all sets. It is used only to sort multisets during [multiset iteration](#multiset-iteration), and therefore by the `"position order"` setting. It does not make ordering comparisons or `[sort]` available for symbols.
+Symbols have an _iteration order_, which is their declaration order in the program. It is used only to sort multisets during [multiset iteration](#multiset-iteration), and therefore by the `"position order"` setting. It does not make ordering comparisons or `[sort]` available for symbols.
 
 Every `int` sorts before every symbol, and every symbol before every tuple.
 
@@ -214,7 +217,7 @@ The probability associated with each multiset is the product of its values' prob
 
 If there is a single die in the pool, this is the same as iterating over the die's outcomes.
 
-Multiset iteration is available for every outcome type, additive or not. Given `enum: ATTACK_RESULT { MISS, HIT }`, the multisets of `2d{MISS, HIT}` are `{MISS, MISS}` with probability 1/4, `{MISS, HIT}` with probability 1/2, and `{HIT, HIT}` with probability 1/4.
+Multiset iteration is available for every outcome type, additive or not. Given `enum { MISS, HIT }`, the multisets of `2d{MISS, HIT}` are `{MISS, MISS}` with probability 1/4, `{MISS, HIT}` with probability 1/2, and `{HIT, HIT}` with probability 1/4.
 
 #### Outcome mapping
 
@@ -557,7 +560,7 @@ The operators `=`, `!=`, `<`, `<=`, `>`, and `>=` are comparison operators, perf
 
 In all cases, these operators evaluate to `1` if their condition is true, or `0` otherwise.
 
-Equality and inequality are _total_: they are defined between any two values, whatever their types. Two elements of different kinds — a symbol and an `int`, two symbols from different declared sets, two tuples of different arity — are never equal. Symbols compare by identity and tuples of the same arity structurally.
+Equality and inequality are defined between any two values, whatever their types. Two elements of different types are never equal. Symbols compare by identity and tuples of the same arity structurally.
 
 This totality is what makes a [mixed collection](#-mixed-collections) usable: a value drawn from one carries no record of the collection it came from, so `X = TIMES_TWO` has to be answerable when `X` happens to be a number.
 
@@ -746,8 +749,6 @@ output [tuple d6, d8] labeled "First die", "Second die"
 output [tuple d6, d8] named "Joint roll" labeled "d6 result", "d8 result"
 ```
 
-Symbol outputs display symbol names rather than numeric values, and show every member of the declared sets involved, including those with probability zero. Tuple outputs display every field of each outcome. Numeric statistics and cumulative/order-based presentation do not apply to symbol or tuple distributions.
-
 For a `print` statement, the value of the expression is shown to the user as soon as possible, attached to the name if present. There is no default name otherwise. `print` does not sum its argument, so it can display a pool of any dimension and outcome type, such as `2d{MISS, HIT}` or `4d{0:2, 1:2, 2, TIMES_TWO}`.
 
 ### Set
@@ -771,15 +772,16 @@ Assignment statements either create a new binding in the [innermost environment 
 AssignmentStatement = VariableName ':' Expr.
 ```
 
-Assigning to the name of a declared set or one of its symbols is an error. Those names also cannot be reused for function parameters or loop variables.
+Assigning to the name of a declared symbol is an error. Symbol names also cannot be reused for function parameters or loop variables.
 
-### ⊕ Symbol set definition
+### ⊕ Symbol definition
 
 ```
-EnumDefinitionStatement = 'enum' ':' VariableName '{' VariableName {',' VariableName} '}'.
+EnumDefinitionStatement = 'enum' ':' VariableName
+                        | 'enum' '{' VariableName {',' VariableName} '}'.
 ```
 
-Set definitions are executed sequentially and are only valid at the top level. The keyword is `enum` for historical reasons; a definition declares a named set of [symbols](#-symbols), not a type.
+Symbol definitions are only valid at the top level. The form with braces is syntactic sugar for a list of enum declarations.
 
 ### Function definition
 
@@ -883,7 +885,7 @@ Returns `1` if `N` is an `int`, or `0` if it is a symbol or a tuple. This is the
 As with any `n`-shaped parameter, a pool argument is [summed](#summing) and the function is evaluated for each of its outcomes, so `[POOL is integer]` reports the distribution of a single die's kind and is an error for a mixed pool of dimension other than one.
 
 ```
-enum: SPECIAL { TIMES_TWO }
+enum { TIMES_TWO }
 output [d{0:2, 1:2, 2, TIMES_TWO} is integer]  \ Outputs d{0:1, 1:5} \
 ```
 
@@ -894,7 +896,7 @@ Returns the sum of the `int` outcomes of `SEQ`, ignoring outcomes that are not `
 If `SEQ` is a pool, the result is the distribution of that sum across all of its dice.
 
 ```
-enum: SPECIAL { TIMES_TWO }
+enum { TIMES_TWO }
 output [sum integers in {1, TIMES_TWO, 2}]  \ Outputs 3 \
 output [sum integers in d{0:2, 1:2, 2, TIMES_TWO}]  \ Outputs d{0:3, 1:2, 2} \
 ```
@@ -907,7 +909,7 @@ output [sum integers in d{0:2, 1:2, 2, TIMES_TWO}]  \ Outputs d{0:3, 1:2, 2} \
 Returns how many outcomes of `SEQ` are `int`s. As with [`[sum integers in SEQ]`](#-sum-integers-in-seqs), this is defined for a [mixed collection](#-mixed-collections) of any dimension, and a pool argument gives the distribution of that count across its dice.
 
 ```
-enum: SPECIAL { TIMES_TWO }
+enum { TIMES_TWO }
 output [count integers in {1, TIMES_TWO, 2}]  \ Outputs 2 \
 output [count integers in 2d{1, TIMES_TWO}]  \ Outputs d{0:1, 1:2, 2:1} \
 ```

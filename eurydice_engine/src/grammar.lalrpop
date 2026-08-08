@@ -29,12 +29,10 @@ StatementInner: Statement = {
     <id_start: @L> <id:VariableIdentifier> <id_end: @R> ":" <e:Expr> => 
         Statement::Assignment { name: WithRange::new(id_start, id_end, id), value: e },
     <fd:FunctionDefinition> => Statement::FunctionDefinition(fd),
-    "enum" ":" <name_start:@L> <name:VariableIdentifier> <name_end:@R>
-        "{" <members:Comma1<RangedVariableIdentifier>> "}" =>
-        Statement::EnumDefinition(EnumDefinition {
-            name: WithRange::new(name_start, name_end, name),
-            members,
-        }),
+    "enum" ":" <member:RangedVariableIdentifier> =>
+        Statement::SymbolDefinitions(vec![member]),
+    "enum" "{" <members:Comma1<RangedVariableIdentifier>> "}" =>
+        Statement::SymbolDefinitions(members),
     "output" <e:Expr> <options:OutputOptions> => Statement::Output {
         expr: e,
         named: options.named,

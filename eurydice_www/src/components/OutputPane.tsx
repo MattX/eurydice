@@ -31,16 +31,17 @@ import {
   DisplayMode,
   prepareChartData,
   prepareCategoricalChartData,
-  partitionDistributions,
+  categoricalOutcomes,
   ColorGenerator,
-  EnumDistributionGroup,
 } from "../utils/chartData";
 import {
   getAllUniqueOutcomes,
   computeTableData,
+  computeCategoricalTableData,
   computeDistributionStatistics,
   calculateBracketingProbabilities,
   DistributionStatistics,
+  TableRowData,
 } from "../utils/tableData";
 Chart.register(...registerables, MatrixController, MatrixElement);
 
@@ -84,35 +85,24 @@ export default function OutputPane(props: OutputPaneProps) {
 }
 
 /**
- * Renders a set of named distributions as grouped numeric/enum sections. Shared
- * by the top-level output and by tuple marginals, so marginals get the same
- * full-featured numeric chart (display modes, bracketing, table view).
+ * Renders all scalar distributions together. Numeric-only outputs use the
+ * full-featured line chart; the presence of any symbol switches the complete
+ * set to one categorical bar chart.
  */
 function OutputSections({
   distributions,
 }: {
   distributions: NamedScalarDistribution[];
 }) {
-  const { sections } = React.useMemo(
-    () => partitionDistributions(distributions),
+  const hasSymbols = React.useMemo(
+    () => distributions.some(([, distribution]) => distribution.fields[0].kind === "enum"),
     [distributions]
   );
-  return (
-    <>
-      {sections.map((section) =>
-        section.kind === "numeric" ? (
-          <NumericOutputSection
-            key="numeric"
-            distributions={section.distributions}
-          />
-        ) : (
-          <EnumOutputSection
-            key={`enum:${section.group.enumName}`}
-            group={section.group}
-          />
-        )
-      )}
-    </>
+  if (distributions.length === 0) return null;
+  return hasSymbols ? (
+    <CategoricalOutputSection distributions={distributions} />
+  ) : (
+    <NumericOutputSection distributions={distributions} />
   );
 }
 
@@ -291,7 +281,7 @@ function NumericOutputSection({
         )}
       </div>
       {tableMode ? (
-        <CombinedProbabilityTable
+        <NumericProbabilityTable
           distributions={distributions}
           mode={displayMode}
         />
@@ -307,16 +297,18 @@ function NumericOutputSection({
   );
 }
 
-function EnumOutputSection({ group }: { group: EnumDistributionGroup }) {
+function CategoricalOutputSection({
+  distributions,
+}: {
+  distributions: NamedScalarDistribution[];
+}) {
   const [tableMode, setTableMode] = React.useState(false);
   const isDarkMode = React.useContext(DarkModeContext);
 
   return (
     <section>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <h2 className="mr-auto text-sm font-semibold text-[var(--text-muted)]">
-          {group.enumName}
-        </h2>
+        <div className="mr-auto" />
         <button
           className="btn-toggle"
           aria-pressed={tableMode}
@@ -326,14 +318,9 @@ function EnumOutputSection({ group }: { group: EnumDistributionGroup }) {
         </button>
       </div>
       {tableMode ? (
-        <CombinedProbabilityTable
-          distributions={group.distributions}
-          mode={DisplayMode.Distribution}
-          outcomes={group.labels.map((_, index) => index)}
-          showStatistics={false}
-        />
+        <CategoricalProbabilityTable distributions={distributions} />
       ) : (
-        <CategoricalChart group={group} isDarkMode={isDarkMode} />
+        <CategoricalChart distributions={distributions} isDarkMode={isDarkMode} />
       )}
     </section>
   );
@@ -756,9 +743,7 @@ function TupleListTable({ distribution }: { distribution: Distribution }) {
 
 function TupleMarginals({ distribution }: { distribution: Distribution }) {
   // Each field's marginal is a plain 1-D distribution, so route them through
-  // the same section renderer as top-level outputs: numeric marginals overlay
-  // on one full-featured chart (display modes, bracketing, table), and enum
-  // marginals become categorical sections.
+  // the same combined renderer as top-level outputs.
   const marginals = React.useMemo(
     () => computeMarginals(distribution),
     [distribution]
@@ -862,20 +847,20 @@ function NumericChart({ distributions, mode, isDarkMode, plugin }: NumericChartP
 }
 
 function CategoricalChart({
-  group,
+  distributions,
   isDarkMode,
 }: {
-  group: EnumDistributionGroup;
+  distributions: NamedScalarDistribution[];
   isDarkMode: boolean;
 }) {
   const { gridColor, textColor, tooltipBg, tooltipText, tooltipBorder } =
     chartTheme(isDarkMode);
-  const height = Math.max(180, group.labels.length * 42 + 70);
+  const height = Math.max(180, categoricalOutcomes(distributions).length * 42 + 70);
 
   return (
     <div className="relative" style={{ height }}>
       <Bar
-        data={prepareCategoricalChartData(group, isDarkMode)}
+        data={prepareCategoricalChartData(distributions, isDarkMode)}
         options={{
           indexAxis: "y",
           maintainAspectRatio: false,
@@ -935,11 +920,9 @@ export interface OutputPaneProps {
   distributions: NamedDistribution[];
 }
 
-interface CombinedProbabilityTableProps {
+interface NumericProbabilityTableProps {
   distributions: NamedScalarDistribution[];
   mode: DisplayMode;
-  outcomes?: number[];
-  showStatistics?: boolean;
 }
 
 interface BracketingTableProps {
@@ -957,19 +940,48 @@ function ColorSwatch({ color }: { color: string }) {
   );
 }
 
-function CombinedProbabilityTable({
+function NumericProbabilityTable({
   distributions,
   mode,
-  outcomes,
-  showStatistics = true,
-}: CombinedProbabilityTableProps) {
+}: NumericProbabilityTableProps) {
+  return (
+    <ProbabilityTable
+      distributions={distributions}
+      rows={computeTableData(
+        distributions,
+        mode,
+        getAllUniqueOutcomes(distributions)
+      )}
+      statistics={computeDistributionStatistics(distributions)}
+    />
+  );
+}
+
+function CategoricalProbabilityTable({
+  distributions,
+}: {
+  distributions: NamedScalarDistribution[];
+}) {
+  return (
+    <ProbabilityTable
+      distributions={distributions}
+      rows={computeCategoricalTableData(distributions)}
+    />
+  );
+}
+
+function ProbabilityTable({
+  distributions,
+  rows,
+  statistics,
+}: {
+  distributions: NamedScalarDistribution[];
+  rows: TableRowData[];
+  statistics?: DistributionStatistics[];
+}) {
   const isDarkMode = React.useContext(DarkModeContext);
   const colorGenerator = new ColorGenerator(isDarkMode);
   const colors = distributions.map(() => colorGenerator.nextColor());
-
-  const sortedOutcomes = outcomes ?? getAllUniqueOutcomes(distributions);
-  const tableData = computeTableData(distributions, mode, sortedOutcomes);
-  const statisticsData = computeDistributionStatistics(distributions);
 
   const cell = "px-3 py-1.5 text-right tabular-nums whitespace-nowrap";
   const cornerHeader =
@@ -994,7 +1006,7 @@ function CombinedProbabilityTable({
           </tr>
         </thead>
         <tbody>
-          {tableData.map((row) => (
+          {rows.map((row) => (
             <tr key={row.outcome} className="dice-row">
               <td className={rowHeader}>{row.outcomeLabel}</td>
               {row.values.map((value, index) => (
@@ -1005,7 +1017,7 @@ function CombinedProbabilityTable({
             </tr>
           ))}
         </tbody>
-        {showStatistics && <tbody className="dice-stats">
+        {statistics && <tbody className="dice-stats">
           {[
             ["Mean", "mean"],
             ["Std dev", "stdDev"],
@@ -1014,7 +1026,7 @@ function CombinedProbabilityTable({
           ].map(([stat, key]) => (
             <tr key={stat} className="dice-row">
               <td className={`${rowHeader} text-[var(--text-muted)]`}>{stat}</td>
-              {statisticsData.map((stats, index) => (
+              {statistics.map((stats, index) => (
                 <td key={index} className={`${cell} text-[var(--text-muted)]`}>
                   {stats[key as keyof DistributionStatistics]}
                 </td>

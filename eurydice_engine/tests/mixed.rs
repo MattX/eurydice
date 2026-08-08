@@ -51,7 +51,7 @@ fn error(program: &str) -> EngineDiagnostic {
 }
 
 /// The die this feature exists for, declared as a list and as a pool.
-const DIE: &str = "enum: SPECIAL { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
+const DIE: &str = "enum { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
 
 /// Nothing inspects a sequence until an operation needs to. A thousand-element
 /// sequence with one symbol near the end is built without complaint, and it is
@@ -59,7 +59,7 @@ const DIE: &str = "enum: SPECIAL { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
 /// sequence that held it.
 #[test]
 fn a_long_sequence_fails_at_the_value_that_cannot_be_added() {
-    let program = "enum: R { ODD_ONE_OUT } SEQ: {1..998, ODD_ONE_OUT, 1000}";
+    let program = "enum { ODD_ONE_OUT } SEQ: {1..998, ODD_ONE_OUT, 1000}";
 
     // Building and inspecting it is fine, and it really is 1000 long.
     assert_eq!(
@@ -101,7 +101,7 @@ fn lists_and_pools_can_mix_numbers_and_symbols() {
     );
     // A mixed list is a list like any other; `#` counts its elements.
     assert_eq!(
-        probabilities("enum: R { A } output #{1, A, 2}"),
+        probabilities("enum { A } output #{1, A, 2}"),
         vec![vec![(vec![3], 1.0)]]
     );
 }
@@ -137,11 +137,11 @@ fn integers_are_summed_and_counted_across_a_whole_pool() {
 
     // Sequences take the same route as pools.
     assert_eq!(
-        probabilities("enum: R { A } output [sum integers in {1, A, 2}]"),
+        probabilities("enum { A } output [sum integers in {1, A, 2}]"),
         vec![vec![(vec![3], 1.0)]]
     );
     assert_eq!(
-        probabilities("enum: R { A } output [count integers in {1, A, 2}]"),
+        probabilities("enum { A } output [count integers in {1, A, 2}]"),
         vec![vec![(vec![2], 1.0)]]
     );
 }
@@ -153,7 +153,7 @@ fn is_integer_distinguishes_the_faces_of_a_mixed_die() {
         vec![vec![(vec![0], 1.0 / 6.0), (vec![1], 5.0 / 6.0)]]
     );
     assert_eq!(
-        probabilities("enum: R { A } output [A is integer] output [1 is integer]"),
+        probabilities("enum { A } output [A is integer] output [1 is integer]"),
         vec![vec![(vec![0], 1.0)], vec![(vec![1], 1.0)]]
     );
 }
@@ -232,7 +232,7 @@ fn shapes_mix_freely_until_something_has_to_combine_them() {
     for program in [
         "X: {1, [tuple 1 2]} print X",
         "X: {[tuple 1 2], [tuple 1 2 3]} print X",
-        "enum: R { A } X: {A, [tuple 1 2]} print X",
+        "enum { A } X: {A, [tuple 1 2]} print X",
     ] {
         assert!(run(program).is_ok(), "{program}");
     }
@@ -240,7 +240,7 @@ fn shapes_mix_freely_until_something_has_to_combine_them() {
     for program in [
         "output {1, [tuple 1 2]}",
         "output {[tuple 1 2], [tuple 1 2 3]}",
-        "enum: R { A } output {A, [tuple 1 2]}",
+        "enum { A } output {A, [tuple 1 2]}",
         "output d{1, [tuple 1 2]}",
         "function: f X:n { if X { result: 1 } result: [tuple 1 2] } output [f d{0, 1}]",
     ] {
@@ -305,7 +305,7 @@ fn mismatched_function_results_are_reported_when_displayed() {
 /// for a tuple says which field is at fault.
 #[test]
 fn a_non_additive_sum_names_the_offending_value() {
-    let scalar = error("enum: R { A, B } output 2d{A, B}");
+    let scalar = error("enum { A, B } output 2d{A, B}");
     assert_eq!(
         scalar.summary,
         "displaying a pool requires summing a pool of 2 dice, but they cannot be added together"
@@ -320,7 +320,7 @@ fn a_non_additive_sum_names_the_offending_value() {
         scalar.help
     );
 
-    let tuple = error("enum: R { A } output 2d{[tuple 1 2 A]}");
+    let tuple = error("enum { A } output 2d{[tuple 1 2 A]}");
     assert_eq!(
         tuple.labels[0].message.as_deref(),
         Some("field 3 of outcomes like `(1, 2, A)` is not a number")
@@ -332,7 +332,7 @@ fn a_non_additive_sum_names_the_offending_value() {
     );
 
     // A multiset returned from a pool evaluation is a sequence, not a pool.
-    let sequence = error("enum: R { A, B } function: f X:s { result: X } output [f 2d{A, B}]");
+    let sequence = error("enum { A, B } function: f X:s { result: X } output [f 2d{A, B}]");
     assert!(
         sequence.summary.contains("summing a sequence of 2 values"),
         "{}",
@@ -355,7 +355,7 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
         vec![vec![(vec![0], 0.5f64), (vec![1], 0.5f64)]]
     );
 
-    let diagnostic = error("enum: R { A } X: {} + {} output {X, A}");
+    let diagnostic = error("enum { A } X: {} + {} output {X, A}");
     assert_eq!(diagnostic.code, "type.outcome_mismatch");
     assert!(
         diagnostic
@@ -372,9 +372,9 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
 #[test]
 fn output_rejects_a_field_that_disagrees_with_itself() {
     for program in [
-        "enum: R { A } output {A, 1}",
-        "enum: R { A } output d{A, 1}",
-        "enum: R { A } output [tuple 1, d{A, 2}]",
+        "enum { A } output {A, 1}",
+        "enum { A } output d{A, 1}",
+        "enum { A } output [tuple 1, d{A, 2}]",
     ] {
         let error = error_summary(program);
         assert!(error.contains("cannot be displayed"), "{program}: {error}");
@@ -386,7 +386,7 @@ fn output_rejects_a_field_that_disagrees_with_itself() {
 
     // Mapping to one kind of value first is all it takes.
     assert_eq!(
-        probabilities("enum: R { A } output [sum integers in d{A, 1}]"),
+        probabilities("enum { A } output [sum integers in d{A, 1}]"),
         vec![vec![(vec![0], 0.5), (vec![1], 0.5)]]
     );
 }
@@ -395,12 +395,11 @@ fn output_rejects_a_field_that_disagrees_with_itself() {
 /// though its outcome type is the same one a mixed pool has.
 #[test]
 fn all_symbol_distributions_still_display() {
-    let (outputs, symbols) = run("enum: R { MISS, HIT } output d{MISS, HIT}").expect("runs");
+    let (outputs, symbols) = run("enum { MISS, HIT } output d{MISS, HIT}").expect("runs");
     let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
-    let FieldSchema::Enum { enum_name, labels } = &distribution.fields[0] else {
+    let FieldSchema::Enum { labels } = &distribution.fields[0] else {
         panic!("expected a symbol field");
     };
-    assert_eq!(enum_name, "R");
     assert_eq!(labels, &["MISS", "HIT"]);
 }
 
@@ -431,7 +430,7 @@ fn integers_sort_before_symbols_in_multisets() {
     let program = |setting: &str| {
         format!(
             r#"
-            enum: R {{ A }}
+            enum {{ A }}
             function: first S:s {{ result: [1@S is integer] }}
             {setting}
             output [first 2d{{1, A}}]

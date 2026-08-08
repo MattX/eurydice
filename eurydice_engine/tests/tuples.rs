@@ -35,7 +35,7 @@ fn tuple_output_labels_require_tuple_outcomes_and_matching_arity() {
     for (program, expected_code) in [
         ("output 1 labeled \"A\", \"B\"", "type.labels_require_tuple"),
         (
-            "enum: RESULT { A } output A labeled \"Value\"",
+            "enum { A } output A labeled \"Value\"",
             "type.labels_require_tuple",
         ),
         (
@@ -71,17 +71,17 @@ fn rejects_invalid_tuple_operations() {
         "output [tuple 1 2] + [tuple 1 2 3]",
         "output [tuple 1 2] / 0",
         "output [tuple 2147483647 0] + [tuple 1 0]",
-        "enum: RESULT { A } output [tuple 1 A] * 2",
+        "enum { A } output [tuple 1 A] * 2",
         // `0d6` has faces, so its sum is the `0` they are shaped like, and `0`
         // is not a tuple. A die with *no* faces is a different matter: see
         // `a_die_with_no_faces_is_the_identity_whatever_it_meets`.
         "output 0d6 + [tuple 1 2]",
-        "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]}",
+        "enum { A, B } output 2d{[tuple 1 A], [tuple 2 B]}",
         // A tuple with an enum field is not additive, so summing it is an error
         // however the sum is reached.
-        "enum: RESULT { A, B } function: f X:n { result: X } output [f 2d{[tuple 1 A], [tuple 2 B]}]",
-        "enum: RESULT { A, B } output {2d{[tuple 1 A], [tuple 2 B]}}",
-        "enum: RESULT { A, B } output 2d{[tuple 1 A], [tuple 2 B]} = [tuple 1 A]",
+        "enum { A, B } function: f X:n { result: X } output [f 2d{[tuple 1 A], [tuple 2 B]}]",
+        "enum { A, B } output {2d{[tuple 1 A], [tuple 2 B]}}",
+        "enum { A, B } output 2d{[tuple 1 A], [tuple 2 B]} = [tuple 1 A]",
     ] {
         assert!(
             diagnostic(program).is_some(),
@@ -130,7 +130,7 @@ fn tuples_of_different_arity_compare_unequal() {
 #[test]
 fn multidimensional_pools_of_tuples_with_enum_fields_iterate_as_multisets() {
     let (outputs, symbols) = run(r#"
-        enum: RESULT { MISS, HIT }
+        enum { MISS, HIT }
         FACES: {[tuple 1 MISS], [tuple 2 HIT]}
         function: hits SEQ:s { result: [count {[tuple 2 HIT]} in SEQ] }
         output [hits 2dFACES]

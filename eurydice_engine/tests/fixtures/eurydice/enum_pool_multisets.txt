@@ -1,4 +1,4 @@
-enum: ATTACK_RESULT { MISS, HIT, CRITICALHIT }
+enum { MISS, HIT, CRITICALHIT }
 
 \\\ A pool of enum outcomes may have any dimension. It cannot be summed, but it
 \\\ can be iterated over its multisets, which is what an `s` parameter does.
@@ -17,7 +17,7 @@ set "position order" to "highest first"
 \\\ `count` and `contains` take the pool itself rather than its multisets, so
 \\\ they neither sum nor enumerate it. This pool has 888030 multisets; going
 \\\ through Icepool keeps it instant.
-enum: FACE { FA, FB, FC, FD, FE, FF, FG, FH }
+enum { FA, FB, FC, FD, FE, FF, FG, FH }
 LARGE: 20d{FA, FB, FC, FD, FE, FF, FG, FH}
 output [count {FA} in LARGE] named "count over a large pool"
 output [LARGE contains FA] named "contains over a large pool"
@@ -37,12 +37,12 @@ output #(2d(2d{MISS, HIT})) named "dimension"
 3,29.629629629629626
 
 "best of three"
-ATTACK_RESULT,%
+Symbol,%
 MISS,12.5
 HIT,87.5
 
 "worst of three"
-ATTACK_RESULT,%
+Symbol,%
 MISS,87.5
 HIT,12.5
 

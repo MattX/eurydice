@@ -53,7 +53,7 @@ Statement {
 Assignment { VariableIdentifier ":" Expression }
 
 EnumDefinition {
-    kw<"enum"> ":" VariableIdentifier "{" VariableIdentifier ("," VariableIdentifier)* "}"
+    kw<"enum"> (":" VariableIdentifier | "{" VariableIdentifier ("," VariableIdentifier)* "}")
 }
 
 Output { kw<"output"> Expression (OutputName OutputLabels? | OutputLabels OutputName?)? }

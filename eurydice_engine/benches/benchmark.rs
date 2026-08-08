@@ -239,7 +239,7 @@ const OUTPUT_SWEEP: &str = r#"
 /// case is fast only if that routing holds. From
 /// `tests/fixtures/eurydice/enum_pool_multisets.txt`.
 const SYMBOL_POOL: &str = r#"
-    enum: FACE { FA, FB, FC, FD, FE, FF, FG, FH }
+    enum { FA, FB, FC, FD, FE, FF, FG, FH }
     LARGE: 20d{FA, FB, FC, FD, FE, FF, FG, FH}
     output [count {FA} in LARGE] named "count"
     output [LARGE contains FA] named "contains"
