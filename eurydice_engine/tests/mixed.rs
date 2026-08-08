@@ -38,10 +38,6 @@ fn probabilities(program: &str) -> Vec<Vec<(Vec<i32>, f64)>> {
         .collect()
 }
 
-fn error_summary(program: &str) -> String {
-    error(program).summary.clone()
-}
-
 fn error(program: &str) -> EngineDiagnostic {
     Engine::new()
         .run_with_diagnostics(program)
@@ -204,8 +200,8 @@ fn the_motivating_program_matches_a_brute_force_enumeration() {
 }
 
 /// A tuple built over a mixed die has a mixed *field*, which is the one kind of
-/// union that arises without anyone asking for it. Projecting the field back
-/// out recovers an ordinary mixed scalar.
+/// union that arises without anyone asking for it. It can be displayed
+/// categorically or projected back out as an ordinary mixed scalar.
 #[test]
 fn tuples_carry_a_mixed_field_through_construction_and_projection() {
     let program = format!("{DIE} PAIR: [tuple DIE 1] output [sum integers in [field 1 of PAIR]]");
@@ -218,9 +214,26 @@ fn tuples_carry_a_mixed_field_through_construction_and_projection() {
         ]]
     );
 
-    // The mixed field is what stops the tuple itself from being displayed.
-    let error = error_summary(&format!("{DIE} output [tuple DIE 1]"));
-    assert!(error.contains("field 1 of this distribution"), "{error}");
+    let (outputs, symbols) = run(&format!("{DIE} output [tuple DIE 1]")).expect("runs");
+    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+    assert_eq!(
+        distribution.fields,
+        vec![
+            FieldSchema::Enum {
+                labels: vec!["0".into(), "1".into(), "2".into(), "TIMES_TWO".into()],
+            },
+            FieldSchema::Int,
+        ]
+    );
+    assert_eq!(
+        distribution.probabilities,
+        vec![
+            (vec![0, 1], 2.0 / 6.0),
+            (vec![1, 1], 2.0 / 6.0),
+            (vec![2, 1], 1.0 / 6.0),
+            (vec![3, 1], 1.0 / 6.0),
+        ]
+    );
 }
 
 /// A sequence holds whatever it was written with. Mixing a scalar and a tuple
@@ -346,8 +359,7 @@ fn a_non_additive_sum_names_the_offending_value() {
 
 /// The empty sum has no shape of its own, so it shares a sequence with anything
 /// at all. It settles into the `0` it stands for the moment something numeric
-/// is alongside it, and only a symbol beside it makes the *output* impossible —
-/// as a mixed field, not as a mismatched shape.
+/// is alongside it, and is rendered as a categorical zero beside a symbol.
 #[test]
 fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
     assert_eq!(
@@ -355,39 +367,53 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
         vec![vec![(vec![0], 0.5f64), (vec![1], 0.5f64)]]
     );
 
-    let diagnostic = error("enum { A } X: {} + {} output {X, A}");
-    assert_eq!(diagnostic.code, "type.outcome_mismatch");
-    assert!(
-        diagnostic
-            .summary
-            .contains("numbers in some outcomes and symbols in others"),
-        "{}",
-        diagnostic.summary
+    let (outputs, symbols) = run("enum { A } X: {} + {} output {X, A}").expect("mixed output runs");
+    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+    assert_eq!(
+        distribution.fields,
+        vec![FieldSchema::Enum {
+            labels: vec!["0".into(), "A".into()],
+        }]
+    );
+    assert_eq!(
+        distribution.probabilities,
+        vec![(vec![0], 0.5), (vec![1], 0.5)]
     );
 }
 
-/// `output` needs one schema per field, so a field cannot be a number in one
-/// outcome and a symbol in another. Everything else about the value still
-/// works, including `print`.
+/// A field with numeric and symbolic outcomes is serialized categorically. Its
+/// dense ordinals keep unlike values distinct even when their ordinary numeric
+/// encodings would collide.
 #[test]
-fn output_rejects_a_field_that_disagrees_with_itself() {
-    for program in [
-        "enum { A } output {A, 1}",
-        "enum { A } output d{A, 1}",
-        "enum { A } output [tuple 1, d{A, 2}]",
-    ] {
-        let error = error_summary(program);
-        assert!(error.contains("cannot be displayed"), "{program}: {error}");
-        assert!(
-            error.contains("sum integers in"),
-            "the error should say what to do instead: {error}"
+fn mixed_fields_display_as_categories() {
+    for program in ["enum { A } output {A, 1}", "enum { A } output d{A, 1}"] {
+        let (outputs, symbols) = run(program).expect("mixed output runs");
+        let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+        assert_eq!(
+            distribution.fields,
+            vec![FieldSchema::Enum {
+                labels: vec!["1".into(), "A".into()],
+            }],
+            "{program}"
+        );
+        assert_eq!(
+            distribution.probabilities,
+            vec![(vec![0], 0.5), (vec![1], 0.5)],
+            "{program}"
         );
     }
 
-    // Mapping to one kind of value first is all it takes.
+    let (outputs, symbols) =
+        run("enum { A } output [tuple 1, d{A, 2}]").expect("mixed tuple output runs");
+    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
     assert_eq!(
-        probabilities("enum { A } output [sum integers in d{A, 1}]"),
-        vec![vec![(vec![0], 0.5), (vec![1], 0.5)]]
+        distribution.fields,
+        vec![
+            FieldSchema::Int,
+            FieldSchema::Enum {
+                labels: vec!["2".into(), "A".into()],
+            },
+        ]
     );
 }
 
@@ -403,8 +429,9 @@ fn all_symbol_distributions_still_display() {
     assert_eq!(labels, &["MISS", "HIT"]);
 }
 
-/// Multiset iteration and the arithmetic that a mixed pool cannot support are
-/// unchanged from the all-symbol case: the outcome type is the same.
+/// Displaying one mixed die does not make a multidimensional mixed pool
+/// additive. Multiset iteration still works, while summing, arithmetic, and
+/// ordering remain unavailable just as they are for an all-symbol pool.
 #[test]
 fn mixed_pools_gain_no_arithmetic_or_ordering() {
     for program in [

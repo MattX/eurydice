@@ -18,9 +18,10 @@ pub struct Distribution {
 /// Describes a single output field, shared by every outcome of a distribution.
 ///
 /// Field values in the outcomes themselves are always raw `i32`s; for an enum
-/// field the value is the member's ordinal, and the labels here map it back to
-/// a display name. Hoisting the schema up here keeps the (potentially large)
-/// list of outcomes free of repeated enum metadata.
+/// categorical field the value is an ordinal, and the labels here map it back
+/// to a display name. This includes all-symbol fields as well as fields that mix
+/// numbers and symbols. Hoisting the schema up here keeps the (potentially
+/// large) list of outcomes free of repeated metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum FieldSchema {
     Int,
@@ -63,12 +64,23 @@ enum FieldRender {
     /// The symbols observed at this position, in declaration order. Their
     /// position in this vector is the field's serialized value.
     Symbols(Vec<u32>),
+    /// A field containing both numbers and symbols is rendered categorically.
+    /// Keeping the original values here gives every outcome a distinct wire
+    /// ordinal even when, for example, the integer `0` and the first symbol
+    /// would otherwise both be encoded as zero.
+    Mixed(Vec<ElementValue>),
 }
 
 impl FieldRender {
     /// The wire value for one field of one outcome.
     fn ordinal(&self, field: &ElementValue) -> i32 {
         match (self, field) {
+            (FieldRender::Mixed(present), field) => i32::try_from(
+                present
+                    .binary_search(field)
+                    .expect("every rendered mixed value was collected from the outcomes"),
+            )
+            .expect("label count fits in i32"),
             (_, ElementValue::AdditiveIdentity) => 0,
             (_, ElementValue::Int(value)) => *value,
             (FieldRender::Symbols(present), ElementValue::Symbol(symbol)) => i32::try_from(
@@ -78,7 +90,7 @@ impl FieldRender {
             )
             .expect("label count fits in i32"),
             (FieldRender::Int, ElementValue::Symbol(_)) => {
-                unreachable!("a field mixing ints and symbols is rejected by the evaluator")
+                unreachable!("a field containing symbols gets a categorical renderer")
             }
             (_, ElementValue::Tuple(_)) => {
                 unreachable!("nested tuples are rejected by the evaluator")
@@ -95,6 +107,15 @@ impl FieldRender {
                     .map(|symbol| symbols.name(*symbol).to_string())
                     .collect(),
             },
+            FieldRender::Mixed(present) => FieldSchema::Enum {
+                labels: present
+                    .iter()
+                    .map(|value| match value {
+                        ElementValue::AdditiveIdentity => "0".to_string(),
+                        other => other.display(symbols).to_string(),
+                    })
+                    .collect(),
+            },
         }
     }
 }
@@ -106,6 +127,7 @@ impl FieldRender {
 /// what an empty distribution falls back to.
 fn field_renders(outcomes: &[(ElementValue, Natural)], arity: usize) -> Vec<FieldRender> {
     let mut symbols_by_field: Vec<Vec<u32>> = vec![Vec::new(); arity];
+    let mut has_non_symbols = vec![false; arity];
     for (outcome, _) in outcomes {
         let fields: &[ElementValue] = match outcome {
             ElementValue::Tuple(fields) => fields,
@@ -117,23 +139,51 @@ fn field_renders(outcomes: &[(ElementValue, Natural)], arity: usize) -> Vec<Fiel
                 if let Err(index) = present.binary_search(symbol) {
                     present.insert(index, *symbol);
                 }
+            } else {
+                has_non_symbols[position] = true;
             }
         }
     }
-    symbols_by_field
+    let mut renders = symbols_by_field
         .into_iter()
-        .map(|present| {
+        .zip(has_non_symbols)
+        .map(|(present, has_non_symbols)| {
             if present.is_empty() {
                 FieldRender::Int
+            } else if has_non_symbols {
+                FieldRender::Mixed(Vec::new())
             } else {
                 FieldRender::Symbols(present)
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    // Mixed fields are uncommon. Populate their categorical dictionaries in a
+    // second pass so the ordinary all-int and all-symbol paths keep their small
+    // representations and avoid cloning every outcome.
+    if renders
+        .iter()
+        .any(|render| matches!(render, FieldRender::Mixed(_)))
+    {
+        for (outcome, _) in outcomes {
+            let fields: &[ElementValue] = match outcome {
+                ElementValue::Tuple(fields) => fields,
+                other => std::slice::from_ref(other),
+            };
+            for (field, render) in fields.iter().zip(&mut renders) {
+                if let FieldRender::Mixed(present) = render {
+                    if let Err(index) = present.binary_search(field) {
+                        present.insert(index, field.clone());
+                    }
+                }
+            }
+        }
+    }
+    renders
 }
 
 /// Renders a distribution, whose outcomes the evaluator has already checked
-/// share one shape — see `reject_mixed_output_fields`. That is what lets the
+/// share one shape — see `reject_mixed_output_shapes`. That is what lets the
 /// first outcome speak for the arity, and what keeps `FieldRender` total.
 fn pool_output(
     pool: &Pool<ElementValue>,

@@ -59,9 +59,9 @@ export interface FieldAxis {
 }
 
 /**
- * The ordered set of values a field ranges over. Enum schemas contain the
- * values observed in the distribution; integer fields fill the observed range
- * so gaps render as empty cells, matching the 1-D numeric chart.
+ * The ordered set of values a field ranges over. Categorical schemas contain
+ * the values observed in the distribution; integer fields fill the observed
+ * range so gaps render as empty cells, matching the 1-D numeric chart.
  */
 export function fieldAxis(
   schema: FieldSchema,

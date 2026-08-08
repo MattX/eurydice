@@ -440,7 +440,7 @@ impl Evaluator {
                 };
                 // Every outcome agrees on its shape from here on, so the first
                 // one speaks for all of them.
-                reject_mixed_output_fields(&displayed, expr.range)?;
+                reject_mixed_output_shapes(&displayed, expr.range)?;
                 let field_names = if let Some(labels) = labeled {
                     let Some(ElementValue::Tuple(fields)) = displayed.first() else {
                         return Err(RuntimeError::LabelsOnNonTupleOutput {
@@ -1050,23 +1050,19 @@ fn rolls_dice(expression: &Expression) -> bool {
     }
 }
 
-/// Rejects an output whose outcomes cannot share one schema.
+/// Rejects an output whose outcomes cannot share one shape.
 ///
-/// A displayed distribution has one shape and one schema per field position, so
-/// this is the last chance to reject outcomes that do not agree on either — and
-/// the only one, since nothing on the way here required them to. Two things are
-/// rejected:
+/// A displayed distribution has one shape, so this is the last chance to reject
+/// outcomes that do not agree on it — and the only one, since nothing on the
+/// way here required them to. This rejects:
 ///
 /// - outcomes of different *shapes*, a number in one and a tuple in another, or
 ///   tuples of different arity. `{1, [tuple 1 2]}` is a perfectly good sequence
 ///   that `print` will show; it just cannot be drawn as one distribution.
-/// - a field that is a number in one outcome and a symbol in another, which has
-///   no single way to be labelled. A field that is *all* symbols is an ordinary
-///   categorical output and is fine.
 ///
 /// [`crate::output`] runs after evaluation and cannot report an error, so
 /// anything it would rather not meet has to be stopped here.
-fn reject_mixed_output_fields(
+fn reject_mixed_output_shapes(
     outcomes: &[&ElementValue],
     range: ast::Range,
 ) -> Result<(), RuntimeError> {
@@ -1093,41 +1089,7 @@ fn reject_mixed_output_fields(
             second: (*other).clone(),
         })));
     }
-    let arity = shape.unwrap_or(1);
-    let mut seen = vec![(false, false); arity];
-    for outcome in outcomes {
-        let fields: &[ElementValue] = match outcome {
-            ElementValue::Tuple(fields) => fields,
-            other => std::slice::from_ref(other),
-        };
-        for (position, field) in fields.iter().enumerate() {
-            let (numbers, symbols) = &mut seen[position];
-            match field {
-                ElementValue::Symbol(_) => *symbols = true,
-                _ => *numbers = true,
-            }
-        }
-    }
-    let Some(position) = seen
-        .iter()
-        .position(|(numbers, symbols)| *numbers && *symbols)
-    else {
-        return Ok(());
-    };
-    let what = if arity == 1 {
-        "this distribution".to_string()
-    } else {
-        format!("field {} of this distribution", position + 1)
-    };
-    Err(RuntimeError::Semantic {
-        kind: SemanticErrorKind::OutcomeMismatch,
-        range: range.into(),
-        message: format!(
-            "{what} holds numbers in some outcomes and symbols in others, so it cannot be \
-             displayed; map it to one kind of value first, for instance with \
-             `[sum integers in ...]`, or use `print` to inspect it as it is"
-        ),
-    })
+    Ok(())
 }
 
 /// Where a list element was written, so a diagnostic can point at it.

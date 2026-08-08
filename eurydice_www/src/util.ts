@@ -1,7 +1,8 @@
 /**
  * Per-field output schema, mirroring the engine's
- * `FieldSchema`. Enum fields carry their member labels; the outcome
- * vectors themselves store raw ints (enum members as ordinals).
+ * `FieldSchema`. Categorical fields carry their labels; the outcome vectors
+ * themselves store raw ints (category members as ordinals). The engine uses
+ * this representation for all-symbol fields and mixed number/symbol fields.
  */
 export type FieldSchema =
   | { kind: "int" }
