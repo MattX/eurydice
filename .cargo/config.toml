@@ -1,0 +1,7 @@
+# Lets `cargo bench --target wasm32-wasip1` run the benchmark on V8, which is
+# what the deployed wasm build runs on. See scripts/wasi-runner.mjs.
+#
+# Cargo resolves a runner program path relative to this config file, so this
+# works whichever package it is benching.
+[target.wasm32-wasip1]
+runner = "scripts/wasi-runner.mjs"

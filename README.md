@@ -63,3 +63,8 @@ The packages in this directory are:
 Build the wasm (from this directory) with `wasm-pack build ./eurydice_wasm`. Then `cd` to `eurydice_www`, run `npm i` and `npm run dev`.
 
 See also notes in <https://rustwasm.github.io/wasm-bindgen/examples/wasm-in-web-worker.html>.
+
+### Benchmarks
+
+`cargo bench -p eurydice_engine` runs the suite natively; it also runs on V8,
+which is what actually matters. See [BENCHMARKS.md](BENCHMARKS.md).
