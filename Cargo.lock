@@ -469,7 +469,6 @@ dependencies = [
  "malachite-base",
  "malachite-nz",
  "malachite-q",
- "miette",
  "pretty_assertions",
  "serde",
  "serde-lexpr",

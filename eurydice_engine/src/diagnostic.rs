@@ -1,7 +1,6 @@
 //! Serializable, frontend-neutral diagnostics produced by the engine.
 
 use lalrpop_util::ParseError;
-use miette::SourceSpan;
 use serde::Serialize;
 
 use crate::{
@@ -189,7 +188,7 @@ fn primitive_call(identifier: &str) -> String {
 /// A primary label reporting the value found where another type was required.
 fn type_mismatch_label(
     source: SourceId,
-    range: &SourceSpan,
+    range: &Range,
     expected: &str,
     value: &RuntimeValue,
     symbols: &SymbolTable,
@@ -197,7 +196,7 @@ fn type_mismatch_label(
     DiagnosticLabel {
         range: SourceRange {
             source,
-            range: range.into(),
+            range: *range,
         },
         message: Some(format!(
             "`{}` is {}; expected {expected}",
@@ -655,18 +654,18 @@ pub(crate) fn runtime_diagnostic(
 ) -> EngineDiagnostic {
     let mut trace = Vec::new();
     let (error, source_id) = runtime_context(error, source_id, &mut trace);
-    let primary = |range: &SourceSpan, message: String| DiagnosticLabel {
+    let primary = |range: &Range, message: String| DiagnosticLabel {
         range: SourceRange {
             source: source_id,
-            range: range.into(),
+            range: *range,
         },
         message: Some(message),
         style: LabelStyle::Primary,
     };
-    let unlabeled = |range: &SourceSpan, style: LabelStyle| DiagnosticLabel {
+    let unlabeled = |range: &Range, style: LabelStyle| DiagnosticLabel {
         range: SourceRange {
             source: source_id,
-            range: range.into(),
+            range: *range,
         },
         message: None,
         style,
@@ -803,7 +802,7 @@ pub(crate) fn runtime_diagnostic(
                 .map(|(index, argument)| DiagnosticLabel {
                     range: SourceRange {
                         source: source_id,
-                        range: (&argument.range).into(),
+                        range: argument.range,
                     },
                     message: Some(argument_mismatch_message(
                         argument.name,
@@ -1117,7 +1116,7 @@ fn runtime_context<'a>(
 
 fn placement_diagnostic(
     statement: &str,
-    range: &SourceSpan,
+    range: &Range,
     source_id: SourceId,
     help: &str,
 ) -> DiagnosticParts {
@@ -1127,7 +1126,7 @@ fn placement_diagnostic(
         vec![DiagnosticLabel {
             range: SourceRange {
                 source: source_id,
-                range: range.into(),
+                range: *range,
             },
             message: None,
             style: LabelStyle::Primary,

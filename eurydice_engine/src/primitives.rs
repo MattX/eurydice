@@ -89,7 +89,7 @@ fn argument_error(
 ) -> PrimitiveArgumentError {
     PrimitiveArgumentError {
         name: argument_name(ctx.identifier, index),
-        range: ctx.arg_ranges[index].into(),
+        range: ctx.arg_ranges[index],
         expected: expected.into(),
         value: value.clone(),
     }
@@ -102,7 +102,7 @@ fn invalid_arguments(
     arguments: Vec<PrimitiveArgumentError>,
 ) -> RuntimeError {
     RuntimeError::InvalidPrimitiveArguments(Box::new(PrimitiveArgumentsError {
-        range: ctx.function_range.into(),
+        range: ctx.function_range,
         function: ctx.identifier,
         requirement: requirement.into(),
         help: Some(help.into()),
@@ -450,11 +450,11 @@ fn field_execute(args: &[RuntimeValue], ctx: PrimitiveCtx) -> Result<RuntimeValu
     let Some(value) = index.and_then(|index| fields.get(index)) else {
         return Err(RuntimeError::InvalidPrimitiveValue(Box::new(
             PrimitiveValueError {
-                range: ctx.function_range.into(),
+                range: ctx.function_range,
                 function: ctx.identifier,
                 requirement: format!("cannot select field `{requested}`"),
                 argument: "INDEX",
-                found_range: ctx.arg_ranges[0].into(),
+                found_range: ctx.arg_ranges[0],
                 value: args[0].clone(),
                 constraint: format!("an index from 1 through {}", fields.len()),
                 help: Some("Tuple field positions start at 1.".to_string()),
@@ -528,7 +528,7 @@ fn not_numeric(ctx: PrimitiveCtx, arg: usize, value: &ElementValue) -> RuntimeEr
          without needing it to be numeric.",
         vec![PrimitiveArgumentError {
             name: argument_name(ctx.identifier, arg),
-            range: ctx.arg_ranges[arg].into(),
+            range: ctx.arg_ranges[arg],
             expected: "a number".to_string(),
             value: RuntimeValue::Element(value.clone()),
         }],
@@ -753,9 +753,9 @@ fn keep_list_for_primitive(
 
     if keep < 0 {
         return Err(RuntimeError::NegativeArgumentToFunction {
-            range: function_range.into(),
+            range: function_range,
             name: identifier.to_string(),
-            found_range: keep_range.into(),
+            found_range: keep_range,
             value: keep,
         });
     }

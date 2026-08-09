@@ -292,7 +292,7 @@ impl ElementMismatch {
         match *self.0 {
             Mismatch::NotNumeric { witness, field } => {
                 RuntimeError::NonAdditiveSum(Box::new(NonAdditiveSumError {
-                    range: range.into(),
+                    range,
                     action,
                     subject,
                     witness: Some(witness),
@@ -301,7 +301,7 @@ impl ElementMismatch {
             }
             Mismatch::Shapes { left, right } => {
                 RuntimeError::ShapeMismatch(Box::new(ShapeMismatchError {
-                    range: range.into(),
+                    range,
                     action,
                     first: left,
                     second: right,

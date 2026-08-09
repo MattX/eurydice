@@ -1,7 +1,5 @@
 use lalrpop_util::ParseError;
-use miette::{Diagnostic, SourceSpan};
 use serde::Serialize;
-use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct Range {
@@ -14,15 +12,6 @@ impl From<(usize, usize)> for Range {
         Self {
             start: range.0,
             end: range.1,
-        }
-    }
-}
-
-impl From<&SourceSpan> for Range {
-    fn from(span: &SourceSpan) -> Self {
-        Self {
-            start: span.offset(),
-            end: span.offset() + span.len(),
         }
     }
 }
@@ -327,23 +316,27 @@ pub fn make_function_call<L: std::fmt::Debug, T: std::fmt::Debug>(
 
 /// This corresponds to inner errors in the grammar - when the LR parser succeeded,
 /// but custom action code failed.
-#[derive(Debug, Diagnostic, Error)]
+#[derive(Debug)]
 pub enum ParseActionError {
-    #[error("Invalid integer literal")]
-    #[diagnostic(help("Integer literals must be in the range -2^31 to 2^31-1"))]
-    InvalidIntegerLiteral {
-        #[label("Invalid integer literal: {error}")]
-        range: Range,
-        error: String,
-    },
+    InvalidIntegerLiteral { range: Range, error: String },
 
-    #[error("Empty function call")]
-    #[diagnostic(help("Function calls must have at least item (word or expression)"))]
-    EmptyFunctionCall {
-        #[label("Empty function call")]
-        range: Range,
-    },
+    EmptyFunctionCall { range: Range },
 }
+
+/// Only so that a `ParseError` wrapping one of these can be printed. User-facing
+/// wording for these lives in [`crate::diagnostic`], like every other error's.
+impl std::fmt::Display for ParseActionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseActionError::InvalidIntegerLiteral { error, .. } => {
+                write!(f, "invalid integer literal: {error}")
+            }
+            ParseActionError::EmptyFunctionCall { .. } => write!(f, "empty function call"),
+        }
+    }
+}
+
+impl std::error::Error for ParseActionError {}
 
 #[cfg(test)]
 mod tests {

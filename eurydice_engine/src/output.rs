@@ -171,10 +171,10 @@ fn field_renders(outcomes: &[(ElementValue, Natural)], arity: usize) -> Vec<Fiel
                 other => std::slice::from_ref(other),
             };
             for (field, render) in fields.iter().zip(&mut renders) {
-                if let FieldRender::Mixed(present) = render {
-                    if let Err(index) = present.binary_search(field) {
-                        present.insert(index, field.clone());
-                    }
+                if let FieldRender::Mixed(present) = render
+                    && let Err(index) = present.binary_search(field)
+                {
+                    present.insert(index, field.clone());
                 }
             }
         }

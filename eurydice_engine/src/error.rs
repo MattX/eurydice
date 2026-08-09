@@ -5,8 +5,6 @@
 //! [`crate::diagnostic`], so there is exactly one place where an error's
 //! presentation can change.
 
-use miette::SourceSpan;
-
 use crate::{
     ast::{self, BinaryOp},
     diagnostic::{EvaluationFrame, SourceId},
@@ -16,7 +14,7 @@ use crate::{
 #[derive(Debug)]
 pub struct PrimitiveArgumentError {
     pub name: &'static str,
-    pub range: SourceSpan,
+    pub range: ast::Range,
     pub expected: String,
     pub value: RuntimeValue,
 }
@@ -43,7 +41,7 @@ pub enum SemanticErrorKind {
 
 #[derive(Debug)]
 pub struct PrimitiveArgumentsError {
-    pub range: SourceSpan,
+    pub range: ast::Range,
     pub function: &'static str,
     pub requirement: String,
     pub help: Option<String>,
@@ -52,11 +50,11 @@ pub struct PrimitiveArgumentsError {
 
 #[derive(Debug)]
 pub struct PrimitiveValueError {
-    pub range: SourceSpan,
+    pub range: ast::Range,
     pub function: &'static str,
     pub requirement: String,
     pub argument: &'static str,
-    pub found_range: SourceSpan,
+    pub found_range: ast::Range,
     pub value: RuntimeValue,
     pub constraint: String,
     pub help: Option<String>,
@@ -72,7 +70,7 @@ pub struct PrimitiveValueError {
 /// what the diagnostic names.
 #[derive(Debug)]
 pub struct ShapeMismatchError {
-    pub range: SourceSpan,
+    pub range: ast::Range,
     /// What needed the two to line up; completes "<action> requires summing ...".
     pub action: &'static str,
     pub first: ElementValue,
@@ -94,7 +92,7 @@ pub enum NonAdditiveSubject {
 /// A value that had to be summed, but whose parts cannot be added together.
 #[derive(Debug)]
 pub struct NonAdditiveSumError {
-    pub range: SourceSpan,
+    pub range: ast::Range,
     /// What forced the sum; completes "<action> requires summing ...".
     pub action: &'static str,
     pub subject: NonAdditiveSubject,
@@ -123,18 +121,12 @@ pub struct ArityMismatch {
     pub comma_insertion: Option<usize>,
 }
 
-impl From<ast::Range> for SourceSpan {
-    fn from(range: ast::Range) -> Self {
-        SourceSpan::new(range.start.into(), range.end - range.start)
-    }
-}
-
 #[derive(Debug)]
 pub enum RuntimeError {
     /// An error raised inside a function body, wrapped with the call that
     /// reached it. Nested calls nest these.
     InFunction {
-        range: SourceSpan,
+        range: ast::Range,
         source: Box<RuntimeError>,
         body_source: SourceId,
         frame: Box<EvaluationFrame>,
@@ -142,72 +134,72 @@ pub enum RuntimeError {
 
     Semantic {
         kind: SemanticErrorKind,
-        range: SourceSpan,
+        range: ast::Range,
         message: String,
     },
 
     LabelsOnNonTupleOutput {
-        range: SourceSpan,
-        value_range: SourceSpan,
+        range: ast::Range,
+        value_range: ast::Range,
         value: RuntimeValue,
     },
 
     OutputLabelCountMismatch {
-        range: SourceSpan,
+        range: ast::Range,
         expected: usize,
         found: usize,
     },
 
     OutputNotAtTopLevel {
-        range: SourceSpan,
+        range: ast::Range,
     },
 
     SetNotAtTopLevel {
-        range: SourceSpan,
+        range: ast::Range,
     },
 
     ReturnOutsideFunction {
-        range: SourceSpan,
+        range: ast::Range,
     },
 
     LoopOverNonSequence {
-        range: SourceSpan,
+        range: ast::Range,
         value: RuntimeValue,
     },
 
     UndefinedReference {
-        range: SourceSpan,
+        range: ast::Range,
         name: String,
     },
 
     UndefinedFunction {
-        range: SourceSpan,
+        range: ast::Range,
         name: String,
         arity_mismatch: Option<ArityMismatch>,
     },
 
     InvalidCondition {
-        range: SourceSpan,
+        range: ast::Range,
         value: RuntimeValue,
     },
 
     RangeHasNonSequenceEndpoints {
-        range: SourceSpan,
+        range: ast::Range,
         value: RuntimeValue,
     },
 
     InvalidArgumentToOperator {
-        operator_range: SourceSpan,
+        operator_range: ast::Range,
         op: BinaryOp,
         expected: &'static str,
-        found_range: SourceSpan,
+        found_range: ast::Range,
         value: RuntimeValue,
     },
 
     NegativeArgumentToFunction {
-        range: SourceSpan,
+        range: ast::Range,
         name: String,
-        found_range: SourceSpan,
+        found_range: ast::Range,
         value: i32,
     },
 
@@ -220,12 +212,12 @@ pub enum RuntimeError {
     NonAdditiveSum(Box<NonAdditiveSumError>),
 
     InvalidRepeatExpression {
-        range: SourceSpan,
+        range: ast::Range,
         value: RuntimeValue,
     },
 
     MathError {
-        range: SourceSpan,
+        range: ast::Range,
         message: String,
     },
 }
@@ -233,26 +225,26 @@ pub enum RuntimeError {
 impl RuntimeError {
     pub fn range(&self) -> ast::Range {
         match self {
-            RuntimeError::InFunction { range, .. } => range.into(),
-            RuntimeError::Semantic { range, .. } => range.into(),
-            RuntimeError::LabelsOnNonTupleOutput { range, .. } => range.into(),
-            RuntimeError::OutputLabelCountMismatch { range, .. } => range.into(),
-            RuntimeError::OutputNotAtTopLevel { range } => range.into(),
-            RuntimeError::SetNotAtTopLevel { range } => range.into(),
-            RuntimeError::ReturnOutsideFunction { range } => range.into(),
-            RuntimeError::LoopOverNonSequence { range, .. } => range.into(),
-            RuntimeError::UndefinedReference { range, .. } => range.into(),
-            RuntimeError::UndefinedFunction { range, .. } => range.into(),
-            RuntimeError::InvalidCondition { range, .. } => range.into(),
-            RuntimeError::RangeHasNonSequenceEndpoints { range, .. } => range.into(),
-            RuntimeError::InvalidArgumentToOperator { operator_range, .. } => operator_range.into(),
-            RuntimeError::NegativeArgumentToFunction { range, .. } => range.into(),
-            RuntimeError::InvalidPrimitiveArguments(error) => (&error.range).into(),
-            RuntimeError::InvalidPrimitiveValue(error) => (&error.range).into(),
-            RuntimeError::ShapeMismatch(error) => (&error.range).into(),
-            RuntimeError::NonAdditiveSum(error) => (&error.range).into(),
-            RuntimeError::InvalidRepeatExpression { range, .. } => range.into(),
-            RuntimeError::MathError { range, .. } => range.into(),
+            RuntimeError::InFunction { range, .. } => *range,
+            RuntimeError::Semantic { range, .. } => *range,
+            RuntimeError::LabelsOnNonTupleOutput { range, .. } => *range,
+            RuntimeError::OutputLabelCountMismatch { range, .. } => *range,
+            RuntimeError::OutputNotAtTopLevel { range } => *range,
+            RuntimeError::SetNotAtTopLevel { range } => *range,
+            RuntimeError::ReturnOutsideFunction { range } => *range,
+            RuntimeError::LoopOverNonSequence { range, .. } => *range,
+            RuntimeError::UndefinedReference { range, .. } => *range,
+            RuntimeError::UndefinedFunction { range, .. } => *range,
+            RuntimeError::InvalidCondition { range, .. } => *range,
+            RuntimeError::RangeHasNonSequenceEndpoints { range, .. } => *range,
+            RuntimeError::InvalidArgumentToOperator { operator_range, .. } => *operator_range,
+            RuntimeError::NegativeArgumentToFunction { range, .. } => *range,
+            RuntimeError::InvalidPrimitiveArguments(error) => error.range,
+            RuntimeError::InvalidPrimitiveValue(error) => error.range,
+            RuntimeError::ShapeMismatch(error) => error.range,
+            RuntimeError::NonAdditiveSum(error) => error.range,
+            RuntimeError::InvalidRepeatExpression { range, .. } => *range,
+            RuntimeError::MathError { range, .. } => *range,
         }
     }
 }

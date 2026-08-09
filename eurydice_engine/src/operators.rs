@@ -18,10 +18,7 @@ use crate::{
 /// error; values the operation is not defined for name the value at fault.
 fn op_error_at(range: ast::Range, action: &'static str) -> impl Fn(ElementOpError) -> RuntimeError {
     move |error| match error {
-        ElementOpError::Math(message) => RuntimeError::MathError {
-            range: range.into(),
-            message,
-        },
+        ElementOpError::Math(message) => RuntimeError::MathError { range, message },
         ElementOpError::Mismatch(mismatch) => {
             mismatch.into_error(range, action, NonAdditiveSubject::Operand)
         }
@@ -229,7 +226,7 @@ pub(crate) fn apply_binary_op(
             if left.non_numeric().is_some() {
                 return Err(RuntimeError::Semantic {
                     kind: SemanticErrorKind::OperatorOperands,
-                    range: op.range.into(),
+                    range: op.range,
                     message: "only integers can be used as positions".to_string(),
                 });
             }
@@ -250,10 +247,10 @@ pub(crate) fn apply_binary_op(
                 ),
                 RuntimeValue::Pool(_) => {
                     return Err(RuntimeError::InvalidArgumentToOperator {
-                        operator_range: op.range.into(),
+                        operator_range: op.range,
                         op: op.value,
                         expected: "an integer or a sequence",
-                        found_range: left_range.into(),
+                        found_range: left_range,
                         value: left.clone(),
                     });
                 }
@@ -295,7 +292,7 @@ pub(crate) fn apply_binary_op(
                     if index < 1 || index > i32::try_from(lst.len()).unwrap_or(i32::MAX) {
                         return Err(RuntimeError::Semantic {
                             kind: SemanticErrorKind::OutOfRange,
-                            range: op.range.into(),
+                            range: op.range,
                             message: "position is out of range".to_string(),
                         });
                     }
@@ -318,7 +315,7 @@ pub(crate) fn apply_binary_op(
                 RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
                     Err(RuntimeError::Semantic {
                         kind: SemanticErrorKind::OperatorOperands,
-                        range: op.range.into(),
+                        range: op.range,
                         message: "positional selection is not defined for this value".to_string(),
                     })
                 }
@@ -623,7 +620,7 @@ fn make_d(
         RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
             return Err(RuntimeError::Semantic {
                 kind: SemanticErrorKind::OperatorOperands,
-                range: range.into(),
+                range,
                 message: "a non-numeric element cannot specify die sides; use a sequence"
                     .to_string(),
             });

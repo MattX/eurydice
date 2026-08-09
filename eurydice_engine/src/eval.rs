@@ -324,7 +324,7 @@ impl Evaluator {
         }
         Err(RuntimeError::Semantic {
             kind: SemanticErrorKind::BindingConflict,
-            range: range.into(),
+            range,
             message: format!(
                 "`{name}` is a declared symbol, so it cannot be used as a variable name"
             ),
@@ -340,7 +340,7 @@ impl Evaluator {
         if eval_context.recursion_depth != 0 || eval_context.block_depth != 0 {
             return Err(RuntimeError::Semantic {
                 kind: SemanticErrorKind::TopLevelOnly,
-                range: statement_range.into(),
+                range: statement_range,
                 message: "enum declarations are only allowed at the top level".to_string(),
             });
         }
@@ -348,14 +348,14 @@ impl Evaluator {
             if self.symbols.contains(&member.value) {
                 return Err(RuntimeError::Semantic {
                     kind: SemanticErrorKind::BindingConflict,
-                    range: member.range.into(),
+                    range: member.range,
                     message: format!("symbol {} is already defined", member.value),
                 });
             }
             if self.env.contains(&member.value) {
                 return Err(RuntimeError::Semantic {
                     kind: SemanticErrorKind::BindingConflict,
-                    range: member.range.into(),
+                    range: member.range,
                     message: format!("{} is already bound as a variable", member.value),
                 });
             }
@@ -412,7 +412,7 @@ impl Evaluator {
             } => {
                 if eval_context.recursion_depth != 0 {
                     return Err(RuntimeError::OutputNotAtTopLevel {
-                        range: statement.range.into(),
+                        range: statement.range,
                     });
                 }
                 let value = self.evaluate(eval_context, expr)?;
@@ -444,14 +444,14 @@ impl Evaluator {
                 let field_names = if let Some(labels) = labeled {
                     let Some(ElementValue::Tuple(fields)) = displayed.first() else {
                         return Err(RuntimeError::LabelsOnNonTupleOutput {
-                            range: labels.range.into(),
-                            value_range: expr.range.into(),
+                            range: labels.range,
+                            value_range: expr.range,
                             value,
                         });
                     };
                     if labels.value.len() != fields.len() {
                         return Err(RuntimeError::OutputLabelCountMismatch {
-                            range: labels.range.into(),
+                            range: labels.range,
                             expected: fields.len(),
                             found: labels.value.len(),
                         });
@@ -499,7 +499,7 @@ impl Evaluator {
             Statement::Return { value } => {
                 if self.recursion_depth == 0 {
                     return Err(RuntimeError::ReturnOutsideFunction {
-                        range: statement.range.into(),
+                        range: statement.range,
                     });
                 }
                 let value = self.evaluate(eval_context, value)?;
@@ -516,7 +516,7 @@ impl Evaluator {
                     RuntimeValue::Element(ElementValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::InvalidCondition {
-                            range: condition.range.into(),
+                            range: condition.range,
                             value: condition_value,
                         });
                     }
@@ -547,7 +547,7 @@ impl Evaluator {
                     RuntimeValue::List(range) => range,
                     _ => {
                         return Err(RuntimeError::LoopOverNonSequence {
-                            range: range_expression.range.into(),
+                            range: range_expression.range,
                             value: range,
                         });
                     }
@@ -567,7 +567,7 @@ impl Evaluator {
             Statement::Set(s) => {
                 if eval_context.recursion_depth != 0 {
                     return Err(RuntimeError::SetNotAtTopLevel {
-                        range: statement.range.into(),
+                        range: statement.range,
                     });
                 }
                 match s {
@@ -643,7 +643,7 @@ impl Evaluator {
                     .functions
                     .get(&name.value)
                     .ok_or_else(|| RuntimeError::UndefinedFunction {
-                        range: expression.range.into(),
+                        range: expression.range,
                         name: name.value.clone(),
                         arity_mismatch: arity_mismatch(&self.functions, &name.value, args),
                     })?
@@ -671,7 +671,7 @@ impl Evaluator {
                 self.env
                     .get(name)
                     .ok_or_else(|| RuntimeError::UndefinedReference {
-                        range: expression.range.into(),
+                        range: expression.range,
                         name: name.clone(),
                     })
             }
@@ -695,7 +695,7 @@ impl Evaluator {
                 }
                 repeat_value => {
                     return Err(RuntimeError::InvalidRepeatExpression {
-                        range: repeat.range.into(),
+                        range: repeat.range,
                         value: repeat_value,
                     });
                 }
@@ -711,7 +711,7 @@ impl Evaluator {
                     RuntimeValue::Element(ElementValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
-                            range: start_expr.range.into(),
+                            range: start_expr.range,
                             value: start,
                         });
                     }
@@ -722,7 +722,7 @@ impl Evaluator {
                     RuntimeValue::Element(ElementValue::Int(i)) => i,
                     _ => {
                         return Err(RuntimeError::RangeHasNonSequenceEndpoints {
-                            range: end_expr.range.into(),
+                            range: end_expr.range,
                             value: end,
                         });
                     }
@@ -928,7 +928,7 @@ impl Evaluator {
                 result.map_err(|source| {
                     let range = source.range();
                     RuntimeError::InFunction {
-                        range: range.into(),
+                        range,
                         source: Box::new(source),
                         body_source: user_function.source_id,
                         frame: Box::new(EvaluationFrame {
@@ -1083,7 +1083,7 @@ fn reject_mixed_output_shapes(
         .find(|outcome| shape_of(outcome) != shape)
     {
         return Err(RuntimeError::ShapeMismatch(Box::new(ShapeMismatchError {
-            range: range.into(),
+            range,
             action: "displaying a distribution",
             first: (*first).clone(),
             second: (*other).clone(),
@@ -1192,7 +1192,7 @@ fn interpolate_variable_names(
                 result.push_str(&value.display(symbols).to_string());
             } else {
                 return Err(RuntimeError::UndefinedReference {
-                    range: template.range.into(),
+                    range: template.range,
                     name,
                 });
             }
