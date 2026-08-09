@@ -4,8 +4,9 @@ use std::rc::Rc;
 
 use crate::{
     ast::{self, BinaryOp, UnaryOp, WithRange},
+    diagnostic::DiagnosticCode,
     dice::Pool,
-    error::{NonAdditiveSubject, RuntimeError, SemanticErrorKind},
+    error::{NonAdditiveSubject, RuntimeError},
     value::{
         ElementMismatch, ElementOpError, ElementValue, PoolSumFailure, RuntimeValue, sum_elements,
         sum_pool,
@@ -225,7 +226,7 @@ pub(crate) fn apply_binary_op(
         BinaryOp::At => {
             if left.non_numeric().is_some() {
                 return Err(RuntimeError::Semantic {
-                    kind: SemanticErrorKind::OperatorOperands,
+                    code: DiagnosticCode::OperatorOperands,
                     range: op.range,
                     message: "only integers can be used as positions".to_string(),
                 });
@@ -291,7 +292,7 @@ pub(crate) fn apply_binary_op(
                     let index = left[0];
                     if index < 1 || index > i32::try_from(lst.len()).unwrap_or(i32::MAX) {
                         return Err(RuntimeError::Semantic {
-                            kind: SemanticErrorKind::OutOfRange,
+                            code: DiagnosticCode::OutOfRange,
                             range: op.range,
                             message: "position is out of range".to_string(),
                         });
@@ -314,7 +315,7 @@ pub(crate) fn apply_binary_op(
                     }),
                 RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
                     Err(RuntimeError::Semantic {
-                        kind: SemanticErrorKind::OperatorOperands,
+                        code: DiagnosticCode::OperatorOperands,
                         range: op.range,
                         message: "positional selection is not defined for this value".to_string(),
                     })
@@ -619,7 +620,7 @@ fn make_d(
         RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
         RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
             return Err(RuntimeError::Semantic {
-                kind: SemanticErrorKind::OperatorOperands,
+                code: DiagnosticCode::OperatorOperands,
                 range,
                 message: "a non-numeric element cannot specify die sides; use a sequence"
                     .to_string(),

@@ -7,7 +7,7 @@
 
 use crate::{
     ast::{self, BinaryOp},
-    diagnostic::{EvaluationFrame, SourceId},
+    diagnostic::{DiagnosticCode, EvaluationFrame, SourceId},
     value::{ElementValue, RuntimeValue},
 };
 
@@ -17,26 +17,6 @@ pub struct PrimitiveArgumentError {
     pub range: ast::Range,
     pub expected: String,
     pub value: RuntimeValue,
-}
-
-/// Why a [`RuntimeError::Semantic`] was raised.
-///
-/// This determines the diagnostic code, so each raise site states it outright
-/// rather than leaving it to be inferred from the message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SemanticErrorKind {
-    /// An operator does not accept the types it was given.
-    OperatorOperands,
-    /// Values that cannot be combined were used together.
-    OutcomeMismatch,
-    /// A value that cannot be summed was used where a sum is required.
-    NonAdditiveValue,
-    /// A value falls outside the range the operation allows.
-    OutOfRange,
-    /// A name is already taken, or cannot be bound in this position.
-    BindingConflict,
-    /// A statement appeared somewhere it is not allowed.
-    TopLevelOnly,
 }
 
 #[derive(Debug)]
@@ -132,8 +112,11 @@ pub enum RuntimeError {
         frame: Box<EvaluationFrame>,
     },
 
+    /// An error whose message is built at the raise site, classified by the
+    /// code it reports as. Everything a diagnostic would add beyond the
+    /// message — a second span, a note, a fix — needs a variant of its own.
     Semantic {
-        kind: SemanticErrorKind,
+        code: DiagnosticCode,
         range: ast::Range,
         message: String,
     },

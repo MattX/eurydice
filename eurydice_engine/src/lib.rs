@@ -11,8 +11,9 @@ pub mod value;
 mod operators;
 
 pub use diagnostic::{
-    DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, EvaluationFrame,
-    FixApplicability, LabelStyle, SourceId, SourceRange, SuggestedFix, TextEdit, TraceBinding,
+    DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic,
+    EvaluationFrame, FixApplicability, LabelStyle, SourceId, SourceRange, SuggestedFix, TextEdit,
+    TraceBinding,
 };
 pub use engine::{Engine, EngineOutput, RunReport};
 pub use primitives::{PrimitiveMetadata, primitive_metadata};

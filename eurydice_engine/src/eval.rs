@@ -11,8 +11,9 @@ use crate::{
         Statement, StaticType, WithRange,
     },
     diagnostic::{
-        DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame, LabelStyle,
-        SourceId, SourceRange, TraceBinding, WarningKind, missing_return_warning, preview_value,
+        DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame,
+        LabelStyle, SourceId, SourceRange, TraceBinding, WarningKind, missing_return_warning,
+        preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
     error::{NonAdditiveSubject, ShapeMismatchError},
@@ -26,7 +27,7 @@ use crate::{
 
 pub(crate) use crate::value::sum_pool;
 pub use crate::{
-    error::{ArityMismatch, RuntimeError, SemanticErrorKind},
+    error::{ArityMismatch, RuntimeError},
     value::{ElementValue, RuntimeValue, SymbolTable},
 };
 
@@ -235,7 +236,7 @@ impl Evaluator {
             return;
         }
         self.diagnostics.push(EngineDiagnostic {
-            code: KIND.code().to_string(),
+            code: KIND.code(),
             severity: DiagnosticSeverity::Warning,
             summary: "The same dice pool is sampled independently more than once".to_string(),
             labels: vec![DiagnosticLabel {
@@ -272,7 +273,7 @@ impl Evaluator {
             return;
         }
         self.diagnostics.push(EngineDiagnostic {
-            code: kind.code().to_string(),
+            code: kind.code(),
             severity: DiagnosticSeverity::Warning,
             summary: summary.to_string(),
             labels: vec![DiagnosticLabel {
@@ -323,7 +324,7 @@ impl Evaluator {
             return Ok(());
         }
         Err(RuntimeError::Semantic {
-            kind: SemanticErrorKind::BindingConflict,
+            code: DiagnosticCode::BindingConflict,
             range,
             message: format!(
                 "`{name}` is a declared symbol, so it cannot be used as a variable name"
@@ -339,7 +340,7 @@ impl Evaluator {
     ) -> Result<(), RuntimeError> {
         if eval_context.recursion_depth != 0 || eval_context.block_depth != 0 {
             return Err(RuntimeError::Semantic {
-                kind: SemanticErrorKind::TopLevelOnly,
+                code: DiagnosticCode::TopLevelOnly,
                 range: statement_range,
                 message: "enum declarations are only allowed at the top level".to_string(),
             });
@@ -347,14 +348,14 @@ impl Evaluator {
         for member in members {
             if self.symbols.contains(&member.value) {
                 return Err(RuntimeError::Semantic {
-                    kind: SemanticErrorKind::BindingConflict,
+                    code: DiagnosticCode::BindingConflict,
                     range: member.range,
                     message: format!("symbol {} is already defined", member.value),
                 });
             }
             if self.env.contains(&member.value) {
                 return Err(RuntimeError::Semantic {
-                    kind: SemanticErrorKind::BindingConflict,
+                    code: DiagnosticCode::BindingConflict,
                     range: member.range,
                     message: format!("{} is already bound as a variable", member.value),
                 });

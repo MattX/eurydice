@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::{
     ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
-    error::{ArityMismatch, NonAdditiveSubject, RuntimeError, SemanticErrorKind},
+    error::{ArityMismatch, NonAdditiveSubject, RuntimeError},
     primitives::primitive_signature,
     value::{ElementValue, RuntimeValue, SymbolTable},
 };
@@ -86,13 +86,262 @@ pub struct EvaluationFrame {
     pub bindings: Vec<TraceBinding>,
 }
 
+/// What kind of problem a diagnostic reports.
+///
+/// Codes are the stable part of a diagnostic: summaries, notes, and help text
+/// are prose that may be reworded at any time, but a code means the same thing
+/// across versions, and serializes to the dotted string it is named for.
+/// Consumers that branch on a diagnostic should branch on this.
+///
+/// The set grows as the engine learns to report more, so it is
+/// `#[non_exhaustive]`: a match on it needs a fallback arm, and a new code is
+/// not a breaking change. [`DiagnosticCode::ALL`] lists every code this version
+/// defines; adding a code means adding it there and to
+/// [`as_str`](DiagnosticCode::as_str) as well.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[non_exhaustive]
+pub enum DiagnosticCode {
+    // Syntax: the program could not be parsed.
+    /// `=` was used where a binding expects `:`.
+    #[serde(rename = "syntax.assignment_separator")]
+    AssignmentSeparator,
+    /// `==` was used where a comparison expects `=`.
+    #[serde(rename = "syntax.equality_operator")]
+    EqualityOperator,
+    /// A variable was written in lowercase, where names are uppercase.
+    #[serde(rename = "syntax.variable_case")]
+    VariableCase,
+    /// A token cannot appear where it was found.
+    #[serde(rename = "syntax.unexpected_token")]
+    UnexpectedToken,
+    /// A bracket, brace, or parenthesis was never closed.
+    #[serde(rename = "syntax.unclosed_delimiter")]
+    UnclosedDelimiter,
+    /// The program ended in the middle of something.
+    #[serde(rename = "syntax.unexpected_end")]
+    UnexpectedEnd,
+    /// Input continues past the end of a complete program.
+    #[serde(rename = "syntax.extra_token")]
+    ExtraToken,
+    /// A string literal was never closed.
+    #[serde(rename = "syntax.unterminated_string")]
+    UnterminatedString,
+    /// A block comment was never closed.
+    #[serde(rename = "syntax.unterminated_comment")]
+    UnterminatedComment,
+    /// A `;` was used to end a statement, which the language does not use.
+    #[serde(rename = "syntax.unexpected_semicolon")]
+    UnexpectedSemicolon,
+    /// A character that means nothing in the language.
+    #[serde(rename = "syntax.invalid_character")]
+    InvalidCharacter,
+    /// An integer literal does not fit in the engine's integer type.
+    #[serde(rename = "syntax.integer_out_of_range")]
+    IntegerOutOfRange,
+    /// A call names no function at all, as in `[]`.
+    #[serde(rename = "syntax.empty_function_call")]
+    EmptyFunctionCall,
+
+    // Names: something was referred to that is not defined, or cannot be.
+    /// A variable that has not been assigned.
+    #[serde(rename = "name.undefined_variable")]
+    UndefinedVariable,
+    /// A function that has not been defined.
+    #[serde(rename = "name.undefined_function")]
+    UndefinedFunction,
+    /// A name is already taken, or cannot be bound in this position.
+    #[serde(rename = "name.binding_conflict")]
+    BindingConflict,
+
+    // Types: a value's type or shape is not what the operation needs.
+    /// A sequence was required.
+    #[serde(rename = "type.expected_sequence")]
+    ExpectedSequence,
+    /// A number was required.
+    #[serde(rename = "type.expected_number")]
+    ExpectedNumber,
+    /// An operator was given an operand of a type it does not accept.
+    #[serde(rename = "type.operator_argument")]
+    OperatorArgument,
+    /// An operator's operands do not work together, whatever each is alone.
+    #[serde(rename = "type.operator_operands")]
+    OperatorOperands,
+    /// A function was given an argument of a type it does not accept.
+    #[serde(rename = "type.function_argument")]
+    FunctionArgument,
+    /// Two values that had to line up have different shapes.
+    #[serde(rename = "type.outcome_mismatch")]
+    OutcomeMismatch,
+    /// A value that had to be summed has parts that cannot be added.
+    #[serde(rename = "type.non_additive_value")]
+    NonAdditiveValue,
+    /// `labeled` was applied to an output that is not a tuple.
+    #[serde(rename = "type.labels_require_tuple")]
+    LabelsRequireTuple,
+    /// A repeat count is not a number.
+    #[serde(rename = "type.repeat_count")]
+    RepeatCount,
+    /// A range endpoint is not a number.
+    #[serde(rename = "type.range_endpoint")]
+    RangeEndpoint,
+
+    // Values: the type is right but the value is not usable.
+    /// A negative number was given where only zero or more makes sense.
+    #[serde(rename = "value.nonnegative_required")]
+    NonnegativeRequired,
+    /// A value falls outside the range the operation allows.
+    #[serde(rename = "value.out_of_range")]
+    OutOfRange,
+    /// An arithmetic operation has no defined result, such as division by zero.
+    #[serde(rename = "value.arithmetic_error")]
+    ArithmeticError,
+    /// The number of labels does not match the number of tuple fields.
+    #[serde(rename = "value.output_label_count")]
+    OutputLabelCount,
+
+    // Placement: the statement is fine, but not here.
+    /// `result:` appeared outside a function.
+    #[serde(rename = "placement.result_outside_function")]
+    ResultOutsideFunction,
+    /// A statement that is only allowed at the top level appeared inside a block.
+    #[serde(rename = "placement.top_level_only")]
+    TopLevelOnly,
+
+    // Control flow.
+    /// A function may finish without reaching `result:`.
+    #[serde(rename = "control_flow.missing_result")]
+    MissingResult,
+
+    // Evaluation: the program ran, but a limit or a subtlety was hit.
+    /// One dice pool is sampled independently more than once.
+    #[serde(rename = "evaluation.independent_pool_reuse")]
+    IndependentPoolReuse,
+    /// Exploding dice stopped at the configured depth.
+    #[serde(rename = "evaluation.explode_depth")]
+    ExplodeDepth,
+    /// Recursion stopped at the configured depth.
+    #[serde(rename = "evaluation.maximum_function_depth")]
+    MaximumFunctionDepth,
+}
+
+impl DiagnosticCode {
+    /// Every code this version of the engine can produce.
+    pub const ALL: &'static [DiagnosticCode] = &[
+        // Syntax: the program could not be parsed.
+        Self::AssignmentSeparator,
+        Self::EqualityOperator,
+        Self::VariableCase,
+        Self::UnexpectedToken,
+        Self::UnclosedDelimiter,
+        Self::UnexpectedEnd,
+        Self::ExtraToken,
+        Self::UnterminatedString,
+        Self::UnterminatedComment,
+        Self::UnexpectedSemicolon,
+        Self::InvalidCharacter,
+        Self::IntegerOutOfRange,
+        Self::EmptyFunctionCall,
+        // Names: something was referred to that is not defined, or cannot be.
+        Self::UndefinedVariable,
+        Self::UndefinedFunction,
+        Self::BindingConflict,
+        // Types: a value's type or shape is not what the operation needs.
+        Self::ExpectedSequence,
+        Self::ExpectedNumber,
+        Self::OperatorArgument,
+        Self::OperatorOperands,
+        Self::FunctionArgument,
+        Self::OutcomeMismatch,
+        Self::NonAdditiveValue,
+        Self::LabelsRequireTuple,
+        Self::RepeatCount,
+        Self::RangeEndpoint,
+        // Values: the type is right but the value is not usable.
+        Self::NonnegativeRequired,
+        Self::OutOfRange,
+        Self::ArithmeticError,
+        Self::OutputLabelCount,
+        // Placement: the statement is fine, but not here.
+        Self::ResultOutsideFunction,
+        Self::TopLevelOnly,
+        // Control flow.
+        Self::MissingResult,
+        // Evaluation: the program ran, but a limit or a subtlety was hit.
+        Self::IndependentPoolReuse,
+        Self::ExplodeDepth,
+        Self::MaximumFunctionDepth,
+    ];
+
+    /// The code's stable dotted string, as it is serialized.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            // Syntax: the program could not be parsed.
+            Self::AssignmentSeparator => "syntax.assignment_separator",
+            Self::EqualityOperator => "syntax.equality_operator",
+            Self::VariableCase => "syntax.variable_case",
+            Self::UnexpectedToken => "syntax.unexpected_token",
+            Self::UnclosedDelimiter => "syntax.unclosed_delimiter",
+            Self::UnexpectedEnd => "syntax.unexpected_end",
+            Self::ExtraToken => "syntax.extra_token",
+            Self::UnterminatedString => "syntax.unterminated_string",
+            Self::UnterminatedComment => "syntax.unterminated_comment",
+            Self::UnexpectedSemicolon => "syntax.unexpected_semicolon",
+            Self::InvalidCharacter => "syntax.invalid_character",
+            Self::IntegerOutOfRange => "syntax.integer_out_of_range",
+            Self::EmptyFunctionCall => "syntax.empty_function_call",
+
+            // Names: something was referred to that is not defined, or cannot be.
+            Self::UndefinedVariable => "name.undefined_variable",
+            Self::UndefinedFunction => "name.undefined_function",
+            Self::BindingConflict => "name.binding_conflict",
+
+            // Types: a value's type or shape is not what the operation needs.
+            Self::ExpectedSequence => "type.expected_sequence",
+            Self::ExpectedNumber => "type.expected_number",
+            Self::OperatorArgument => "type.operator_argument",
+            Self::OperatorOperands => "type.operator_operands",
+            Self::FunctionArgument => "type.function_argument",
+            Self::OutcomeMismatch => "type.outcome_mismatch",
+            Self::NonAdditiveValue => "type.non_additive_value",
+            Self::LabelsRequireTuple => "type.labels_require_tuple",
+            Self::RepeatCount => "type.repeat_count",
+            Self::RangeEndpoint => "type.range_endpoint",
+
+            // Values: the type is right but the value is not usable.
+            Self::NonnegativeRequired => "value.nonnegative_required",
+            Self::OutOfRange => "value.out_of_range",
+            Self::ArithmeticError => "value.arithmetic_error",
+            Self::OutputLabelCount => "value.output_label_count",
+
+            // Placement: the statement is fine, but not here.
+            Self::ResultOutsideFunction => "placement.result_outside_function",
+            Self::TopLevelOnly => "placement.top_level_only",
+
+            // Control flow.
+            Self::MissingResult => "control_flow.missing_result",
+
+            // Evaluation: the program ran, but a limit or a subtlety was hit.
+            Self::IndependentPoolReuse => "evaluation.independent_pool_reuse",
+            Self::ExplodeDepth => "evaluation.explode_depth",
+            Self::MaximumFunctionDepth => "evaluation.maximum_function_depth",
+        }
+    }
+}
+
+impl std::fmt::Display for DiagnosticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A complete engine diagnostic.
 ///
 /// The `code` classifies the diagnostic for consumers that want to branch on
 /// it; everything else is prose and spans for them to present.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EngineDiagnostic {
-    pub code: String,
+    pub code: DiagnosticCode,
     pub severity: DiagnosticSeverity,
     pub summary: String,
     pub labels: Vec<DiagnosticLabel>,
@@ -223,7 +472,7 @@ fn argument_mismatch_message(
 }
 
 struct DiagnosticParts {
-    code: &'static str,
+    code: DiagnosticCode,
     summary: String,
     labels: Vec<DiagnosticLabel>,
     notes: Vec<String>,
@@ -233,7 +482,7 @@ struct DiagnosticParts {
 }
 
 impl DiagnosticParts {
-    fn new(code: &'static str, summary: impl Into<String>, labels: Vec<DiagnosticLabel>) -> Self {
+    fn new(code: DiagnosticCode, summary: impl Into<String>, labels: Vec<DiagnosticLabel>) -> Self {
         Self {
             code,
             summary: summary.into(),
@@ -247,7 +496,7 @@ impl DiagnosticParts {
 
     fn finish(self, severity: DiagnosticSeverity, trace: Vec<EvaluationFrame>) -> EngineDiagnostic {
         EngineDiagnostic {
-            code: self.code.to_string(),
+            code: self.code,
             severity,
             summary: self.summary,
             labels: self.labels,
@@ -289,7 +538,7 @@ impl DiagnosticParts {
 fn syntax_parts(
     source: SourceId,
     range: Range,
-    code: &'static str,
+    code: DiagnosticCode,
     summary: impl Into<String>,
 ) -> DiagnosticParts {
     DiagnosticParts::new(
@@ -318,7 +567,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.assignment_separator",
+                    DiagnosticCode::AssignmentSeparator,
                     "Assignments use `:`, not `=`",
                 )
                 .help("Write `NAME: value` to bind a variable.")
@@ -336,7 +585,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.equality_operator",
+                    DiagnosticCode::EqualityOperator,
                     "Equality uses one `=`",
                 )
                 .help("AnyDice writes equality as `A = B`.")
@@ -354,7 +603,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.variable_case",
+                    DiagnosticCode::VariableCase,
                     "Variable names use uppercase letters",
                 )
                 .help("Lowercase words are reserved for function names.")
@@ -368,7 +617,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.unexpected_token",
+                    DiagnosticCode::UnexpectedToken,
                     format!("Unexpected token `{found}`"),
                 )
                 .note("At the top level, expressions you want to show must start with `output`.")
@@ -380,7 +629,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.unclosed_delimiter",
+                    DiagnosticCode::UnclosedDelimiter,
                     format!("Missing closing `{closer}`"),
                 )
                 .incomplete()
@@ -397,7 +646,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.unexpected_end",
+                    DiagnosticCode::UnexpectedEnd,
                     "The program ends before this construct is complete",
                 )
                 .incomplete()
@@ -408,7 +657,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
             syntax_parts(
                 source_id,
                 range,
-                "syntax.extra_token",
+                DiagnosticCode::ExtraToken,
                 format!(
                     "Unexpected extra token `{}`",
                     source.get(token.0..token.2).unwrap_or_default()
@@ -426,7 +675,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.unterminated_string",
+                    DiagnosticCode::UnterminatedString,
                     "This string is missing its closing quote",
                 )
                 .incomplete()
@@ -441,7 +690,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.unterminated_comment",
+                    DiagnosticCode::UnterminatedComment,
                     "This block comment is missing its closing backslash",
                 )
                 .incomplete()
@@ -456,7 +705,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.semicolon",
+                    DiagnosticCode::UnexpectedSemicolon,
                     "Statements are not separated with semicolons",
                 )
                 .help("Whitespace is enough to separate AnyDice statements.")
@@ -470,7 +719,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                 syntax_parts(
                     source_id,
                     range,
-                    "syntax.invalid_character",
+                    DiagnosticCode::InvalidCharacter,
                     found.map_or_else(
                         || "Invalid character".to_string(),
                         |character| format!("Invalid character `{character}`"),
@@ -482,14 +731,14 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
             ParseActionError::InvalidIntegerLiteral { range, .. } => syntax_parts(
                 source_id,
                 range,
-                "syntax.integer_out_of_range",
+                DiagnosticCode::IntegerOutOfRange,
                 "This integer is outside the supported range",
             )
             .help("Integers must fit between -2147483648 and 2147483647."),
             ParseActionError::EmptyFunctionCall { range } => syntax_parts(
                 source_id,
                 range,
-                "syntax.empty_function_call",
+                DiagnosticCode::EmptyFunctionCall,
                 "A function call cannot be empty",
             )
             .help("Put a lowercase function name between the brackets."),
@@ -528,12 +777,12 @@ pub(crate) enum WarningKind {
 }
 
 impl WarningKind {
-    pub(crate) fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> DiagnosticCode {
         match self {
-            Self::IndependentPoolReuse => "evaluation.independent_pool_reuse",
-            Self::ExplodeDepth => "evaluation.explode_depth",
-            Self::MaximumFunctionDepth => "evaluation.maximum_function_depth",
-            Self::MissingResult => "control_flow.missing_result",
+            Self::IndependentPoolReuse => DiagnosticCode::IndependentPoolReuse,
+            Self::ExplodeDepth => DiagnosticCode::ExplodeDepth,
+            Self::MaximumFunctionDepth => DiagnosticCode::MaximumFunctionDepth,
+            Self::MissingResult => DiagnosticCode::MissingResult,
         }
     }
 }
@@ -548,7 +797,7 @@ pub(crate) fn missing_return_warning(
 
     let function = definition.name.value.replace("{}", "…");
     Some(EngineDiagnostic {
-        code: WarningKind::MissingResult.code().to_string(),
+        code: WarningKind::MissingResult.code(),
         severity: DiagnosticSeverity::Warning,
         summary: format!("Function `[{function}]` may finish without a result"),
         labels: vec![DiagnosticLabel {
@@ -673,7 +922,7 @@ pub(crate) fn runtime_diagnostic(
 
     let parts = match error {
         RuntimeError::UndefinedReference { range, name } => DiagnosticParts::new(
-            "name.undefined_variable",
+            DiagnosticCode::UndefinedVariable,
             format!("Variable `{name}` is not defined"),
             vec![unlabeled(range, LabelStyle::Primary)],
         )
@@ -687,7 +936,7 @@ pub(crate) fn runtime_diagnostic(
             arity_mismatch,
         } => {
             let parts = DiagnosticParts::new(
-                "name.undefined_function",
+                DiagnosticCode::UndefinedFunction,
                 format!("Function `[{}]` is not defined", name.replace("{}", "…")),
                 vec![unlabeled(range, LabelStyle::Primary)],
             )
@@ -720,7 +969,7 @@ pub(crate) fn runtime_diagnostic(
         }
         RuntimeError::LoopOverNonSequence { range, value } => {
             let parts = DiagnosticParts::new(
-                "type.expected_sequence",
+                DiagnosticCode::ExpectedSequence,
                 "A loop can only iterate over a sequence",
                 vec![type_mismatch_label(
                     source_id,
@@ -741,7 +990,7 @@ pub(crate) fn runtime_diagnostic(
         }
         RuntimeError::InvalidCondition { range, value } => {
             let parts = DiagnosticParts::new(
-                "type.expected_number",
+                DiagnosticCode::ExpectedNumber,
                 "An `if` condition must be an integer",
                 vec![type_mismatch_label(
                     source_id,
@@ -767,7 +1016,7 @@ pub(crate) fn runtime_diagnostic(
             found_range,
             value,
         } => DiagnosticParts::new(
-            "type.operator_argument",
+            DiagnosticCode::OperatorArgument,
             format!("Operator `{op}` expects {expected}"),
             vec![
                 unlabeled(operator_range, LabelStyle::Secondary),
@@ -787,7 +1036,7 @@ pub(crate) fn runtime_diagnostic(
             found_range,
             value,
         } => DiagnosticParts::new(
-            "value.nonnegative_required",
+            DiagnosticCode::NonnegativeRequired,
             format!("`{}` needs a nonnegative count", primitive_call(name)),
             vec![
                 unlabeled(range, LabelStyle::Secondary),
@@ -818,14 +1067,14 @@ pub(crate) fn runtime_diagnostic(
                 })
                 .collect::<Vec<_>>();
             DiagnosticParts::new(
-                "type.function_argument",
+                DiagnosticCode::FunctionArgument,
                 format!("`{}` {}", primitive_call(error.function), error.requirement),
                 labels,
             )
             .maybe_help(error.help.clone())
         }
         RuntimeError::InvalidPrimitiveValue(error) => DiagnosticParts::new(
-            "value.out_of_range",
+            DiagnosticCode::OutOfRange,
             format!("`{}` {}", primitive_call(error.function), error.requirement),
             vec![primary(
                 &error.found_range,
@@ -839,7 +1088,7 @@ pub(crate) fn runtime_diagnostic(
             let mut summary = format!("{first} and {second} cannot be combined");
             summary[..1].make_ascii_uppercase();
             DiagnosticParts::new(
-                "type.outcome_mismatch",
+                DiagnosticCode::OutcomeMismatch,
                 summary,
                 vec![primary(
                     &error.range,
@@ -888,7 +1137,7 @@ pub(crate) fn runtime_diagnostic(
                 None => format!("{} requires numbers", error.action),
             };
             DiagnosticParts::new(
-                "type.non_additive_value",
+                DiagnosticCode::NonAdditiveValue,
                 summary,
                 vec![primary(&error.range, label)],
             )
@@ -904,7 +1153,7 @@ pub(crate) fn runtime_diagnostic(
             })
         }
         RuntimeError::MathError { range, message } => DiagnosticParts::new(
-            "value.arithmetic",
+            DiagnosticCode::ArithmeticError,
             message,
             vec![unlabeled(range, LabelStyle::Primary)],
         ),
@@ -921,7 +1170,7 @@ pub(crate) fn runtime_diagnostic(
             "Move this setting before the function definition.",
         ),
         RuntimeError::ReturnOutsideFunction { range } => DiagnosticParts::new(
-            "placement.result_outside_function",
+            DiagnosticCode::ResultOutsideFunction,
             "`result:` can only appear inside a function",
             vec![unlabeled(range, LabelStyle::Primary)],
         ),
@@ -930,7 +1179,7 @@ pub(crate) fn runtime_diagnostic(
             value_range,
             value,
         } => DiagnosticParts::new(
-            "type.labels_require_tuple",
+            DiagnosticCode::LabelsRequireTuple,
             "Output labels require a tuple-valued output",
             vec![
                 unlabeled(range, LabelStyle::Secondary),
@@ -942,7 +1191,7 @@ pub(crate) fn runtime_diagnostic(
             expected,
             found,
         } => DiagnosticParts::new(
-            "value.output_label_count",
+            DiagnosticCode::OutputLabelCount,
             format!(
                 "This tuple has {expected} fields, but {found} output {} provided",
                 if *found == 1 {
@@ -954,7 +1203,7 @@ pub(crate) fn runtime_diagnostic(
             vec![unlabeled(range, LabelStyle::Primary)],
         ),
         RuntimeError::InvalidRepeatExpression { range, value } => DiagnosticParts::new(
-            "type.repeat_count",
+            DiagnosticCode::RepeatCount,
             "A repetition count must be an integer",
             vec![type_mismatch_label(
                 source_id,
@@ -965,7 +1214,7 @@ pub(crate) fn runtime_diagnostic(
             )],
         ),
         RuntimeError::RangeHasNonSequenceEndpoints { range, value } => DiagnosticParts::new(
-            "type.range_endpoint",
+            DiagnosticCode::RangeEndpoint,
             "Both ends of a range must be integers",
             vec![type_mismatch_label(
                 source_id,
@@ -976,32 +1225,16 @@ pub(crate) fn runtime_diagnostic(
             )],
         ),
         RuntimeError::Semantic {
-            kind,
+            code,
             range,
             message,
-        } => DiagnosticParts::new(
-            semantic_code(*kind),
-            message,
-            vec![unlabeled(range, LabelStyle::Primary)],
-        ),
+        } => DiagnosticParts::new(*code, message, vec![unlabeled(range, LabelStyle::Primary)]),
         RuntimeError::InFunction { .. } => {
             unreachable!("function contexts were peeled before rendering")
         }
     };
 
     parts.finish(DiagnosticSeverity::Error, trace)
-}
-
-/// The stable diagnostic code for a semantic error.
-fn semantic_code(kind: SemanticErrorKind) -> &'static str {
-    match kind {
-        SemanticErrorKind::OperatorOperands => "type.operator_operands",
-        SemanticErrorKind::OutcomeMismatch => "type.outcome_mismatch",
-        SemanticErrorKind::NonAdditiveValue => "type.non_additive_value",
-        SemanticErrorKind::OutOfRange => "value.out_of_range",
-        SemanticErrorKind::BindingConflict => "name.binding_conflict",
-        SemanticErrorKind::TopLevelOnly => "placement.top_level_only",
-    }
 }
 
 fn arity_mismatch_help(mismatch: &ArityMismatch) -> String {
@@ -1121,7 +1354,7 @@ fn placement_diagnostic(
     help: &str,
 ) -> DiagnosticParts {
     DiagnosticParts::new(
-        "placement.top_level_only",
+        DiagnosticCode::TopLevelOnly,
         format!("`{statement}` can only appear at the top level"),
         vec![DiagnosticLabel {
             range: SourceRange {
@@ -1137,29 +1370,78 @@ fn placement_diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use super::{SemanticErrorKind, expected_closer, semantic_code};
+    use super::{DiagnosticCode, expected_closer};
 
-    /// The codes are part of the diagnostic contract, so they are pinned here
-    /// rather than left to follow whatever a raise site's wording happens to be.
+    /// The strings are the diagnostic contract a frontend matches on, so they
+    /// are pinned here rather than left to follow whatever a variant happens to
+    /// be renamed to. A new code belongs at the end of this list.
     #[test]
-    fn every_semantic_kind_has_a_stable_code() {
-        let codes = [
-            (
-                SemanticErrorKind::OperatorOperands,
-                "type.operator_operands",
-            ),
-            (SemanticErrorKind::OutcomeMismatch, "type.outcome_mismatch"),
-            (
-                SemanticErrorKind::NonAdditiveValue,
-                "type.non_additive_value",
-            ),
-            (SemanticErrorKind::OutOfRange, "value.out_of_range"),
-            (SemanticErrorKind::BindingConflict, "name.binding_conflict"),
-            (SemanticErrorKind::TopLevelOnly, "placement.top_level_only"),
-        ];
+    fn every_code_has_a_stable_string() {
+        let strings = DiagnosticCode::ALL
+            .iter()
+            .map(|code| code.as_str())
+            .collect::<Vec<_>>();
 
-        for (kind, code) in codes {
-            assert_eq!(semantic_code(kind), code, "{kind:?}");
+        assert_eq!(
+            strings,
+            [
+                "syntax.assignment_separator",
+                "syntax.equality_operator",
+                "syntax.variable_case",
+                "syntax.unexpected_token",
+                "syntax.unclosed_delimiter",
+                "syntax.unexpected_end",
+                "syntax.extra_token",
+                "syntax.unterminated_string",
+                "syntax.unterminated_comment",
+                "syntax.unexpected_semicolon",
+                "syntax.invalid_character",
+                "syntax.integer_out_of_range",
+                "syntax.empty_function_call",
+                "name.undefined_variable",
+                "name.undefined_function",
+                "name.binding_conflict",
+                "type.expected_sequence",
+                "type.expected_number",
+                "type.operator_argument",
+                "type.operator_operands",
+                "type.function_argument",
+                "type.outcome_mismatch",
+                "type.non_additive_value",
+                "type.labels_require_tuple",
+                "type.repeat_count",
+                "type.range_endpoint",
+                "value.nonnegative_required",
+                "value.out_of_range",
+                "value.arithmetic_error",
+                "value.output_label_count",
+                "placement.result_outside_function",
+                "placement.top_level_only",
+                "control_flow.missing_result",
+                "evaluation.independent_pool_reuse",
+                "evaluation.explode_depth",
+                "evaluation.maximum_function_depth",
+            ]
+        );
+    }
+
+    /// The string a code serializes to is what a frontend matches on, and it
+    /// is written out twice — once as a `serde` rename, once in `as_str`. This
+    /// is what keeps the two the same.
+    #[test]
+    fn codes_serialize_as_the_string_they_report() {
+        for code in DiagnosticCode::ALL {
+            assert_eq!(serde_lexpr::to_string(code).unwrap(), code.as_str());
+        }
+    }
+
+    /// A code that serialized to the same string as another would make the two
+    /// indistinguishable to every frontend.
+    #[test]
+    fn codes_are_distinct() {
+        let mut seen = std::collections::HashSet::new();
+        for code in DiagnosticCode::ALL {
+            assert!(seen.insert(code.as_str()), "duplicate code {code}");
         }
     }
 

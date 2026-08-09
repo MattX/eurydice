@@ -2,7 +2,7 @@
 use std::collections::HashSet;
 
 use eurydice_engine::{
-    DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, LabelStyle,
+    DiagnosticCode, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, LabelStyle,
     output::{Distribution, FieldSchema},
 };
 use miette::{Diagnostic, GraphicalReportHandler, LabeledSpan, NamedSource, Severity};
@@ -79,7 +79,7 @@ pub fn format_engine_diagnostics(
                 .collect();
             let adapter = EngineDiagnosticAdapter {
                 summary: diagnostic.summary.clone(),
-                code: diagnostic.code.clone(),
+                code: diagnostic.code,
                 severity: match diagnostic.severity {
                     DiagnosticSeverity::Error => Severity::Error,
                     DiagnosticSeverity::Warning => Severity::Warning,
@@ -143,7 +143,7 @@ fn line_column(source: &str, byte_offset: usize) -> (usize, usize) {
 
 struct EngineDiagnosticAdapter {
     summary: String,
-    code: String,
+    code: DiagnosticCode,
     severity: Severity,
     help: Option<String>,
     source_code: NamedSource<String>,

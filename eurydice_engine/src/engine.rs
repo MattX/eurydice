@@ -192,7 +192,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::FixApplicability;
+    use crate::diagnostic::{DiagnosticCode, FixApplicability};
 
     /// Runs a submission that is expected to succeed, returning its outputs.
     fn run(engine: &mut Engine, source: &str) -> Vec<EngineOutput> {
@@ -252,12 +252,12 @@ mod tests {
     #[test]
     fn reports_common_syntax_mistakes_with_fixes() {
         let cases = [
-            ("X = 1", "syntax.assignment_separator", ":"),
-            ("output 1 == 1", "syntax.equality_operator", ""),
-            ("output d6;", "syntax.semicolon", ""),
-            ("output x", "syntax.variable_case", "X"),
-            ("output total", "syntax.variable_case", "TOTAL"),
-            ("output (1", "syntax.unclosed_delimiter", ")"),
+            ("X = 1", DiagnosticCode::AssignmentSeparator, ":"),
+            ("output 1 == 1", DiagnosticCode::EqualityOperator, ""),
+            ("output d6;", DiagnosticCode::UnexpectedSemicolon, ""),
+            ("output x", DiagnosticCode::VariableCase, "X"),
+            ("output total", DiagnosticCode::VariableCase, "TOTAL"),
+            ("output (1", DiagnosticCode::UnclosedDelimiter, ")"),
         ];
 
         for (source, code, replacement) in cases {
@@ -283,7 +283,7 @@ mod tests {
         let report = Engine::new().run_with_diagnostics("output result");
         let error = report.error().unwrap();
 
-        assert_eq!(error.code, "syntax.unexpected_token");
+        assert_eq!(error.code, DiagnosticCode::UnexpectedToken);
         assert!(error.fixes.is_empty());
     }
 
@@ -295,7 +295,7 @@ mod tests {
             let report = Engine::new().run_with_diagnostics(source);
             let error = report.error().unwrap();
 
-            assert_eq!(error.code, "syntax.unclosed_delimiter", "{source}");
+            assert_eq!(error.code, DiagnosticCode::UnclosedDelimiter, "{source}");
             assert_eq!(error.fixes[0].edits[0].replacement, ")", "{source}");
         }
     }
@@ -306,7 +306,7 @@ mod tests {
             let report = Engine::new().run_with_diagnostics(source);
             let error = report.error().unwrap();
 
-            assert_eq!(error.code, "syntax.unexpected_token");
+            assert_eq!(error.code, DiagnosticCode::UnexpectedToken);
             assert_eq!(
                 error.notes,
                 ["At the top level, expressions you want to show must start with `output`."]
@@ -351,7 +351,7 @@ mod tests {
             let report = Engine::new().run_with_diagnostics(source);
             let error = report.error().unwrap();
 
-            assert_eq!(error.code, "name.undefined_function", "{source}");
+            assert_eq!(error.code, DiagnosticCode::UndefinedFunction, "{source}");
             assert_eq!(error.fixes.len(), 1, "{source}");
             assert_eq!(
                 error.fixes[0].applicability,
@@ -374,7 +374,7 @@ mod tests {
         let report = Engine::new().run_with_diagnostics("output [absolute 1, 2]");
         let error = report.error().unwrap();
 
-        assert_eq!(error.code, "name.undefined_function");
+        assert_eq!(error.code, DiagnosticCode::UndefinedFunction);
         assert!(error.fixes.is_empty());
     }
 
@@ -388,7 +388,7 @@ output [pick d3]";
         let report = Engine::new().run_with_diagnostics(source);
         let error = report.error().unwrap();
 
-        assert_eq!(error.code, "value.out_of_range");
+        assert_eq!(error.code, DiagnosticCode::OutOfRange);
         assert_eq!(error.trace.len(), 1);
         assert_eq!(error.trace[0].function, "pick {}");
         assert_eq!(error.trace[0].bindings[0].name, "I");
@@ -401,7 +401,7 @@ output [pick d3]";
         let report = Engine::new().run_with_diagnostics(source);
         let error = report.error().unwrap();
 
-        assert_eq!(error.code, "type.function_argument");
+        assert_eq!(error.code, DiagnosticCode::FunctionArgument);
         assert_eq!(
             error.summary,
             "`[field INDEX:n of TUPLE:n]` requires `INDEX` to be an integer and `TUPLE` to be a tuple"
@@ -423,7 +423,7 @@ output [pick d3]";
         let nested =
             Engine::new().run_with_diagnostics("output [tuple [tuple 1, 2], [tuple 3, 4]]");
         let nested_error = nested.error().unwrap();
-        assert_eq!(nested_error.code, "type.function_argument");
+        assert_eq!(nested_error.code, DiagnosticCode::FunctionArgument);
         assert_eq!(
             nested_error.summary,
             "`[tuple A:n B:n]` cannot contain another tuple"
@@ -446,7 +446,7 @@ output [pick d3]";
 
         let field = Engine::new().run_with_diagnostics("output [field [tuple 1, 2] of 1]");
         let field_error = field.error().unwrap();
-        assert_eq!(field_error.code, "type.function_argument");
+        assert_eq!(field_error.code, DiagnosticCode::FunctionArgument);
         assert_eq!(field_error.labels.len(), 2);
         assert!(
             field_error.labels[0]
@@ -488,7 +488,7 @@ output [pick d3]";
     fn primitive_diagnostics_explain_outcome_and_value_constraints() {
         let bounds = Engine::new().run_with_diagnostics("output [field 3 of [tuple 1, 2]]");
         let bounds_error = bounds.error().unwrap();
-        assert_eq!(bounds_error.code, "value.out_of_range");
+        assert_eq!(bounds_error.code, DiagnosticCode::OutOfRange);
         assert_eq!(
             bounds_error.summary,
             "`[field INDEX:n of TUPLE:n]` cannot select field `3`"
@@ -513,18 +513,22 @@ output [pick d3]";
         let cases = [
             (
                 "loop X over d6 { print X }",
-                "type.expected_sequence",
+                DiagnosticCode::ExpectedSequence,
                 "expected a sequence",
             ),
             (
                 "if d6 { print 1 }",
-                "type.expected_number",
+                DiagnosticCode::ExpectedNumber,
                 "expected an integer",
             ),
-            ("output {1:d6}", "type.repeat_count", "expected an integer"),
+            (
+                "output {1:d6}",
+                DiagnosticCode::RepeatCount,
+                "expected an integer",
+            ),
             (
                 "output {1..d6}",
-                "type.range_endpoint",
+                DiagnosticCode::RangeEndpoint,
                 "expected an integer",
             ),
         ];
@@ -545,7 +549,7 @@ output [pick d3]";
     fn output_label_errors_explain_the_output_shape_and_arity() {
         let non_tuple = Engine::new().run_with_diagnostics("output 1 labeled \"Value\"");
         let error = non_tuple.error().unwrap();
-        assert_eq!(error.code, "type.labels_require_tuple");
+        assert_eq!(error.code, DiagnosticCode::LabelsRequireTuple);
         assert_eq!(error.labels.len(), 2);
         assert!(
             error.labels[1]
@@ -652,7 +656,7 @@ output [pick d3]";
         assert!(report.error().is_none());
         assert_eq!(
             report.diagnostics[0].code,
-            "evaluation.independent_pool_reuse"
+            DiagnosticCode::IndependentPoolReuse
         );
 
         let no_warning = Engine::new().run_with_diagnostics("D: d6\noutput #D + #D");
@@ -669,7 +673,7 @@ output [pick d3]";
         for source in cases {
             let report = Engine::new().run_with_diagnostics(source);
             let warning = &report.diagnostics[0];
-            assert_eq!(warning.code, "control_flow.missing_result", "{source}");
+            assert_eq!(warning.code, DiagnosticCode::MissingResult, "{source}");
             assert_eq!(warning.severity, DiagnosticSeverity::Warning);
             assert!(warning.fixes.is_empty());
         }
@@ -762,14 +766,14 @@ output [pick d3]";
     #[test]
     fn warns_when_depth_settings_bound_results() {
         let explode = Engine::new().run_with_diagnostics("output [explode d6]");
-        assert_eq!(explode.diagnostics[0].code, "evaluation.explode_depth");
+        assert_eq!(explode.diagnostics[0].code, DiagnosticCode::ExplodeDepth);
 
         let recursion = Engine::new().run_with_diagnostics(
             "function: recurse N:n { result: [recurse N] }\noutput [recurse 1]",
         );
         assert_eq!(
             recursion.diagnostics[0].code,
-            "evaluation.maximum_function_depth"
+            DiagnosticCode::MaximumFunctionDepth
         );
     }
 }

@@ -4,7 +4,7 @@
 //! one, such as `d{0:2, 1:2, 2, TIMES_TWO}`.
 
 use eurydice_engine::{
-    Engine, EngineDiagnostic, LabelStyle,
+    DiagnosticCode, Engine, EngineDiagnostic, LabelStyle,
     eval::{EvaluatedOutput, Evaluator, SymbolTable},
     grammar,
     output::{Distribution, FieldSchema},
@@ -70,7 +70,11 @@ fn a_long_sequence_fails_at_the_value_that_cannot_be_added() {
         format!("{program} function: total S:n {{ result: S }} output [total SEQ]"),
     ] {
         let diagnostic = error(&summing);
-        assert_eq!(diagnostic.code, "type.non_additive_value", "{summing}");
+        assert_eq!(
+            diagnostic.code,
+            DiagnosticCode::NonAdditiveValue,
+            "{summing}"
+        );
         assert!(
             diagnostic.summary.contains("a sequence of 1000 values"),
             "{}",
@@ -258,7 +262,11 @@ fn shapes_mix_freely_until_something_has_to_combine_them() {
         "function: f X:n { if X { result: 1 } result: [tuple 1 2] } output [f d{0, 1}]",
     ] {
         // The wording depends on what had to combine them; the code does not.
-        assert_eq!(error(program).code, "type.outcome_mismatch", "{program}");
+        assert_eq!(
+            error(program).code,
+            DiagnosticCode::OutcomeMismatch,
+            "{program}"
+        );
     }
 }
 

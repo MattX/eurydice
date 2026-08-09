@@ -1,5 +1,5 @@
 use eurydice_engine::{
-    Engine, EngineDiagnostic,
+    DiagnosticCode, Engine, EngineDiagnostic,
     eval::{EvaluatedOutput, Evaluator, SymbolTable},
     grammar,
     output::Distribution,
@@ -33,22 +33,25 @@ fn diagnostic(program: &str) -> Option<EngineDiagnostic> {
 #[test]
 fn tuple_output_labels_require_tuple_outcomes_and_matching_arity() {
     for (program, expected_code) in [
-        ("output 1 labeled \"A\", \"B\"", "type.labels_require_tuple"),
+        (
+            "output 1 labeled \"A\", \"B\"",
+            DiagnosticCode::LabelsRequireTuple,
+        ),
         (
             "enum { A } output A labeled \"Value\"",
-            "type.labels_require_tuple",
+            DiagnosticCode::LabelsRequireTuple,
         ),
         (
             "output [tuple 1 2] labeled \"Only one\"",
-            "value.output_label_count",
+            DiagnosticCode::OutputLabelCount,
         ),
         (
             "output [tuple 1 2] labeled \"A\", \"B\", \"C\"",
-            "value.output_label_count",
+            DiagnosticCode::OutputLabelCount,
         ),
         (
             "output [tuple 1 2] labeled \"[MISSING]\", \"B\"",
-            "name.undefined_variable",
+            DiagnosticCode::UndefinedVariable,
         ),
     ] {
         let error =
