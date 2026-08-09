@@ -24,16 +24,25 @@ thiserror = "2.0.12"
 
 # Serde derive is used for testing only, but we need it here to derive
 # the traits.
-serde = { version = "1.0.204", features = ["derive", "rc"] }
+serde = { version = "1.0.204", features = ["derive"] }
 
 # Parser stuff
 lalrpop-util = { version = "0.22.2", features = ["lexer", "unicode"] }
 
-# Used for bigints
-malachite = "0.6.0"
-
-# Random utility stuff
-lazy_static = "1.5.0"
+# Used for bigints.
+#
+# `floats` is not a default feature, but malachite's `std` feature enables
+# `malachite-float/std` without a `?`, which drags the float crate in anyway.
+# Depending on the three sub-crates directly turns `std` back on for the parts
+# we do use; without that malachite-base falls back to `libm` and the wasm
+# binary grows by ~43kB.
+malachite = { version = "0.10.0", default-features = false, features = [
+    "naturals_and_integers",
+    "rationals",
+] }
+malachite-base = { version = "0.10.0", features = ["std"] }
+malachite-nz = { version = "0.10.0", features = ["std"] }
+malachite-q = { version = "0.10.0", features = ["std"] }
 
 [build-dependencies]
 lalrpop = "0.22.2"

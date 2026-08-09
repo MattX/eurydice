@@ -11,14 +11,18 @@
 //! [^icepool]: Liu, A. J. (2022). Icepool: Efficient Computation of Dice Pool Probabilities.
 //! _Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital
 //! Entertainment_, 18(1), 258-265. https://doi.org/10.1609/aiide.v18i1.21971
-use lazy_static::lazy_static;
 use malachite::Natural;
 use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::base::num::basic::traits::{One, Zero};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::rc::Rc;
-use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::RwLock};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    hash::Hash,
+    sync::{LazyLock, RwLock},
+};
 
 /// Represents a pool of identical independent dice whose faces have type `T`.
 ///
@@ -707,10 +711,9 @@ fn sum_mapper(state: &i32, outcome: &i32, count: u32) -> i32 {
     state + outcome * i32::try_from(count).expect("count fits in i32")
 }
 
-lazy_static! {
-    /// Cache for binomial coefficients. Rows are either missing or fully calculated.
-    static ref BINOM_CACHE: RwLock<Vec<Vec<Natural>>> = RwLock::new(vec![vec![Natural::ONE]]);
-}
+/// Cache for binomial coefficients. Rows are either missing or fully calculated.
+static BINOM_CACHE: LazyLock<RwLock<Vec<Vec<Natural>>>> =
+    LazyLock::new(|| RwLock::new(vec![vec![Natural::ONE]]));
 
 /// Calculate binomial coefficient n choose k, with value caching.
 ///
