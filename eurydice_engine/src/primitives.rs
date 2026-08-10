@@ -1,6 +1,7 @@
 use std::{collections::HashMap, rc::Rc};
 
 use malachite::Natural;
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 use crate::{
@@ -40,7 +41,8 @@ pub(crate) struct Primitive {
 }
 
 /// Presentation metadata for a built-in function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct PrimitiveMetadata {
     /// The evaluator's canonical function identifier, with `{}` argument slots.
     pub identifier: &'static str,

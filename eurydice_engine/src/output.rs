@@ -1,15 +1,17 @@
 use malachite::base::num::conversion::traits::RoundingFrom;
 use malachite::{Natural, base::rounding_modes::RoundingMode, rational::Rational};
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 use crate::dice::Pool;
 use crate::eval::{ElementValue, RuntimeValue, SymbolTable, sum_pool};
 use crate::value::display_requires_summing;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Distribution {
     pub fields: Vec<FieldSchema>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub field_names: Option<Vec<String>>,
     pub probabilities: Vec<(Vec<i32>, f64)>,
 }
@@ -21,7 +23,8 @@ pub struct Distribution {
 /// to a display name. This includes all-symbol fields as well as fields that mix
 /// numbers and symbols. Hoisting the schema up here keeps the (potentially
 /// large) list of outcomes free of repeated metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub enum FieldSchema {
     Int,
     Enum { labels: Vec<String> },

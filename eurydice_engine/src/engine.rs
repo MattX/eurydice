@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 use crate::{
@@ -16,14 +17,16 @@ use crate::{
 };
 
 /// A named distribution produced by an `output` statement.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct EngineOutput {
     pub name: String,
     pub distribution: Distribution,
 }
 
 /// Outputs and diagnostics produced by one source submission.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct RunReport {
     pub outputs: Vec<EngineOutput>,
     pub diagnostics: Vec<EngineDiagnostic>,

@@ -21,6 +21,11 @@ Probabilities are computed exactly with rational arithmetic and converted to
 [icepool]: https://pypi.org/project/icepool/
 
 
+## Features
+
+`serde` (default) derives `Serialize` on the public types. Turn it off with
+`default-features = false` to keep serde out of the dependency graph.
+
 ## This project is not affiliated with AnyDice
 
 AnyDice was created by [Jasper Flick](https://ko-fi.com/catlikecoding). This is

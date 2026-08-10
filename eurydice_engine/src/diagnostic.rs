@@ -1,6 +1,7 @@
 //! Serializable, frontend-neutral diagnostics produced by the engine.
 
 use lalrpop_util::ParseError;
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 use crate::{
@@ -11,11 +12,13 @@ use crate::{
 };
 
 /// Identifies one source submission within a stateful [`crate::Engine`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceId(pub u64);
 
 /// Source text referenced by a diagnostic.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct DiagnosticSource {
     pub id: SourceId,
     pub name: String,
@@ -23,62 +26,68 @@ pub struct DiagnosticSource {
 }
 
 /// A range whose source submission is explicit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceRange {
     pub source: SourceId,
     pub range: Range,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
 pub enum DiagnosticSeverity {
     Error,
     Warning,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
 pub enum LabelStyle {
     Primary,
     Secondary,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct DiagnosticLabel {
     pub range: SourceRange,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub message: Option<String>,
     pub style: LabelStyle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
 pub enum FixApplicability {
     MachineApplicable,
     Suggested,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct TextEdit {
     pub range: SourceRange,
     pub replacement: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SuggestedFix {
     pub message: String,
     pub applicability: FixApplicability,
     pub edits: Vec<TextEdit>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct TraceBinding {
     pub name: String,
     /// The bound value, rendered for display.
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct EvaluationFrame {
     pub function: String,
     pub call: SourceRange,
@@ -98,129 +107,93 @@ pub struct EvaluationFrame {
 /// not a breaking change. [`DiagnosticCode::ALL`] lists every code this version
 /// defines; adding a code means adding it there and to
 /// [`as_str`](DiagnosticCode::as_str) as well.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum DiagnosticCode {
     // Syntax: the program could not be parsed.
     /// `=` was used where a binding expects `:`.
-    #[serde(rename = "syntax.assignment_separator")]
     AssignmentSeparator,
     /// `==` was used where a comparison expects `=`.
-    #[serde(rename = "syntax.equality_operator")]
     EqualityOperator,
     /// A variable was written in lowercase, where names are uppercase.
-    #[serde(rename = "syntax.variable_case")]
     VariableCase,
     /// A token cannot appear where it was found.
-    #[serde(rename = "syntax.unexpected_token")]
     UnexpectedToken,
     /// A bracket, brace, or parenthesis was never closed.
-    #[serde(rename = "syntax.unclosed_delimiter")]
     UnclosedDelimiter,
     /// The program ended in the middle of something.
-    #[serde(rename = "syntax.unexpected_end")]
     UnexpectedEnd,
     /// Input continues past the end of a complete program.
-    #[serde(rename = "syntax.extra_token")]
     ExtraToken,
     /// A string literal was never closed.
-    #[serde(rename = "syntax.unterminated_string")]
     UnterminatedString,
     /// A block comment was never closed.
-    #[serde(rename = "syntax.unterminated_comment")]
     UnterminatedComment,
     /// A `;` was used to end a statement, which the language does not use.
-    #[serde(rename = "syntax.unexpected_semicolon")]
     UnexpectedSemicolon,
     /// A character that means nothing in the language.
-    #[serde(rename = "syntax.invalid_character")]
     InvalidCharacter,
     /// An integer literal does not fit in the engine's integer type.
-    #[serde(rename = "syntax.integer_out_of_range")]
     IntegerOutOfRange,
     /// A call names no function at all, as in `[]`.
-    #[serde(rename = "syntax.empty_function_call")]
     EmptyFunctionCall,
 
     // Names: something was referred to that is not defined, or cannot be.
     /// A variable that has not been assigned.
-    #[serde(rename = "name.undefined_variable")]
     UndefinedVariable,
     /// A function that has not been defined.
-    #[serde(rename = "name.undefined_function")]
     UndefinedFunction,
     /// A name is already taken, or cannot be bound in this position.
-    #[serde(rename = "name.binding_conflict")]
     BindingConflict,
 
     // Types: a value's type or shape is not what the operation needs.
     /// A sequence was required.
-    #[serde(rename = "type.expected_sequence")]
     ExpectedSequence,
     /// A number was required.
-    #[serde(rename = "type.expected_number")]
     ExpectedNumber,
     /// An operator was given an operand of a type it does not accept.
-    #[serde(rename = "type.operator_argument")]
     OperatorArgument,
     /// An operator's operands do not work together, whatever each is alone.
-    #[serde(rename = "type.operator_operands")]
     OperatorOperands,
     /// A function was given an argument of a type it does not accept.
-    #[serde(rename = "type.function_argument")]
     FunctionArgument,
     /// Two values that had to line up have different shapes.
-    #[serde(rename = "type.outcome_mismatch")]
     OutcomeMismatch,
     /// A value that had to be summed has parts that cannot be added.
-    #[serde(rename = "type.non_additive_value")]
     NonAdditiveValue,
     /// `labeled` was applied to an output that is not a tuple.
-    #[serde(rename = "type.labels_require_tuple")]
     LabelsRequireTuple,
     /// A repeat count is not a number.
-    #[serde(rename = "type.repeat_count")]
     RepeatCount,
     /// A range endpoint is not a number.
-    #[serde(rename = "type.range_endpoint")]
     RangeEndpoint,
 
     // Values: the type is right but the value is not usable.
     /// A negative number was given where only zero or more makes sense.
-    #[serde(rename = "value.nonnegative_required")]
     NonnegativeRequired,
     /// A value falls outside the range the operation allows.
-    #[serde(rename = "value.out_of_range")]
     OutOfRange,
     /// An arithmetic operation has no defined result, such as division by zero.
-    #[serde(rename = "value.arithmetic_error")]
     ArithmeticError,
     /// The number of labels does not match the number of tuple fields.
-    #[serde(rename = "value.output_label_count")]
     OutputLabelCount,
 
     // Placement: the statement is fine, but not here.
     /// `result:` appeared outside a function.
-    #[serde(rename = "placement.result_outside_function")]
     ResultOutsideFunction,
     /// A statement that is only allowed at the top level appeared inside a block.
-    #[serde(rename = "placement.top_level_only")]
     TopLevelOnly,
 
     // Control flow.
     /// A function may finish without reaching `result:`.
-    #[serde(rename = "control_flow.missing_result")]
     MissingResult,
 
     // Evaluation: the program ran, but a limit or a subtlety was hit.
     /// One dice pool is sampled independently more than once.
-    #[serde(rename = "evaluation.independent_pool_reuse")]
     IndependentPoolReuse,
     /// Exploding dice stopped at the configured depth.
-    #[serde(rename = "evaluation.explode_depth")]
     ExplodeDepth,
     /// Recursion stopped at the configured depth.
-    #[serde(rename = "evaluation.maximum_function_depth")]
     MaximumFunctionDepth,
 }
 
@@ -335,11 +308,22 @@ impl std::fmt::Display for DiagnosticCode {
     }
 }
 
+/// Serialized as its dotted string, never as a variant name, so the wire
+/// contract is the one [`as_str`](DiagnosticCode::as_str) documents and cannot
+/// drift from it.
+#[cfg(feature = "serde")]
+impl Serialize for DiagnosticCode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 /// A complete engine diagnostic.
 ///
 /// The `code` classifies the diagnostic for consumers that want to branch on
 /// it; everything else is prose and spans for them to present.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct EngineDiagnostic {
     pub code: DiagnosticCode,
     pub severity: DiagnosticSeverity,
@@ -1425,13 +1409,17 @@ mod tests {
         );
     }
 
-    /// The string a code serializes to is what a frontend matches on, and it
-    /// is written out twice — once as a `serde` rename, once in `as_str`. This
-    /// is what keeps the two the same.
+    /// Frontends read the code as a plain string. Serializing it as anything
+    /// structured — a tagged variant, an object — would break every one of
+    /// them, and nothing about the enum itself would look wrong.
+    #[cfg(feature = "serde")]
     #[test]
-    fn codes_serialize_as_the_string_they_report() {
+    fn codes_serialize_as_a_plain_string() {
         for code in DiagnosticCode::ALL {
-            assert_eq!(serde_lexpr::to_string(code).unwrap(), code.as_str());
+            assert_eq!(
+                serde_lexpr::to_string(code).unwrap(),
+                format!("\"{}\"", code.as_str())
+            );
         }
     }
 
