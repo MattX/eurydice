@@ -80,10 +80,10 @@ export class ColorGenerator {
   }
 }
 
-function categoricalKey(field: FieldSchema, outcome: number): string {
-  return field.kind === "int"
+function categoricalKey(schema: FieldSchema, outcome: number): string {
+  return schema.kind === "int"
     ? `int:${outcome}`
-    : `symbol:${field.labels[outcome] ?? outcome}`;
+    : `symbol:${schema.labels[outcome] ?? outcome}`;
 }
 
 /** Numeric outcomes first, then observed symbols in their first displayed order. */
@@ -93,15 +93,15 @@ export function categoricalOutcomes(
   const integers = new Set<number>();
   const symbols = new Map<string, string>();
   for (const [, distribution] of distributions) {
-    const field = distribution.fields[0];
-    if (field.kind === "int") {
+    const { schema } = distribution.fields[0];
+    if (schema.kind === "int") {
       for (const [[outcome]] of distribution.entries) {
         integers.add(outcome);
       }
     } else {
       // Symbol labels are a dense dictionary of the values observed in this
       // field, so there is no separate declared domain to filter here.
-      for (const label of field.labels) {
+      for (const label of schema.labels) {
         symbols.set(`symbol:${label}`, label);
       }
     }
@@ -117,10 +117,10 @@ export function categoricalOutcomes(
 export function categoricalProbabilities(
   distribution: ScalarDistribution,
 ): Map<string, number> {
-  const field = distribution.fields[0];
+  const { schema } = distribution.fields[0];
   const probabilities = new Map<string, number>();
   for (const [[outcome], probability] of distribution.entries) {
-    const key = categoricalKey(field, outcome);
+    const key = categoricalKey(schema, outcome);
     probabilities.set(key, (probabilities.get(key) ?? 0) + probability);
   }
   return probabilities;
@@ -132,7 +132,8 @@ export function numericChartOutcomeRange(
 ): number | null {
   if (
     distributions.some(
-      ([, distribution]) => distribution.fields[0].kind === "categorical",
+      ([, distribution]) =>
+        distribution.fields[0].schema.kind === "categorical",
     )
   ) {
     return null;

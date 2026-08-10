@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef } from "react";
 
 import { WorkerWrapper } from "./worker-wrapper";
 import { NamedDistribution, isNamedScalarDistribution } from "./util";
-import { normalizeDistribution } from "./utils/tupleData";
 import OutputPane from "./components/OutputPane";
 import ExportModal from "./components/ExportModal";
 import EditorPane from "./components/EditorPane";
@@ -102,10 +101,7 @@ function AppInner() {
         setDiagnosticSource(source);
 
         const distributions: NamedDistribution[] = report.outputs.map(
-          ({ name, distribution }) => [
-            name,
-            normalizeDistribution(distribution),
-          ],
+          ({ name, distribution }) => [name, distribution],
         );
         const chartData = distributions.filter(isNamedScalarDistribution);
 

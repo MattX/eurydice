@@ -10,27 +10,25 @@ pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f
     let is_tuple = distribution.fields.len() > 1;
     distribution
         .entries
-        .into_iter()
+        .iter()
         .map(|(outcome, probability)| {
             let fields = outcome
                 .iter()
                 .zip(&distribution.fields)
-                .enumerate()
-                .map(|(index, (value, schema))| {
-                    let value = match schema {
+                .map(|(value, field)| {
+                    let value = match &field.schema {
                         FieldSchema::Int => value.to_string(),
                         FieldSchema::Categorical { labels, .. } => usize::try_from(*value)
                             .ok()
-                            .and_then(|i| labels.get(i))
+                            .and_then(|index| labels.get(index))
                             .cloned()
                             .unwrap_or_else(|| value.to_string()),
                         _ => value.to_string(),
                     };
-                    distribution
-                        .field_names
-                        .as_ref()
-                        .and_then(|names| names.get(index))
-                        .map_or(value.clone(), |name| format!("{name}: {value}"))
+                    match &field.name {
+                        Some(name) => format!("{name}: {value}"),
+                        None => value,
+                    }
                 })
                 .collect::<Vec<_>>();
             let label = if is_tuple {
@@ -38,7 +36,7 @@ pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f
             } else {
                 fields.into_iter().next().unwrap_or_default()
             };
-            (label, probability)
+            (label, *probability)
         })
         .collect()
 }
@@ -199,32 +197,37 @@ impl MietteDiagnostic for MietteDiagnosticAdapter {
 mod tests {
     use super::{format_engine_diagnostics, format_output_probabilities};
     use eurydice_engine::Engine;
-    use eurydice_engine::{Distribution, FieldSchema};
+    use eurydice_engine::{Distribution, Field, FieldSchema};
 
     #[test]
     fn formats_labeled_and_unlabeled_tuple_outcomes() {
-        let output = |field_names| {
+        let output = |names: Option<[&str; 2]>| {
+            let name = |index: usize| names.map(|names| names[index].to_string());
             Distribution::new(
-                vec![FieldSchema::Int, FieldSchema::Int],
-                field_names,
+                vec![
+                    Field::new(name(0), FieldSchema::Int),
+                    Field::new(name(1), FieldSchema::Int),
+                ],
                 vec![(vec![1, 2], 1.0)],
             )
         };
 
         assert_eq!(format_output_probabilities(output(None))[0].0, "(1, 2)");
         assert_eq!(
-            format_output_probabilities(output(Some(vec!["A".into(), "B".into()])))[0].0,
+            format_output_probabilities(output(Some(["A", "B"])))[0].0,
             "(A: 1, B: 2)"
         );
 
         let enum_output = Distribution::new(
             vec![
-                FieldSchema::Int,
-                FieldSchema::Categorical {
-                    labels: vec!["MISS".into(), "HIT".into()],
-                },
+                Field::new(Some("Roll".into()), FieldSchema::Int),
+                Field::new(
+                    Some("Result".into()),
+                    FieldSchema::Categorical {
+                        labels: vec!["MISS".into(), "HIT".into()],
+                    },
+                ),
             ],
-            Some(vec!["Roll".into(), "Result".into()]),
             vec![(vec![20, 1], 1.0)],
         );
         assert_eq!(

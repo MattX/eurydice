@@ -16,7 +16,7 @@ pub use diagnostic::{
     EvaluationFrame, SourceId, SourceRange, SuggestedFix, TraceBinding,
 };
 pub use engine::{Engine, EngineOutput, PrintEvent, Program, RunReport};
-pub use output::{Distribution, FieldSchema};
+pub use output::{Distribution, Field, FieldSchema};
 pub use primitives::{PrimitiveMetadata, primitive_metadata};
 
 use lalrpop_util::lalrpop_mod;

@@ -96,7 +96,7 @@ export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
     ([, distribution]) => distribution.fields.length > 1,
   );
   const hasSymbols = distributions.some(
-    ([, distribution]) => distribution.fields[0].kind === "categorical",
+    ([, distribution]) => distribution.fields[0].schema.kind === "categorical",
   );
   const blocks: string[] = [];
   if (distributions.length > 0 && hasSymbols) {
@@ -127,7 +127,7 @@ export function generateAnyDiceFormatCSV(outputs: NamedDistribution[]): string {
 
   const numericDistributions = outputs
     .filter(isNamedScalarDistribution)
-    .filter(([, distribution]) => distribution.fields[0].kind === "int");
+    .filter(([, distribution]) => distribution.fields[0].schema.kind === "int");
 
   numericDistributions.forEach(([name, distribution], index) => {
     if (index > 0) csv += "\n";

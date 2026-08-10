@@ -120,8 +120,10 @@ describe("csvExport", () => {
         [
           "round",
           {
-            fields: [{ kind: "int" }, { kind: "int" }],
-            fieldNames: ["Attacker losses", "Defender losses"],
+            fields: [
+              { name: "Attacker losses", schema: { kind: "int" } },
+              { name: "Defender losses", schema: { kind: "int" } },
+            ],
             entries: [[[1, 2], 1]],
           },
         ],
@@ -299,8 +301,13 @@ describe("csvExport", () => {
         "joint",
         {
           fields: [
-            { kind: "int" as const },
-            { kind: "categorical" as const, labels: ["MISS", "HIT"] },
+            { schema: { kind: "int" as const } },
+            {
+              schema: {
+                kind: "categorical" as const,
+                labels: ["MISS", "HIT"],
+              },
+            },
           ],
           entries: [
             [[1, 1], 0.4],

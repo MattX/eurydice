@@ -338,10 +338,10 @@ fn create_anydice_result(
     distribution: &Distribution,
 ) -> Result<AnyDiceResult, &'static str> {
     match distribution.fields.as_slice() {
-        [FieldSchema::Int] => {}
-        [FieldSchema::Categorical { .. }] => {
-            return Err("AnyDice fixtures must have numeric outputs");
-        }
+        [field] => match field.schema {
+            FieldSchema::Int => {}
+            _ => return Err("AnyDice fixtures must have numeric outputs"),
+        },
         _ => return Err("AnyDice fixtures must have a single output field"),
     }
     let probabilities = distribution
@@ -383,17 +383,16 @@ fn export_anydice_result(result: &AnyDiceResult) -> String {
 }
 
 fn create_distribution_result(name: &str, distribution: Distribution) -> DistributionResult {
-    let fields = distribution.field_names.unwrap_or_else(|| {
-        distribution
-            .fields
-            .iter()
-            .map(|field| match field {
-                FieldSchema::Int => "#".to_owned(),
-                FieldSchema::Categorical { .. } => "Symbol".to_owned(),
-                _ => "Value".to_owned(),
-            })
-            .collect()
-    });
+    let fields = distribution
+        .fields
+        .iter()
+        .map(|field| match (&field.name, &field.schema) {
+            (Some(name), _) => name.clone(),
+            (None, FieldSchema::Int) => "#".to_owned(),
+            (None, FieldSchema::Categorical { .. }) => "Symbol".to_owned(),
+            (None, _) => "Value".to_owned(),
+        })
+        .collect::<Vec<_>>();
     let outcomes = distribution
         .entries
         .into_iter()
@@ -401,7 +400,7 @@ fn create_distribution_result(name: &str, distribution: Distribution) -> Distrib
             let values = values
                 .into_iter()
                 .zip(&distribution.fields)
-                .map(|(value, field)| match field {
+                .map(|(value, field)| match &field.schema {
                     FieldSchema::Int => value.to_string(),
                     FieldSchema::Categorical { labels, .. } => usize::try_from(value)
                         .ok()

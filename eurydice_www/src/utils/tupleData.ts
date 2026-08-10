@@ -1,34 +1,5 @@
 import { Distribution, FieldSchema, ScalarDistribution } from "../util";
 
-/**
- * Wire representation of an output distribution, as serialized by the engine. serde
- * encodes `FieldSchema::Int` as the bare string "Int" and the struct
- * variant as `{ Categorical: { labels } }`.
- */
-export type WireFieldSchema = "Int" | { Categorical: { labels: string[] } };
-
-export interface WireDistribution {
-  fields: WireFieldSchema[];
-  field_names?: string[];
-  entries: [number[], number][];
-}
-
-export function normalizeFieldSchema(wire: WireFieldSchema): FieldSchema {
-  if (wire === "Int") return { kind: "int" };
-  return {
-    kind: "categorical",
-    labels: wire.Categorical.labels,
-  };
-}
-
-export function normalizeDistribution(wire: WireDistribution): Distribution {
-  return {
-    fields: wire.fields.map(normalizeFieldSchema),
-    fieldNames: wire.field_names,
-    entries: wire.entries,
-  };
-}
-
 /** Display label for a single raw field value under its schema. */
 export function fieldValueLabel(schema: FieldSchema, value: number): string {
   if (schema.kind === "categorical") {
@@ -39,9 +10,7 @@ export function fieldValueLabel(schema: FieldSchema, value: number): string {
 
 /** A human-facing name for a field, used as a column/axis title. */
 export function fieldName(dist: Distribution, index: number): string {
-  const explicit = dist.fieldNames?.[index];
-  if (explicit !== undefined) return explicit;
-  return `Field ${index + 1}`;
+  return dist.fields[index].name ?? `Field ${index + 1}`;
 }
 
 export interface FieldAxis {
@@ -80,16 +49,16 @@ export function observedValues(dist: Distribution, field: number): number[] {
  * so the result can feed the existing 1-D chart machinery.
  */
 export function computeMarginals(dist: Distribution): ScalarDistribution[] {
-  return dist.fields.map((schema, field) => {
+  return dist.fields.map((field, index) => {
     const totals = new Map<number, number>();
     for (const [outcome, probability] of dist.entries) {
-      const value = outcome[field];
+      const value = outcome[index];
       totals.set(value, (totals.get(value) ?? 0) + probability);
     }
     const entries: [[number], number][] = Array.from(totals.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([value, probability]) => [[value], probability]);
-    return { fields: [schema], entries };
+    return { fields: [field], entries };
   });
 }
 
@@ -110,8 +79,8 @@ export interface TuplePivot {
 
 /** Pivots an arity-2 joint distribution into a 2-D grid with marginals. */
 export function computeTuplePivot(dist: Distribution): TuplePivot {
-  const xAxis = fieldAxis(dist.fields[0], observedValues(dist, 0));
-  const yAxis = fieldAxis(dist.fields[1], observedValues(dist, 1));
+  const xAxis = fieldAxis(dist.fields[0].schema, observedValues(dist, 0));
+  const yAxis = fieldAxis(dist.fields[1].schema, observedValues(dist, 1));
   const joint = new Map<string, number>();
   const xMarginal = new Map<number, number>();
   const yMarginal = new Map<number, number>();
@@ -151,7 +120,7 @@ export function computeTupleRows(
   const rows: TupleRow[] = dist.entries.map(([outcome, probability]) => ({
     values: outcome,
     labels: outcome.map((value, field) =>
-      fieldValueLabel(dist.fields[field], value),
+      fieldValueLabel(dist.fields[field].schema, value),
     ),
     probability,
   }));

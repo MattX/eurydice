@@ -26,7 +26,7 @@ export default function ExportModal({
   const omittedFromAnyDice = outputs.filter(
     ([, distribution]) =>
       !isScalarDistribution(distribution) ||
-      distribution.fields[0].kind === "categorical",
+      distribution.fields[0].schema.kind === "categorical",
   ).length;
 
   const { csvContent, csvFilename } = React.useMemo(() => {

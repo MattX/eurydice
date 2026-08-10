@@ -97,7 +97,8 @@ function OutputSections({
   const hasSymbols = React.useMemo(
     () =>
       distributions.some(
-        ([, distribution]) => distribution.fields[0].kind === "categorical",
+        ([, distribution]) =>
+          distribution.fields[0].schema.kind === "categorical",
       ),
     [distributions],
   );

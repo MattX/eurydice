@@ -97,10 +97,12 @@ mod tests {
     fn labeled_tuple_metadata_reaches_wasm_output() {
         let report = Engine::new().run_source("output [tuple 1 2] labeled \"Left\", \"Right\"");
         let distribution = &report.outputs[0].distribution;
-        assert_eq!(
-            distribution.field_names.as_ref().unwrap(),
-            &["Left".to_string(), "Right".to_string()]
-        );
+        let names = distribution
+            .fields
+            .iter()
+            .map(|field| field.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(names, [Some("Left".into()), Some("Right".into())]);
     }
 
     #[test]

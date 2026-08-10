@@ -7,7 +7,7 @@
 // Each test binary compiles this module separately and uses only part of it.
 #![allow(dead_code)]
 
-use eurydice_engine::{Diagnostic, Distribution, Engine};
+use eurydice_engine::{Diagnostic, Distribution, Engine, FieldSchema};
 
 /// Runs a program, returning one distribution per `output` statement, or the
 /// diagnostic that stopped it.
@@ -42,6 +42,15 @@ pub fn only_probabilities(program: &str) -> Vec<(Vec<i32>, f64)> {
 /// The distributions of a program that is expected to run.
 pub fn distributions(program: &str) -> Vec<Distribution> {
     run(program).unwrap_or_else(|error| panic!("{program}: {}", error.summary))
+}
+
+/// The schema of every field, for tests that do not care about field names.
+pub fn field_schemas(distribution: &Distribution) -> Vec<FieldSchema> {
+    distribution
+        .fields
+        .iter()
+        .map(|field| field.schema.clone())
+        .collect()
 }
 
 /// The diagnostic a failing program produces.

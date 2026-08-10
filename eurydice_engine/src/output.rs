@@ -7,17 +7,41 @@ use crate::dice::Pool;
 use crate::eval::{ElementValue, RuntimeValue, SymbolTable, sum_pool};
 use crate::value::display_requires_summing;
 
+/// A distribution of outcomes, each with a probability.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct Distribution {
-    pub fields: Vec<FieldSchema>,
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub field_names: Option<Vec<String>>,
+    /// Describes the type and name of each field in the outcomes.
+    ///
+    /// In the simple case of a scalar integer field, this vector will have a single entry with [`FieldSchema::Int`].
+    pub fields: Vec<Field>,
+
+    // TODO: can we reduce vec nesting?
+    /// The values in this distribution and their probabilities.
+    ///
+    /// Each entry in `entries` is a pair of an outcome (`Vec<i32>`) and its probability (`f64`).
+    /// Each entry's outcome will have the same length as `fields`. If a given field's schema is [`FieldSchema::Categorical`], the corresponding value in the outcome will be a non-negative ordinal index into the schema's labels.
     pub entries: Vec<(Vec<i32>, f64)>,
 }
 
-/// Describes a single output field, shared by every outcome of a distribution.
+/// One output field: how its values are rendered, plus the name the `labeled`
+/// clause gave it, if any.
+///
+/// Keeping the name beside the schema means the two can never disagree on how
+/// many fields there are, and every outcome's values line up with this list by
+/// position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
+pub struct Field {
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub name: Option<String>,
+    pub schema: FieldSchema,
+}
+
+/// Describes how one output field's values are displayed, shared by every
+/// outcome of a distribution.
 ///
 /// Field values in the outcomes themselves are always raw `i32`s; for a
 /// categorical field the value is an ordinal, and the labels here map it back
@@ -26,23 +50,23 @@ pub struct Distribution {
 /// large) list of outcomes free of repeated metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
 #[non_exhaustive]
 pub enum FieldSchema {
     Int,
     Categorical { labels: Vec<String> },
 }
 
+impl Field {
+    pub fn new(name: Option<String>, schema: FieldSchema) -> Self {
+        Self { name, schema }
+    }
+}
+
 impl Distribution {
-    pub fn new(
-        fields: Vec<FieldSchema>,
-        field_names: Option<Vec<String>>,
-        entries: Vec<(Vec<i32>, f64)>,
-    ) -> Self {
-        Self {
-            fields,
-            field_names,
-            entries,
-        }
+    // TODO: remove this
+    pub fn new(fields: Vec<Field>, entries: Vec<(Vec<i32>, f64)>) -> Self {
+        Self { fields, entries }
     }
 
     /// Converts an evaluated value into its serialized display representation,
@@ -244,12 +268,20 @@ fn pool_output(
         _ => 1,
     };
     let renders = field_renders(pool.ordered_outcomes(), arity);
+    // The evaluator only accepts labels on tuple outputs, and checks that it
+    // got one per field, so the names line up with the renders by position.
+    let field_names = if is_tuple { field_names } else { None };
     Distribution {
         fields: renders
             .iter()
-            .map(|render| render.schema(symbols))
+            .enumerate()
+            .map(|(position, render)| Field {
+                name: field_names
+                    .as_ref()
+                    .and_then(|names| names.get(position).cloned()),
+                schema: render.schema(symbols),
+            })
             .collect(),
-        field_names: if is_tuple { field_names } else { None },
         entries: to_probabilities_generic(pool.ordered_outcomes())
             .into_iter()
             .map(|(value, probability)| {
@@ -296,6 +328,32 @@ mod tests {
     /// Most outputs contain no symbols, so they need nothing from the table.
     fn distribution(value: RuntimeValue) -> Distribution {
         Distribution::from_runtime(value, None, &SymbolTable::default())
+    }
+
+    /// The serialized form is the frontend's type: `FieldSchema` is a tagged
+    /// union it can switch on, and each field's name travels with its schema.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serializes_fields_as_a_tagged_union() {
+        let distribution = Distribution::new(
+            vec![
+                Field::new(Some("Roll".into()), FieldSchema::Int),
+                Field::new(
+                    None,
+                    FieldSchema::Categorical {
+                        labels: vec!["MISS".into(), "HIT".into()],
+                    },
+                ),
+            ],
+            vec![(vec![20, 1], 1.0)],
+        );
+
+        assert_eq!(
+            serde_lexpr::to_string(&distribution).unwrap(),
+            "((fields ((name \"Roll\") (schema (kind . \"int\"))) \
+             ((schema (kind . \"categorical\") (labels \"MISS\" \"HIT\")))) \
+             (entries #((20 1) 1.0)))"
+        );
     }
 
     #[test]

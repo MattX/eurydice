@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{distributions, error, probabilities, run};
+use common::{distributions, error, field_schemas, probabilities, run};
 use eurydice_engine::{DiagnosticCode, FieldSchema};
 
 /// The die this feature exists for, declared as a list and as a pool.
@@ -182,7 +182,7 @@ fn tuples_carry_a_mixed_field_through_construction_and_projection() {
 
     let distribution = distributions(&format!("{DIE} output [tuple DIE 1]")).remove(0);
     assert_eq!(
-        distribution.fields,
+        field_schemas(&distribution),
         vec![
             FieldSchema::Categorical {
                 labels: vec!["0".into(), "1".into(), "2".into(), "TIMES_TWO".into()],
@@ -338,7 +338,7 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
 
     let distribution = distributions("enum { A } X: {} + {} output {X, A}").remove(0);
     assert_eq!(
-        distribution.fields,
+        field_schemas(&distribution),
         vec![FieldSchema::Categorical {
             labels: vec!["0".into(), "A".into()],
         }]
@@ -354,7 +354,7 @@ fn mixed_fields_display_as_categories() {
     for program in ["enum { A } output {A, 1}", "enum { A } output d{A, 1}"] {
         let distribution = distributions(program).remove(0);
         assert_eq!(
-            distribution.fields,
+            field_schemas(&distribution),
             vec![FieldSchema::Categorical {
                 labels: vec!["1".into(), "A".into()],
             }],
@@ -369,7 +369,7 @@ fn mixed_fields_display_as_categories() {
 
     let distribution = distributions("enum { A } output [tuple 1, d{A, 2}]").remove(0);
     assert_eq!(
-        distribution.fields,
+        field_schemas(&distribution),
         vec![
             FieldSchema::Int,
             FieldSchema::Categorical {
@@ -384,7 +384,7 @@ fn mixed_fields_display_as_categories() {
 #[test]
 fn all_symbol_distributions_still_display() {
     let distribution = distributions("enum { MISS, HIT } output d{MISS, HIT}").remove(0);
-    let FieldSchema::Categorical { labels } = &distribution.fields[0] else {
+    let FieldSchema::Categorical { labels } = &distribution.fields[0].schema else {
         panic!("expected a symbol field");
     };
     assert_eq!(labels, &["MISS", "HIT"]);

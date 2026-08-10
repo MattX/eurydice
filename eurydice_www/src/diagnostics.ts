@@ -1,4 +1,4 @@
-import { WireDistribution } from "./utils/tupleData";
+import { Distribution } from "./util";
 import type { Diagnostic as CodeMirrorDiagnostic } from "@codemirror/lint";
 
 export interface SourceRange {
@@ -58,7 +58,7 @@ export interface Diagnostics {
 }
 
 export interface RunReport {
-  outputs: { name: string; distribution: WireDistribution }[];
+  outputs: { name: string; distribution: Distribution }[];
   diagnostics: Diagnostics;
 }
 
