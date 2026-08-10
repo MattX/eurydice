@@ -227,6 +227,8 @@ export function DiagnosticCard({
   applyFix: (fix: SuggestedFix) => void;
 }) {
   const color = diagnostic.severity === "error" ? "var(--danger)" : "var(--warning)";
+  // Bound so the guard below narrows it for the click handler.
+  const fix = diagnostic.fix;
   const supportingMessages = Array.from(
     new Set(
       diagnostic.labels
@@ -252,7 +254,6 @@ export function DiagnosticCard({
           </div>
           {(supportingMessages.length > 0 ||
             diagnostic.help ||
-            diagnostic.notes.length > 0 ||
             diagnostic.trace.length > 0) && (
             <div className="mt-1 space-y-0.5 text-xs leading-5 text-(--text-muted)">
               {supportingMessages.map((message, index) => (
@@ -265,11 +266,6 @@ export function DiagnosticCard({
                   <DiagnosticText>{diagnostic.help}</DiagnosticText>
                 </p>
               )}
-              {diagnostic.notes.map((note, index) => (
-                <p key={`note-${index}`}>
-                  <DiagnosticText>{note}</DiagnosticText>
-                </p>
-              ))}
               {diagnostic.trace.map((frame, index) => {
                 const bindings = frame.bindings
                   .map((binding) => `${binding.name} = ${binding.value}`)
@@ -283,16 +279,15 @@ export function DiagnosticCard({
               })}
             </div>
           )}
-          {diagnostic.fixes.filter(canApplyFix).map((fix, index) => (
+          {fix && canApplyFix(fix) && (
             <button
               type="button"
               className="btn btn-compact btn-secondary mt-1.5 mr-1.5"
               onClick={() => applyFix(fix)}
-              key={index}
             >
               <DiagnosticText>{fix.message}</DiagnosticText>
             </button>
-          ))}
+          )}
         </div>
       </div>
     </section>

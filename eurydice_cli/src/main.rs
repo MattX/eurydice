@@ -12,7 +12,10 @@ fn main() {
     while let Ok(line) = rl.readline(if code.is_empty() { "> " } else { ". " }) {
         code.push_str(&line);
         let report = engine.run_source(&code);
-        if report.error().is_some_and(|error| error.incomplete) {
+        if report
+            .error()
+            .is_some_and(|error| error.code.is_incomplete())
+        {
             code.push('\n');
             continue;
         }

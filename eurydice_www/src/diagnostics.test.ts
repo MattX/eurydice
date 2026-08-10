@@ -29,7 +29,6 @@ describe("isApplicableFix", () => {
   const submitted = { id: 0, name: "submission 1", text: "output 1 == 1" };
   const fix: SuggestedFix = {
     message: "Remove the second `=`",
-    applicability: "machine_applicable",
     edits: [edit(10, 11, "")],
   };
 
@@ -71,11 +70,9 @@ describe("editorDiagnostics", () => {
         style: "secondary",
       },
     ],
-    notes: [],
     help: null,
-    fixes: [],
+    fix: null,
     trace: [],
-    incomplete: false,
   };
 
   it("marks only the primary span as the problem", () => {

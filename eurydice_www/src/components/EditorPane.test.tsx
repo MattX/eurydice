@@ -21,15 +21,11 @@ describe("DiagnosticCard", () => {
           style: "secondary",
         },
       ],
-      notes: ["Tuple values contain two or more fields."],
-      help: "Build a tuple with `[tuple A B]`.",
-      fixes: [
-        {
-          message: "Wrap in a tuple",
-          applicability: "suggested",
-          edits: [],
-        },
-      ],
+      help: "Tuple values contain two or more fields. Build a tuple with `[tuple A B]`.",
+      fix: {
+        message: "Wrap in a tuple",
+        edits: [],
+      },
       trace: [
         {
           function: "pick {}",
@@ -38,7 +34,6 @@ describe("DiagnosticCard", () => {
           bindings: [{ name: "I", value: "1" }],
         },
       ],
-      incomplete: false,
     };
 
     const markup = renderToStaticMarkup(
@@ -56,7 +51,7 @@ describe("DiagnosticCard", () => {
     expect(markup).not.toContain("`");
     expect(markup).not.toContain(">here<");
     expect(markup).toContain("Build a tuple with <code");
-    expect(markup).toContain(diagnostic.notes[0]);
+    expect(markup).toContain("Tuple values contain two or more fields.");
     expect(markup).toContain("Wrap in a tuple");
     expect(markup).not.toContain(diagnostic.code);
 
@@ -86,11 +81,9 @@ describe("DiagnosticCard", () => {
           style: "primary",
         },
       ],
-      notes: [],
       help: "Variable names are uppercase and must be assigned before use.",
-      fixes: [],
+      fix: null,
       trace: [],
-      incomplete: false,
     };
 
     const markup = renderToStaticMarkup(

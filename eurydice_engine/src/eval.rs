@@ -11,8 +11,8 @@ use crate::{
         Statement, StaticType, WithRange,
     },
     diagnostic::{
-        DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame,
-        LabelStyle, SourceId, SourceRange, TraceBinding, missing_return_warning, preview_value,
+        DiagnosticCode, DiagnosticLabel, EngineDiagnostic, EvaluationFrame, LabelStyle, SourceId,
+        SourceRange, TraceBinding, missing_return_warning, preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
     engine::PrintEvent,
@@ -242,26 +242,20 @@ impl Evaluator {
         }
         self.diagnostics.push(EngineDiagnostic {
             code: CODE,
-            severity: DiagnosticSeverity::Warning,
             summary: "The same dice pool is sampled independently more than once".to_string(),
             labels: vec![DiagnosticLabel {
                 range: SourceRange { source, range },
                 message: Some(format!("{subject} refer to the same pool")),
                 style: LabelStyle::Primary,
             }],
-            notes: vec![
-                "Assigning a dice pool to a variable stores its distribution; it does not roll \
-                 the dice and remember one result."
-                    .to_string(),
-            ],
             help: Some(
-                "To reuse one roll, pass the pool to an `n` parameter and reuse that parameter \
-                 inside the function."
+                "Assigning a dice pool to a variable stores its distribution; it does not roll \
+                 the dice and remember one result. To reuse one roll, pass the pool to an `n` \
+                 parameter and reuse that parameter inside the function."
                     .to_string(),
             ),
-            fixes: Vec::new(),
+            fix: None,
             trace: Vec::new(),
-            incomplete: false,
         });
     }
 
@@ -279,20 +273,18 @@ impl Evaluator {
         }
         self.diagnostics.push(EngineDiagnostic {
             code,
-            severity: DiagnosticSeverity::Warning,
             summary: summary.to_string(),
             labels: vec![DiagnosticLabel {
                 range: SourceRange { source, range },
                 message: Some(format!("`{setting}` is currently {value}")),
                 style: LabelStyle::Primary,
             }],
-            notes: vec!["The returned distribution is bounded by this setting.".to_string()],
             help: Some(format!(
-                "Change it with `set \"{setting}\" to N` if you need a different bound."
+                "The returned distribution is bounded by this setting. Change it with \
+                 `set \"{setting}\" to N` if you need a different bound."
             )),
-            fixes: Vec::new(),
+            fix: None,
             trace: Vec::new(),
-            incomplete: false,
         });
     }
 

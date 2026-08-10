@@ -16,13 +16,19 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceId(pub u64);
 
-/// Source text referenced by a diagnostic.
+/// A block of source text referenced by a diagnostic.
+///
+/// A new `DiagnosticSource` is created each time a block of text is submitted to
+/// an [`crate::Engine`].
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct DiagnosticSource {
+    /// A unique identifier for the source.
     pub id: SourceId,
+    /// The source's user-defined name.
     pub name: String,
+    /// The source's full text.
     pub text: String,
 }
 
@@ -30,41 +36,46 @@ pub struct DiagnosticSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceRange {
+    /// The unique source identifier assigned by the engine.
     pub source: SourceId,
+    /// The byte range within this source.
     pub range: ByteRange,
 }
 
+/// Describes a diagnostic's severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
 #[non_exhaustive]
 pub enum DiagnosticSeverity {
+    /// Used when a diagnostic caused a compilation or execution failure.
     Error,
+    /// Used for diagnostics that did not cause a compilation or execution failure,
+    /// but may provide useful information to the user.
     Warning,
 }
 
+/// The level of relevance a span has to a diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
 pub enum LabelStyle {
+    /// Used when a span is a primary cause of the diagnostic.
     Primary,
+    /// Used when a span provides additional context for the diagnostic.
     Secondary,
 }
 
+/// A span of source text that is relevant to a diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct DiagnosticLabel {
+    /// The range of source text
     pub range: SourceRange,
+    /// An optional explanation for the span's relevance to the diagnostic.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub message: Option<String>,
+    /// Describes the relevance the span has to the diagnostic.
     pub style: LabelStyle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
-#[non_exhaustive]
-pub enum FixApplicability {
-    MachineApplicable,
-    Suggested,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +90,6 @@ pub struct TextEdit {
 #[non_exhaustive]
 pub struct SuggestedFix {
     pub message: String,
-    pub applicability: FixApplicability,
     pub edits: Vec<TextEdit>,
 }
 
@@ -103,7 +113,7 @@ pub struct EvaluationFrame {
 
 /// What kind of problem a diagnostic reports.
 ///
-/// Codes are the stable part of a diagnostic: summaries, notes, and help text
+/// Codes are the stable part of a diagnostic: summaries and help text
 /// are prose that may be reworded at any time, but a code means the same thing
 /// across versions, and serializes to the dotted string it is named for.
 /// Consumers that branch on a diagnostic should branch on this.
@@ -112,9 +122,11 @@ pub struct EvaluationFrame {
 /// `#[non_exhaustive]`: a match on it needs a fallback arm, and a new code is
 /// not a breaking change. [`DiagnosticCode::ALL`] lists every code this version
 /// defines. The declaration table below generates that list and
-/// [`as_str`](DiagnosticCode::as_str), keeping them exhaustive by construction.
+/// [`as_str`](DiagnosticCode::as_str), [`severity`](DiagnosticCode::severity),
+/// and [`is_incomplete`](DiagnosticCode::is_incomplete), keeping them exhaustive
+/// by construction.
 macro_rules! define_diagnostic_codes {
-    ($( $(#[$metadata:meta])* $variant:ident => $wire:literal, )+) => {
+    ($( $(#[$metadata:meta])* $variant:ident => ($wire:literal, $severity:ident, $incomplete:literal), )+) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         #[non_exhaustive]
         pub enum DiagnosticCode {
@@ -134,83 +146,99 @@ macro_rules! define_diagnostic_codes {
                     $(Self::$variant => $wire,)+
                 }
             }
+
+            /// Whether this diagnostic prevents the submission from running.
+            #[must_use]
+            pub const fn severity(self) -> DiagnosticSeverity {
+                match self {
+                    $(Self::$variant => DiagnosticSeverity::$severity,)+
+                }
+            }
+
+            /// Whether more input may complete a submission that ended with this diagnostic.
+            #[must_use]
+            pub const fn is_incomplete(self) -> bool {
+                match self {
+                    $(Self::$variant => $incomplete,)+
+                }
+            }
         }
     };
 }
 
 define_diagnostic_codes! {
     /// `=` was used where a binding expects `:`.
-    AssignmentSeparator => "syntax.assignment_separator",
+    AssignmentSeparator => ("syntax.assignment_separator", Error, false),
     /// `==` was used where a comparison expects `=`.
-    EqualityOperator => "syntax.equality_operator",
+    EqualityOperator => ("syntax.equality_operator", Error, false),
     /// A variable was written in lowercase, where names are uppercase.
-    VariableCase => "syntax.variable_case",
+    VariableCase => ("syntax.variable_case", Error, false),
     /// A token cannot appear where it was found.
-    UnexpectedToken => "syntax.unexpected_token",
+    UnexpectedToken => ("syntax.unexpected_token", Error, false),
     /// A bracket, brace, or parenthesis was never closed.
-    UnclosedDelimiter => "syntax.unclosed_delimiter",
+    UnclosedDelimiter => ("syntax.unclosed_delimiter", Error, true),
     /// The program ended in the middle of something.
-    UnexpectedEnd => "syntax.unexpected_end",
+    UnexpectedEnd => ("syntax.unexpected_end", Error, true),
     /// Input continues past the end of a complete program.
-    ExtraToken => "syntax.extra_token",
+    ExtraToken => ("syntax.extra_token", Error, false),
     /// A string literal was never closed.
-    UnterminatedString => "syntax.unterminated_string",
+    UnterminatedString => ("syntax.unterminated_string", Error, true),
     /// A block comment was never closed.
-    UnterminatedComment => "syntax.unterminated_comment",
+    UnterminatedComment => ("syntax.unterminated_comment", Error, true),
     /// A `;` was used to end a statement, which the language does not use.
-    UnexpectedSemicolon => "syntax.unexpected_semicolon",
+    UnexpectedSemicolon => ("syntax.unexpected_semicolon", Error, false),
     /// A character that means nothing in the language.
-    InvalidCharacter => "syntax.invalid_character",
+    InvalidCharacter => ("syntax.invalid_character", Error, false),
     /// An integer literal does not fit in the engine's integer type.
-    IntegerOutOfRange => "syntax.integer_out_of_range",
+    IntegerOutOfRange => ("syntax.integer_out_of_range", Error, false),
     /// A call names no function at all, as in `[]`.
-    EmptyFunctionCall => "syntax.empty_function_call",
+    EmptyFunctionCall => ("syntax.empty_function_call", Error, false),
     /// A variable that has not been assigned.
-    UndefinedVariable => "name.undefined_variable",
+    UndefinedVariable => ("name.undefined_variable", Error, false),
     /// A function that has not been defined.
-    UndefinedFunction => "name.undefined_function",
+    UndefinedFunction => ("name.undefined_function", Error, false),
     /// A name is already taken, or cannot be bound in this position.
-    BindingConflict => "name.binding_conflict",
+    BindingConflict => ("name.binding_conflict", Error, false),
     /// A sequence was required.
-    ExpectedSequence => "type.expected_sequence",
+    ExpectedSequence => ("type.expected_sequence", Error, false),
     /// A number was required.
-    ExpectedNumber => "type.expected_number",
+    ExpectedNumber => ("type.expected_number", Error, false),
     /// An operator was given an operand of a type it does not accept.
-    OperatorArgument => "type.operator_argument",
+    OperatorArgument => ("type.operator_argument", Error, false),
     /// An operator's operands do not work together, whatever each is alone.
-    OperatorOperands => "type.operator_operands",
+    OperatorOperands => ("type.operator_operands", Error, false),
     /// A function was given an argument of a type it does not accept.
-    FunctionArgument => "type.function_argument",
+    FunctionArgument => ("type.function_argument", Error, false),
     /// Two values that had to line up have different shapes.
-    OutcomeMismatch => "type.outcome_mismatch",
+    OutcomeMismatch => ("type.outcome_mismatch", Error, false),
     /// A value that had to be summed has parts that cannot be added.
-    NonAdditiveValue => "type.non_additive_value",
+    NonAdditiveValue => ("type.non_additive_value", Error, false),
     /// `labeled` was applied to an output that is not a tuple.
-    LabelsRequireTuple => "type.labels_require_tuple",
+    LabelsRequireTuple => ("type.labels_require_tuple", Error, false),
     /// A repeat count is not a number.
-    RepeatCount => "type.repeat_count",
+    RepeatCount => ("type.repeat_count", Error, false),
     /// A range endpoint is not a number.
-    RangeEndpoint => "type.range_endpoint",
+    RangeEndpoint => ("type.range_endpoint", Error, false),
     /// A negative number was given where only zero or more makes sense.
-    NonnegativeRequired => "value.nonnegative_required",
+    NonnegativeRequired => ("value.nonnegative_required", Error, false),
     /// A value falls outside the range the operation allows.
-    OutOfRange => "value.out_of_range",
+    OutOfRange => ("value.out_of_range", Error, false),
     /// An arithmetic operation has no defined result, such as division by zero.
-    ArithmeticError => "value.arithmetic_error",
+    ArithmeticError => ("value.arithmetic_error", Error, false),
     /// The number of labels does not match the number of tuple fields.
-    OutputLabelCount => "value.output_label_count",
+    OutputLabelCount => ("value.output_label_count", Error, false),
     /// `result:` appeared outside a function.
-    ResultOutsideFunction => "placement.result_outside_function",
+    ResultOutsideFunction => ("placement.result_outside_function", Error, false),
     /// A statement that is only allowed at the top level appeared inside a block.
-    TopLevelOnly => "placement.top_level_only",
+    TopLevelOnly => ("placement.top_level_only", Error, false),
     /// A function may finish without reaching `result:`.
-    MissingResult => "control_flow.missing_result",
+    MissingResult => ("control_flow.missing_result", Warning, false),
     /// One dice pool is sampled independently more than once.
-    IndependentPoolReuse => "evaluation.independent_pool_reuse",
+    IndependentPoolReuse => ("evaluation.independent_pool_reuse", Warning, false),
     /// Exploding dice stopped at the configured depth.
-    ExplodeDepth => "evaluation.explode_depth",
+    ExplodeDepth => ("evaluation.explode_depth", Warning, false),
     /// Recursion stopped at the configured depth.
-    MaximumFunctionDepth => "evaluation.maximum_function_depth",
+    MaximumFunctionDepth => ("evaluation.maximum_function_depth", Warning, false),
 }
 
 impl std::fmt::Display for DiagnosticCode {
@@ -229,23 +257,26 @@ impl Serialize for DiagnosticCode {
     }
 }
 
-/// A complete engine diagnostic.
+/// Errors, warnings, or other information produced by the engine about a span of code.
 ///
 /// The `code` classifies the diagnostic for consumers that want to branch on
-/// it; everything else is prose and spans for them to present.
+/// it. Other fields provide additional context to an end user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct EngineDiagnostic {
+    /// The error type.
     pub code: DiagnosticCode,
-    pub severity: DiagnosticSeverity,
+    /// A human-readable description of the summary.
     pub summary: String,
+    /// A collection of code spans that relate to this diagnostic.
     pub labels: Vec<DiagnosticLabel>,
-    pub notes: Vec<String>,
+    /// Optional human-readable context or description of how to fix the diagnostic.
     pub help: Option<String>,
-    pub fixes: Vec<SuggestedFix>,
+    /// An optional fix for the diagnostic.
+    pub fix: Option<SuggestedFix>,
+    /// Stack trace when this diagnostic was emitted. Empty for syntax issues.
     pub trace: Vec<EvaluationFrame>,
-    pub incomplete: bool,
 }
 
 impl EngineDiagnostic {
@@ -371,10 +402,8 @@ struct DiagnosticParts {
     code: DiagnosticCode,
     summary: String,
     labels: Vec<DiagnosticLabel>,
-    notes: Vec<String>,
     help: Option<String>,
-    fixes: Vec<SuggestedFix>,
-    incomplete: bool,
+    fix: Option<SuggestedFix>,
 }
 
 impl DiagnosticParts {
@@ -383,24 +412,19 @@ impl DiagnosticParts {
             code,
             summary: summary.into(),
             labels,
-            notes: Vec::new(),
             help: None,
-            fixes: Vec::new(),
-            incomplete: false,
+            fix: None,
         }
     }
 
-    fn finish(self, severity: DiagnosticSeverity, trace: Vec<EvaluationFrame>) -> EngineDiagnostic {
+    fn finish(self, trace: Vec<EvaluationFrame>) -> EngineDiagnostic {
         EngineDiagnostic {
             code: self.code,
-            severity,
             summary: self.summary,
             labels: self.labels,
-            notes: self.notes,
             help: self.help,
-            fixes: self.fixes,
+            fix: self.fix,
             trace,
-            incomplete: self.incomplete,
         }
     }
 
@@ -414,18 +438,8 @@ impl DiagnosticParts {
         self
     }
 
-    fn note(mut self, note: impl Into<String>) -> Self {
-        self.notes.push(note.into());
-        self
-    }
-
-    fn incomplete(mut self) -> Self {
-        self.incomplete = true;
-        self
-    }
-
     fn fix(mut self, fix: SuggestedFix) -> Self {
-        self.fixes.push(fix);
+        self.fix = Some(fix);
         self
     }
 }
@@ -516,7 +530,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     DiagnosticCode::UnexpectedToken,
                     format!("Unexpected token `{found}`"),
                 )
-                .note("At the top level, expressions you want to show must start with `output`.")
+                .help("At the top level, expressions you want to show must start with `output`.")
             }
         }
         ParseError::UnrecognizedEof { location, expected } => {
@@ -528,7 +542,6 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     DiagnosticCode::UnclosedDelimiter,
                     format!("Missing closing `{closer}`"),
                 )
-                .incomplete()
                 .help(format!(
                     "Add the matching `{closer}` to complete this expression."
                 ))
@@ -545,7 +558,6 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     DiagnosticCode::UnexpectedEnd,
                     "The program ends before this construct is complete",
                 )
-                .incomplete()
             }
         }
         ParseError::ExtraToken { token } => {
@@ -574,7 +586,6 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     DiagnosticCode::UnterminatedString,
                     "This string is missing its closing quote",
                 )
-                .incomplete()
                 .help("String literals end with `\"`.")
                 .fix(replacement_fix(
                     source_id,
@@ -589,7 +600,6 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
                     DiagnosticCode::UnterminatedComment,
                     "This block comment is missing its closing backslash",
                 )
-                .incomplete()
                 .help("AnyDice block comments are enclosed by backslashes.")
                 .fix(replacement_fix(
                     source_id,
@@ -641,7 +651,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
         },
     };
 
-    parts.finish(DiagnosticSeverity::Error, Vec::new())
+    parts.finish(Vec::new())
 }
 
 /// Whether `word` is a lowercase word that carries no meaning of its own, and
@@ -670,7 +680,6 @@ pub(crate) fn missing_return_warning(
     let function = definition.name.value.replace("{}", "…");
     Some(EngineDiagnostic {
         code: DiagnosticCode::MissingResult,
-        severity: DiagnosticSeverity::Warning,
         summary: format!("Function `[{function}]` may finish without a result"),
         labels: vec![DiagnosticLabel {
             range: SourceRange {
@@ -680,14 +689,13 @@ pub(crate) fn missing_return_warning(
             message: Some("not every path reaches `result:`".to_string()),
             style: LabelStyle::Primary,
         }],
-        notes: vec![
-            "When execution reaches the end of a function, the function produces an empty die."
+        help: Some(
+            "When execution reaches the end of a function, the function produces an empty die. \
+             Add `result:` on every path through this function."
                 .to_string(),
-        ],
-        help: Some("Add `result:` on every path through this function.".to_string()),
-        fixes: Vec::new(),
+        ),
+        fix: None,
         trace: Vec::new(),
-        incomplete: false,
     })
 }
 
@@ -716,7 +724,6 @@ fn replacement_fix(
 ) -> SuggestedFix {
     SuggestedFix {
         message: message.to_string(),
-        applicability: FixApplicability::MachineApplicable,
         edits: vec![TextEdit {
             range: SourceRange { source, range },
             replacement: replacement.to_string(),
@@ -824,7 +831,6 @@ pub(crate) fn runtime_diagnostic(
             match arity_mismatch.as_ref().and_then(|m| m.comma_insertion) {
                 Some(offset) => parts.fix(SuggestedFix {
                     message: "Separate these dice arguments with a comma".to_string(),
-                    applicability: FixApplicability::Suggested,
                     edits: vec![TextEdit {
                         range: SourceRange {
                             source: source_id,
@@ -1106,7 +1112,7 @@ pub(crate) fn runtime_diagnostic(
         }
     };
 
-    parts.finish(DiagnosticSeverity::Error, trace)
+    parts.finish(trace)
 }
 
 fn arity_mismatch_help(mismatch: &ArityMismatch) -> String {
@@ -1194,9 +1200,14 @@ pub(crate) fn add_later_definition(
             message: Some("defined later".to_string()),
             style: LabelStyle::Secondary,
         });
-        diagnostic.notes.push(
-            "Statements execute in order, so this definition is not available yet.".to_string(),
-        );
+        let context = "Statements execute in order, so this definition is not available yet.";
+        match &mut diagnostic.help {
+            Some(help) => {
+                help.push(' ');
+                help.push_str(context);
+            }
+            None => diagnostic.help = Some(context.to_string()),
+        }
     }
 }
 

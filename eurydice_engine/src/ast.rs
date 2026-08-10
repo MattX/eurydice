@@ -2,10 +2,13 @@ use lalrpop_util::ParseError;
 #[cfg(any(feature = "serde", test))]
 use serde::Serialize;
 
+/// A range of bytes in the source text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct ByteRange {
+    /// The starting byte index (inclusive) of the range.
     pub start: usize,
+    /// The ending byte index (exclusive) of the range.
     pub end: usize,
 }
 

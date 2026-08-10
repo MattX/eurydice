@@ -32,12 +32,12 @@ fn unresolved_calls_suggest_a_comma_when_the_arity_is_wrong() {
     let joined = diagnostic("output [tuple d6 d8]").unwrap();
     assert_eq!(joined.code, DiagnosticCode::UndefinedFunction);
     assert!(mentions_a_comma(&joined), "got {:?}", joined.help);
-    assert_eq!(joined.fixes.len(), 1);
+    assert!(joined.fix.is_some());
 
     // The hint is only attached when a same-word function of another arity
     // exists; an entirely unknown function gets none.
     let unknown = diagnostic("output [nonexistent thing]").unwrap();
     assert_eq!(unknown.code, DiagnosticCode::UndefinedFunction);
     assert!(!mentions_a_comma(&unknown), "got {:?}", unknown.help);
-    assert!(unknown.fixes.is_empty());
+    assert!(unknown.fix.is_none());
 }

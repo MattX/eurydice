@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use eurydice_engine::{
     Engine, PrintEvent, RunReport, SourceRange, primitive_metadata as engine_primitive_metadata,
 };
-use js_sys::Function;
+use js_sys::{Array, Function, Reflect};
 use utils::set_panic_hook;
 use wasm_bindgen::prelude::*;
 
@@ -23,7 +23,21 @@ pub fn run_source(input: &str, print_callback: Function) -> JsValue {
     engine.set_print_callback(callback);
     let mut report = engine.run_source(input);
     convert_report_offsets(&mut report);
-    serde_wasm_bindgen::to_value(&report).unwrap()
+    serialize_report(&report)
+}
+
+fn serialize_report(report: &RunReport) -> JsValue {
+    let value = serde_wasm_bindgen::to_value(report).unwrap();
+    let diagnostics = Reflect::get(&value, &JsValue::from_str("diagnostics")).unwrap();
+    let diagnostics = Array::from(&diagnostics);
+
+    for (index, diagnostic) in report.diagnostics.iter().enumerate() {
+        let wire_diagnostic = diagnostics.get(u32::try_from(index).unwrap());
+        let severity = serde_wasm_bindgen::to_value(&diagnostic.code.severity()).unwrap();
+        Reflect::set(&wire_diagnostic, &JsValue::from_str("severity"), &severity).unwrap();
+    }
+
+    value
 }
 
 /// Metadata used by editor integrations to complete built-in function calls.
@@ -62,7 +76,7 @@ fn convert_report_offsets(report: &mut RunReport) {
         for label in &mut diagnostic.labels {
             convert(&mut label.range);
         }
-        for fix in &mut diagnostic.fixes {
+        if let Some(fix) = &mut diagnostic.fix {
             for edit in &mut fix.edits {
                 convert(&mut edit.range);
             }

@@ -46,7 +46,7 @@ impl RunReport {
     pub fn errors(&self) -> impl Iterator<Item = &EngineDiagnostic> {
         self.diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .filter(|diagnostic| diagnostic.code.severity() == DiagnosticSeverity::Error)
     }
 
     pub fn error(&self) -> Option<&EngineDiagnostic> {
@@ -54,22 +54,26 @@ impl RunReport {
     }
 }
 
+/// An error returned by the compiler.
 #[derive(Debug, Clone)]
 pub struct CompileError {
     report: RunReport,
 }
 
 impl CompileError {
+    /// Returns the diagnostic that caused the compilation to fail.
     pub fn diagnostic(&self) -> &EngineDiagnostic {
         self.report
             .error()
             .expect("a compilation error report contains an error diagnostic")
     }
 
+    /// Returns the report that caused the compilation to fail.
     pub fn report(&self) -> &RunReport {
         &self.report
     }
 
+    /// Consumes the error and returns the report that caused the compilation to fail.
     pub fn into_report(self) -> RunReport {
         self.report
     }
@@ -289,7 +293,7 @@ impl Engine {
             .flat_map(|diagnostic| {
                 let labels = diagnostic.labels.iter().map(|label| label.range.source);
                 let edits = diagnostic
-                    .fixes
+                    .fix
                     .iter()
                     .flat_map(|fix| fix.edits.iter().map(|edit| edit.range.source));
                 let frames = diagnostic.trace.iter().flat_map(|frame| {
@@ -369,7 +373,12 @@ fn compile_program(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::{DiagnosticCode, FixApplicability};
+    use crate::diagnostic::{DiagnosticCode, SuggestedFix};
+
+    /// The fix a diagnostic is expected to carry.
+    fn fix(diagnostic: &EngineDiagnostic) -> &SuggestedFix {
+        diagnostic.fix.as_ref().expect("diagnostic carries a fix")
+    }
 
     /// Runs a submission that is expected to succeed, returning its outputs.
     fn run(engine: &mut Engine, source: &str) -> Vec<EngineOutput> {
@@ -515,12 +524,12 @@ mod tests {
     fn reports_parse_and_runtime_ranges() {
         let parse_report = Engine::new().run_source("output (");
         let parse_error = parse_report.error().unwrap();
-        assert!(parse_error.incomplete);
+        assert!(parse_error.code.is_incomplete());
         assert_eq!(parse_error.primary_range().unwrap().range.start, 8);
 
         let runtime_report = Engine::new().run_source("output MISSING");
         let runtime_error = runtime_report.error().unwrap();
-        assert!(!runtime_error.incomplete);
+        assert!(!runtime_error.code.is_incomplete());
         assert_eq!(runtime_error.primary_range().unwrap().range.start, 7);
     }
 
@@ -552,7 +561,7 @@ mod tests {
             let report = Engine::new().run_source(source);
             let error = report.error().unwrap();
             assert_eq!(error.code, code);
-            assert_eq!(error.fixes[0].edits[0].replacement, replacement);
+            assert_eq!(fix(error).edits[0].replacement, replacement);
         }
     }
 
@@ -572,7 +581,7 @@ mod tests {
         let error = report.error().unwrap();
 
         assert_eq!(error.code, DiagnosticCode::UnexpectedToken);
-        assert!(error.fixes.is_empty());
+        assert!(error.fix.is_none());
     }
 
     #[test]
@@ -594,7 +603,7 @@ mod tests {
             let error = report.error().unwrap();
 
             assert_eq!(error.code, DiagnosticCode::UnclosedDelimiter, "{source}");
-            assert_eq!(error.fixes[0].edits[0].replacement, ")", "{source}");
+            assert_eq!(fix(error).edits[0].replacement, ")", "{source}");
         }
     }
 
@@ -606,10 +615,10 @@ mod tests {
 
             assert_eq!(error.code, DiagnosticCode::UnexpectedToken);
             assert_eq!(
-                error.notes,
-                ["At the top level, expressions you want to show must start with `output`."]
+                error.help.as_deref(),
+                Some("At the top level, expressions you want to show must start with `output`.")
             );
-            assert!(error.fixes.is_empty());
+            assert!(error.fix.is_none());
         }
     }
 
@@ -626,6 +635,14 @@ mod tests {
                 .help
                 .as_deref()
                 .is_some_and(|help| help.contains("Did you mean `FOOD`?")),
+            "{:?}",
+            error.help
+        );
+        assert!(
+            error
+                .help
+                .as_deref()
+                .is_some_and(|help| help.contains("this definition is not available yet")),
             "{:?}",
             error.help
         );
@@ -650,13 +667,7 @@ mod tests {
             let error = report.error().unwrap();
 
             assert_eq!(error.code, DiagnosticCode::UndefinedFunction, "{source}");
-            assert_eq!(error.fixes.len(), 1, "{source}");
-            assert_eq!(
-                error.fixes[0].applicability,
-                FixApplicability::Suggested,
-                "{source}"
-            );
-            let edit = &error.fixes[0].edits[0];
+            let edit = &fix(error).edits[0];
             assert_eq!(
                 &report.sources[0].text[edit.range.range.start..],
                 remainder,
@@ -673,7 +684,7 @@ mod tests {
         let error = report.error().unwrap();
 
         assert_eq!(error.code, DiagnosticCode::UndefinedFunction);
-        assert!(error.fixes.is_empty());
+        assert!(error.fix.is_none());
     }
 
     #[test]
@@ -954,6 +965,9 @@ output [pick d3]";
             report.diagnostics[0].code,
             DiagnosticCode::IndependentPoolReuse
         );
+        let help = report.diagnostics[0].help.as_deref().unwrap();
+        assert!(help.contains("stores its distribution"));
+        assert!(help.contains("To reuse one roll"));
 
         let no_warning = Engine::new().run_source("D: d6\noutput #D + #D");
         assert!(no_warning.diagnostics.is_empty());
@@ -970,8 +984,11 @@ output [pick d3]";
             let report = Engine::new().run_source(source);
             let warning = &report.diagnostics[0];
             assert_eq!(warning.code, DiagnosticCode::MissingResult, "{source}");
-            assert_eq!(warning.severity, DiagnosticSeverity::Warning);
-            assert!(warning.fixes.is_empty());
+            assert_eq!(warning.code.severity(), DiagnosticSeverity::Warning);
+            let help = warning.help.as_deref().unwrap();
+            assert!(help.contains("produces an empty die"), "{source}");
+            assert!(help.contains("Add `result:`"), "{source}");
+            assert!(warning.fix.is_none());
         }
     }
 
@@ -1055,6 +1072,9 @@ output [pick d3]";
     fn warns_when_depth_settings_bound_results() {
         let explode = Engine::new().run_source("output [explode d6]");
         assert_eq!(explode.diagnostics[0].code, DiagnosticCode::ExplodeDepth);
+        let help = explode.diagnostics[0].help.as_deref().unwrap();
+        assert!(help.contains("bounded by this setting"));
+        assert!(help.contains("Change it with"));
 
         let recursion = Engine::new()
             .run_source("function: recurse N:n { result: [recurse N] }\noutput [recurse 1]");

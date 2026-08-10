@@ -19,7 +19,6 @@ export interface TextEdit {
 
 export interface SuggestedFix {
   message: string;
-  applicability: "machine_applicable" | "suggested";
   edits: TextEdit[];
 }
 
@@ -35,11 +34,9 @@ export interface EurydiceDiagnostic {
   severity: "error" | "warning";
   summary: string;
   labels: DiagnosticLabel[];
-  notes: string[];
   help: string | null;
-  fixes: SuggestedFix[];
+  fix: SuggestedFix | null;
   trace: EvaluationFrame[];
-  incomplete: boolean;
 }
 
 export interface DiagnosticSource {

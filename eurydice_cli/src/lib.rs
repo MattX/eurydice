@@ -81,7 +81,7 @@ pub fn format_engine_diagnostics(
             let adapter = EngineDiagnosticAdapter {
                 summary: diagnostic.summary.clone(),
                 code: diagnostic.code,
-                severity: match diagnostic.severity {
+                severity: match diagnostic.code.severity() {
                     DiagnosticSeverity::Error => Severity::Error,
                     DiagnosticSeverity::Warning => Severity::Warning,
                     _ => Severity::Advice,
@@ -94,10 +94,7 @@ pub fn format_engine_diagnostics(
             first_source = false;
         }
 
-        for note in &diagnostic.notes {
-            rendered.push_str(&format!("  note: {note}\n"));
-        }
-        for fix in &diagnostic.fixes {
+        if let Some(fix) = &diagnostic.fix {
             rendered.push_str(&format!("  suggestion: {}\n", fix.message));
         }
         for frame in &diagnostic.trace {

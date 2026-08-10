@@ -11,11 +11,9 @@ const diagnostic: EurydiceDiagnostic = {
   labels: [
     { range: { source: 0, range: { start: 7, end: 10 } }, style: "primary" },
   ],
-  notes: [],
   help: null,
-  fixes: [],
+  fix: null,
   trace: [],
-  incomplete: false,
 };
 
 const state = () =>

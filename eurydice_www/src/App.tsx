@@ -293,10 +293,8 @@ function frontendDiagnostic(
             message: "",
             style: "primary",
           }],
-    notes: [],
     help: null,
-    fixes: [],
+    fix: null,
     trace: [],
-    incomplete: false,
   };
 }
