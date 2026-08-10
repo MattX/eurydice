@@ -11,14 +11,10 @@ export interface DiagnosticLabel {
   message?: string;
 }
 
-export interface TextEdit {
-  range: SourceRange;
-  replacement: string;
-}
-
 export interface SuggestedFix {
   message: string;
-  edits: TextEdit[];
+  range: SourceRange;
+  replacement: string;
 }
 
 export interface EvaluationFrame {
@@ -55,16 +51,21 @@ export interface DiagnosticSource {
   text: string;
 }
 
+/** Diagnostics, together with every source text needed to render them. */
+export interface Diagnostics {
+  entries: Diagnostic[];
+  sources: DiagnosticSource[];
+}
+
 export interface RunReport {
   outputs: { name: string; distribution: WireDistribution }[];
-  diagnostics: Diagnostic[];
-  sources: DiagnosticSource[];
+  diagnostics: Diagnostics;
 }
 
 /**
  * Whether a fix can still be applied to the text in the editor.
  *
- * An edit is a set of offsets into the submission that produced it. Applying it
+ * A fix is a pair of offsets into the submission that produced it. Applying it
  * to anything else — the editor has moved on since, or the fix points into an
  * earlier submission — would land in the wrong place and corrupt the program,
  * so the fix is withheld rather than offered.
@@ -77,29 +78,27 @@ export function isApplicableFix(
   return (
     source !== null &&
     editorText === source.text &&
-    fix.edits.length > 0 &&
-    fix.edits.every((edit) => edit.range.source === source.id)
+    fix.range.source === source.id
   );
 }
 
-export function applyTextEdits(source: string, edits: TextEdit[]): string {
-  return [...edits]
-    .sort((left, right) => right.range.range.start - left.range.range.start)
-    .reduce(
-      (result, edit) =>
-        result.slice(0, edit.range.range.start) +
-        edit.replacement +
-        result.slice(edit.range.range.end),
-      source,
-    );
+/** `source` with `fix` applied. Guard with `isApplicableFix` first. */
+export function fixedSource(source: string, fix: SuggestedFix): string {
+  return (
+    source.slice(0, fix.range.range.start) +
+    fix.replacement +
+    source.slice(fix.range.range.end)
+  );
 }
 
 /**
- * The submission a report's diagnostics are anchored to, which the engine
- * always places last.
+ * The submission the diagnostics are anchored to, which the engine always
+ * places last.
  */
-export function currentSource(report: RunReport): DiagnosticSource | null {
-  return report.sources[report.sources.length - 1] ?? null;
+export function currentSource(
+  diagnostics: Diagnostics,
+): DiagnosticSource | null {
+  return diagnostics.sources[diagnostics.sources.length - 1] ?? null;
 }
 
 export function editorDiagnostics(

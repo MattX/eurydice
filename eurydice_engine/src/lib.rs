@@ -12,10 +12,10 @@ mod value;
 
 pub use ast::ByteRange;
 pub use diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource,
-    EvaluationFrame, SourceId, SourceRange, SuggestedFix, TextEdit, TraceBinding,
+    Diagnostic, DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, Diagnostics,
+    EvaluationFrame, SourceId, SourceRange, SuggestedFix, TraceBinding,
 };
-pub use engine::{CompileError, Engine, EngineOutput, PrintEvent, Program, RunReport};
+pub use engine::{Engine, EngineOutput, PrintEvent, Program, RunReport};
 pub use output::{Distribution, FieldSchema};
 pub use primitives::{PrimitiveMetadata, primitive_metadata};
 

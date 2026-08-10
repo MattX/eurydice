@@ -13,14 +13,15 @@ fn main() {
         code.push_str(&line);
         let report = engine.run_source(&code);
         if report
-            .error()
+            .diagnostics
+            .first_error()
             .is_some_and(|error| error.code.is_incomplete())
         {
             code.push('\n');
             continue;
         }
-        print_engine_diagnostics(&report.diagnostics, &report.sources);
-        if report.error().is_some() {
+        print_engine_diagnostics(&report.diagnostics);
+        if report.diagnostics.first_error().is_some() {
             code.clear();
             continue;
         }

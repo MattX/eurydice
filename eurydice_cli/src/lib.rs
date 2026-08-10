@@ -1,9 +1,7 @@
 //! Terminal rendering helpers for engine outputs and diagnostics.
 use std::collections::HashSet;
 
-use eurydice_engine::{
-    Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSource, Distribution, FieldSchema,
-};
+use eurydice_engine::{DiagnosticCode, DiagnosticSeverity, Diagnostics, Distribution, FieldSchema};
 use miette::{
     Diagnostic as MietteDiagnostic, GraphicalReportHandler, LabeledSpan, NamedSource, Severity,
 };
@@ -46,13 +44,11 @@ pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f
 }
 
 /// Renders the engine's frontend-neutral diagnostics for terminal users.
-pub fn format_engine_diagnostics(
-    diagnostics: &[Diagnostic],
-    sources: &[DiagnosticSource],
-) -> String {
+pub fn format_engine_diagnostics(diagnostics: &Diagnostics) -> String {
+    let sources = &diagnostics.sources;
     let handler = GraphicalReportHandler::new();
     let mut rendered = String::new();
-    for diagnostic in diagnostics {
+    for diagnostic in &diagnostics.entries {
         let source_ids = diagnostic
             .labels()
             .map(|label| label.range.source)
@@ -135,8 +131,8 @@ pub fn format_engine_diagnostics(
     rendered
 }
 
-pub fn print_engine_diagnostics(diagnostics: &[Diagnostic], sources: &[DiagnosticSource]) {
-    eprint!("{}", format_engine_diagnostics(diagnostics, sources));
+pub fn print_engine_diagnostics(diagnostics: &Diagnostics) {
+    eprint!("{}", format_engine_diagnostics(diagnostics));
 }
 
 fn line_column(source: &str, byte_offset: usize) -> (usize, usize) {
@@ -240,13 +236,13 @@ mod tests {
     #[test]
     fn formats_structured_warnings_and_evaluation_traces() {
         let warning = Engine::new().run_source("D: d6\noutput D + D");
-        let rendered = format_engine_diagnostics(&warning.diagnostics, &warning.sources);
+        let rendered = format_engine_diagnostics(&warning.diagnostics);
         assert!(rendered.contains("evaluation.independent_pool_reuse"));
         assert!(rendered.contains("sampled independently"));
 
         let error = Engine::new()
             .run_source("function: pick I:n { result: [field I of [tuple 1 2]] } output [pick d3]");
-        let rendered = format_engine_diagnostics(&error.diagnostics, &error.sources);
+        let rendered = format_engine_diagnostics(&error.diagnostics);
         assert!(rendered.contains("while calling [pick …]"));
         assert!(rendered.contains("I = 3"));
     }

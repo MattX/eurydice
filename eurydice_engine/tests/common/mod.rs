@@ -13,7 +13,7 @@ use eurydice_engine::{Diagnostic, Distribution, Engine};
 /// diagnostic that stopped it.
 pub fn run(program: &str) -> Result<Vec<Distribution>, Box<Diagnostic>> {
     let report = Engine::new().run_source(program);
-    match report.error() {
+    match report.diagnostics.first_error() {
         Some(error) => Err(Box::new(error.clone())),
         None => Ok(report
             .outputs

@@ -23,7 +23,7 @@ import { DarkModeContext } from "./DarkModeContext";
 import React from "react";
 import { toast } from "react-hot-toast";
 import {
-  applyTextEdits,
+  fixedSource,
   DiagnosticSource,
   editorDiagnostics,
   EurydiceDiagnostic,
@@ -103,7 +103,7 @@ export default function EditorPane(props: EditorPaneProps) {
 
   function applyFix(fix: SuggestedFix) {
     if (canApplyFix(fix)) {
-      props.onChange(applyTextEdits(props.editorText, fix.edits));
+      props.onChange(fixedSource(props.editorText, fix));
     }
   }
 

@@ -94,9 +94,11 @@ function AppInner() {
         runningRef.current = false;
         setRunning(false);
         const report = event.data.Report;
-        const source = currentSource(report);
+        const source = currentSource(report.diagnostics);
         const sourceId = source?.id ?? null;
-        const nextDiagnostics: EurydiceDiagnostic[] = [...report.diagnostics];
+        const nextDiagnostics: EurydiceDiagnostic[] = [
+          ...report.diagnostics.entries,
+        ];
         setDiagnosticSource(source);
 
         const distributions: NamedDistribution[] = report.outputs.map(

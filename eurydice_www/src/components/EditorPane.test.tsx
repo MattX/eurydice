@@ -22,7 +22,8 @@ describe("DiagnosticCard", () => {
       help: "Tuple values contain two or more fields. Build a tuple with `[tuple A B]`.",
       fix: {
         message: "Wrap in a tuple",
-        edits: [],
+        range: { source: 0, range: { start: 0, end: 1 } },
+        replacement: "[tuple 1 1]",
       },
       trace: [
         {

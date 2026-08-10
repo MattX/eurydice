@@ -1,32 +1,42 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  applyTextEdits,
   editorDiagnostics,
   EurydiceDiagnostic,
+  fixedSource,
   isApplicableFix,
   SuggestedFix,
-  TextEdit,
 } from "./diagnostics";
 
-const edit = (start: number, end: number, replacement: string): TextEdit => ({
+const fixAt = (
+  start: number,
+  end: number,
+  replacement: string,
+): SuggestedFix => ({
+  message: "Fix it",
   range: { source: 0, range: { start, end } },
   replacement,
 });
 
-describe("structured diagnostics", () => {
-  it("applies multi-edit fixes without shifting later ranges", () => {
-    expect(
-      applyTextEdits("output 1 == 1;", [edit(10, 11, ""), edit(13, 14, "")]),
-    ).toBe("output 1 = 1");
+describe("fixedSource", () => {
+  it("replaces the fix's range with its replacement", () => {
+    expect(fixedSource("output 1 == 1", fixAt(10, 11, ""))).toBe(
+      "output 1 = 1",
+    );
+  });
+
+  it("inserts at an empty range", () => {
+    expect(fixedSource("output [pick 1 2]", fixAt(14, 14, ","))).toBe(
+      "output [pick 1, 2]",
+    );
   });
 });
 
 describe("isApplicableFix", () => {
   const submitted = { id: 0, name: "submission 1", text: "output 1 == 1" };
   const fix: SuggestedFix = {
+    ...fixAt(10, 11, ""),
     message: "Remove the second `=`",
-    edits: [edit(10, 11, "")],
   };
 
   it("applies a fix to the text its offsets were measured in", () => {
@@ -43,15 +53,10 @@ describe("isApplicableFix", () => {
   it("withholds a fix that edits an earlier submission", () => {
     const elsewhere: SuggestedFix = {
       ...fix,
-      edits: [
-        { ...fix.edits[0], range: { source: 1, range: { start: 0, end: 0 } } },
-      ],
+      range: { source: 1, range: { start: 0, end: 0 } },
     };
 
     expect(isApplicableFix(elsewhere, submitted, submitted.text)).toBe(false);
-    expect(
-      isApplicableFix({ ...fix, edits: [] }, submitted, submitted.text),
-    ).toBe(false);
   });
 });
 

@@ -3,7 +3,8 @@ mod utils;
 use std::collections::HashMap;
 
 use eurydice_engine::{
-    Engine, PrintEvent, RunReport, SourceRange, primitive_metadata as engine_primitive_metadata,
+    Diagnostics, Engine, PrintEvent, RunReport, SourceRange,
+    primitive_metadata as engine_primitive_metadata,
 };
 use js_sys::{Array, Function, Reflect};
 use utils::set_panic_hook;
@@ -29,10 +30,11 @@ pub fn run_source(input: &str, print_callback: Function) -> JsValue {
 fn serialize_report(report: &RunReport) -> JsValue {
     let value = serde_wasm_bindgen::to_value(report).unwrap();
     let diagnostics = Reflect::get(&value, &JsValue::from_str("diagnostics")).unwrap();
-    let diagnostics = Array::from(&diagnostics);
+    let entries = Reflect::get(&diagnostics, &JsValue::from_str("entries")).unwrap();
+    let entries = Array::from(&entries);
 
-    for (index, diagnostic) in report.diagnostics.iter().enumerate() {
-        let wire_diagnostic = diagnostics.get(u32::try_from(index).unwrap());
+    for (index, diagnostic) in report.diagnostics.entries.iter().enumerate() {
+        let wire_diagnostic = entries.get(u32::try_from(index).unwrap());
         let severity = serde_wasm_bindgen::to_value(&diagnostic.code.severity()).unwrap();
         Reflect::set(&wire_diagnostic, &JsValue::from_str("severity"), &severity).unwrap();
     }
@@ -55,11 +57,9 @@ fn byte_to_utf16(source: &str, byte_offset: usize) -> usize {
 }
 
 fn convert_report_offsets(report: &mut RunReport) {
-    let RunReport {
-        diagnostics,
-        sources,
-        ..
-    } = report;
+    let Diagnostics {
+        entries, sources, ..
+    } = &mut report.diagnostics;
     let texts = sources
         .iter()
         .map(|source| (source.id, source.text.as_str()))
@@ -72,14 +72,12 @@ fn convert_report_offsets(report: &mut RunReport) {
         range.range.end = byte_to_utf16(text, range.range.end);
     };
 
-    for diagnostic in diagnostics {
+    for diagnostic in entries {
         for label in diagnostic.labels_mut() {
             convert(&mut label.range);
         }
         if let Some(fix) = &mut diagnostic.fix {
-            for edit in &mut fix.edits {
-                convert(&mut edit.range);
-            }
+            convert(&mut fix.range);
         }
         for frame in &mut diagnostic.trace {
             convert(&mut frame.call);
@@ -115,11 +113,25 @@ mod tests {
     fn converts_every_structured_diagnostic_range() {
         let input = "print 1 named \"é\"\noutput MISSING";
         let mut report = Engine::new().run_source(input);
-        let byte_start = report.error().unwrap().primary_label.range.range.start;
+        let byte_start = report
+            .diagnostics
+            .first_error()
+            .unwrap()
+            .primary_label
+            .range
+            .range
+            .start;
         convert_report_offsets(&mut report);
 
         assert_eq!(
-            report.error().unwrap().primary_label.range.range.start,
+            report
+                .diagnostics
+                .first_error()
+                .unwrap()
+                .primary_label
+                .range
+                .range
+                .start,
             input[..byte_start].encode_utf16().count()
         );
     }

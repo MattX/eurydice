@@ -32,7 +32,50 @@ pub struct DiagnosticSource {
     pub text: String,
 }
 
-/// A range whose source submission is explicit.
+/// Diagnostics produced by compiling or running a program, together with every source text needed to render them.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
+pub struct Diagnostics {
+    pub entries: Vec<Diagnostic>,
+    /// Every source the diagnostics point into, plus the submission that
+    /// produced them. The submission is always last.
+    pub sources: Vec<DiagnosticSource>,
+}
+
+impl Diagnostics {
+    /// Whether any of the diagnostics are errors.
+    pub fn has_errors(&self) -> bool {
+        self.first_error().is_some()
+    }
+
+    /// An iterator over the diagnostics that are errors.
+    pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.entries
+            .iter()
+            .filter(|diagnostic| diagnostic.code.severity() == DiagnosticSeverity::Error)
+    }
+
+    /// The first diagnostic that is an error, if any.
+    pub fn first_error(&self) -> Option<&Diagnostic> {
+        self.errors().next()
+    }
+}
+
+/// Summarizes the first error, so diagnostics returned as an `Err` work with
+/// `?` and the rest of the standard error machinery.
+impl std::fmt::Display for Diagnostics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.first_error() {
+            Some(diagnostic) => write!(f, "{}: {}", diagnostic.code, diagnostic.summary),
+            None => f.write_str("no errors"),
+        }
+    }
+}
+
+impl std::error::Error for Diagnostics {}
+
+/// A range with an explicit source submission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceRange {
@@ -66,36 +109,42 @@ pub struct DiagnosticLabel {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct TextEdit {
-    pub range: SourceRange,
-    pub replacement: String,
-}
-
+/// One proposed edit to program code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct SuggestedFix {
+    /// How to offer the fix, phrased as the action it takes (e.g. "Insert `:`" or "Remove the second `=`").
     pub message: String,
-    pub edits: Vec<TextEdit>,
+    /// The range of text that should be replaced to apply this fix.
+    pub range: SourceRange,
+    /// The text that should replace the range to apply this fix.
+    pub replacement: String,
 }
 
+/// One name to value binding. The value is stringified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct TraceBinding {
+    /// The name of the argument being bound.
     pub name: String,
     /// The bound value, rendered for display.
     pub value: String,
 }
 
+/// One frame of the stack trace where a diagnostic was emitted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct EvaluationFrame {
+    /// Name of the function this stack frame is executing.
     pub function: String,
+    /// Source code range where the function was called.
     pub call: SourceRange,
+    /// Source code range where the function was defined, if known. This will be absent
+    /// for primitives.
     pub definition: Option<SourceRange>,
+    /// Bindings of the function's arguments to their values at this call site.
     pub bindings: Vec<TraceBinding>,
 }
 
@@ -726,10 +775,8 @@ fn replacement_fix(
 ) -> SuggestedFix {
     SuggestedFix {
         message: message.to_string(),
-        edits: vec![TextEdit {
-            range: SourceRange { source, range },
-            replacement: replacement.to_string(),
-        }],
+        range: SourceRange { source, range },
+        replacement: replacement.to_string(),
     }
 }
 
@@ -831,16 +878,14 @@ pub(crate) fn runtime_diagnostic(
             match arity_mismatch.as_ref().and_then(|m| m.comma_insertion) {
                 Some(offset) => parts.fix(SuggestedFix {
                     message: "Separate these dice arguments with a comma".to_string(),
-                    edits: vec![TextEdit {
-                        range: SourceRange {
-                            source: source_id,
-                            range: ByteRange {
-                                start: offset,
-                                end: offset,
-                            },
+                    range: SourceRange {
+                        source: source_id,
+                        range: ByteRange {
+                            start: offset,
+                            end: offset,
                         },
-                        replacement: ",".to_string(),
-                    }],
+                    },
+                    replacement: ",".to_string(),
                 }),
                 None => parts,
             }

@@ -79,7 +79,7 @@ fn run_fixture_directory(directory: &str) {
             };
 
             let report = Engine::new().run_source(program);
-            if let Some(error) = report.error() {
+            if let Some(error) = report.diagnostics.first_error() {
                 paths_with_errors.insert(path_string);
                 println!(
                     "Error in file {}: [{}] {}",

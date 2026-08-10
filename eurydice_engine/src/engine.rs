@@ -8,8 +8,8 @@ use serde::Serialize;
 use crate::{
     ast::{Statement, WithRange},
     diagnostic::{
-        Diagnostic, DiagnosticSeverity, DiagnosticSource, SourceId, UndefinedName,
-        add_later_definition, parse_error, runtime_diagnostic, undefined_name,
+        Diagnostic, DiagnosticSource, Diagnostics, SourceId, UndefinedName, add_later_definition,
+        parse_error, runtime_diagnostic, undefined_name,
     },
     eval::Evaluator,
     grammar,
@@ -25,70 +25,15 @@ pub struct EngineOutput {
     pub distribution: Distribution,
 }
 
-/// Outputs and diagnostics produced by one source submission.
+/// Outputs and diagnostics produced by a source submission.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[must_use]
 #[non_exhaustive]
 pub struct RunReport {
     pub outputs: Vec<EngineOutput>,
-    pub diagnostics: Vec<Diagnostic>,
-    /// Every source the report's diagnostics point into, plus the submission
-    /// that produced it. The submission is always last.
-    pub sources: Vec<DiagnosticSource>,
+    pub diagnostics: Diagnostics,
 }
-
-impl RunReport {
-    pub fn has_errors(&self) -> bool {
-        self.error().is_some()
-    }
-
-    pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
-        self.diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.code.severity() == DiagnosticSeverity::Error)
-    }
-
-    pub fn error(&self) -> Option<&Diagnostic> {
-        self.errors().next()
-    }
-}
-
-/// An error returned by the compiler.
-#[derive(Debug, Clone)]
-pub struct CompileError {
-    report: RunReport,
-}
-
-impl CompileError {
-    /// Returns the diagnostic that caused the compilation to fail.
-    pub fn diagnostic(&self) -> &Diagnostic {
-        self.report
-            .error()
-            .expect("a compilation error report contains an error diagnostic")
-    }
-
-    /// Returns the report that caused the compilation to fail.
-    pub fn report(&self) -> &RunReport {
-        &self.report
-    }
-
-    /// Consumes the error and returns the report that caused the compilation to fail.
-    pub fn into_report(self) -> RunReport {
-        self.report
-    }
-}
-
-impl std::fmt::Display for CompileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.report.error() {
-            Some(error) => write!(f, "{}: {}", error.code, error.summary),
-            None => f.write_str("program compilation failed"),
-        }
-    }
-}
-
-impl std::error::Error for CompileError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -97,12 +42,7 @@ pub struct PrintEvent {
     pub value: String,
 }
 
-/// A compiled program, ready to run.
-///
-/// Parsing is a substantial share of a short program's cost — a quarter to a
-/// third of the total for a small pool program — so a caller that runs the same
-/// source repeatedly should compile it once with [`Program::compile`] and then
-/// run it with [`Engine::run_program`].
+/// A parsed program, ready to run.
 ///
 /// A program carries its own source text and is independent of the engine that
 /// compiled it: it may be run on any engine, any number of times. Each run is a
@@ -117,29 +57,26 @@ pub struct Program {
 impl Program {
     /// Compiles source without involving an engine session.
     ///
-    /// A parse failure is returned as a self-contained report whose source has
-    /// ID zero. Running a source through [`Engine::run_source`] instead assigns
-    /// the failure an ID from that engine's submission history.
-    pub fn compile(source: &str) -> Result<Self, CompileError> {
+    /// A parse failure comes back as [`Diagnostics`] carrying its own source,
+    /// whose ID is zero. Running a source through [`Engine::run_source`] instead
+    /// assigns the failure an ID from that engine's submission history.
+    pub fn compile(source: &str) -> Result<Self, Diagnostics> {
         Self::compile_with_name(None, source)
     }
 
-    pub fn compile_named(name: impl Into<String>, source: &str) -> Result<Self, CompileError> {
+    pub fn compile_named(name: impl Into<String>, source: &str) -> Result<Self, Diagnostics> {
         Self::compile_with_name(Some(name.into()), source)
     }
 
-    fn compile_with_name(name: Option<String>, source: &str) -> Result<Self, CompileError> {
+    fn compile_with_name(name: Option<String>, source: &str) -> Result<Self, Diagnostics> {
         let source_id = SourceId(0);
-        compile_program(source, source_id, name.clone()).map_err(|diagnostic| CompileError {
-            report: RunReport {
-                outputs: Vec::new(),
-                diagnostics: vec![*diagnostic],
-                sources: vec![DiagnosticSource {
-                    id: source_id,
-                    name: name.unwrap_or_else(|| "source".to_string()),
-                    text: source.to_string(),
-                }],
-            },
+        compile_program(source, source_id, name.clone()).map_err(|diagnostic| Diagnostics {
+            entries: vec![*diagnostic],
+            sources: vec![DiagnosticSource {
+                id: source_id,
+                name: name.unwrap_or_else(|| "source".to_string()),
+                text: source.to_string(),
+            }],
         })
     }
 
@@ -281,8 +218,10 @@ impl Engine {
         let sources = self.referenced_sources(&diagnostics);
         RunReport {
             outputs,
-            diagnostics,
-            sources,
+            diagnostics: Diagnostics {
+                entries: diagnostics,
+                sources,
+            },
         }
     }
 
@@ -292,15 +231,12 @@ impl Engine {
             .iter()
             .flat_map(|diagnostic| {
                 let labels = diagnostic.labels().map(|label| label.range.source);
-                let edits = diagnostic
-                    .fix
-                    .iter()
-                    .flat_map(|fix| fix.edits.iter().map(|edit| edit.range.source));
+                let fixes = diagnostic.fix.iter().map(|fix| fix.range.source);
                 let frames = diagnostic.trace.iter().flat_map(|frame| {
                     std::iter::once(frame.call.source)
                         .chain(frame.definition.map(|range| range.source))
                 });
-                labels.chain(edits).chain(frames)
+                labels.chain(fixes).chain(frames)
             })
             .collect::<HashSet<_>>();
         // The current submission is always included: a frontend renders it
@@ -373,7 +309,7 @@ fn compile_program(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::{DiagnosticCode, SuggestedFix};
+    use crate::diagnostic::{DiagnosticCode, DiagnosticSeverity, SuggestedFix};
 
     /// The fix a diagnostic is expected to carry.
     fn fix(diagnostic: &Diagnostic) -> &SuggestedFix {
@@ -383,7 +319,7 @@ mod tests {
     /// Runs a submission that is expected to succeed, returning its outputs.
     fn run(engine: &mut Engine, source: &str) -> Vec<EngineOutput> {
         let report = engine.run_source(source);
-        assert_eq!(report.error(), None, "{source}");
+        assert_eq!(report.diagnostics.first_error(), None, "{source}");
         report.outputs
     }
 
@@ -396,7 +332,7 @@ mod tests {
 
         for _ in 0..3 {
             let report = engine.run_program(&program);
-            assert_eq!(report.error(), None);
+            assert_eq!(report.diagnostics.first_error(), None);
             assert_eq!(report.outputs[0].distribution.entries, vec![(vec![1], 1.0)]);
         }
     }
@@ -410,29 +346,28 @@ mod tests {
 
         let report = Engine::new().run_program(&program);
 
-        assert_eq!(report.error(), None);
+        assert_eq!(report.diagnostics.first_error(), None);
         assert_eq!(
             report.outputs[0].distribution.entries,
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
         // The run registered the program's text as its own submission, so the
         // report can be rendered without the caller supplying the source.
-        assert_eq!(report.sources.len(), 1);
-        assert_eq!(report.sources[0].text, "output 2d2");
+        assert_eq!(report.diagnostics.sources.len(), 1);
+        assert_eq!(report.diagnostics.sources[0].text, "output 2d2");
     }
 
-    /// A failed parse comes back as a report rather than a bare diagnostic,
-    /// because rendering it needs the source the diagnostic points into.
+    /// A failed parse carries its source rather than a bare diagnostic, because
+    /// rendering it needs the source the diagnostic points into.
     #[test]
     fn a_failed_compile_reports_against_its_own_source() {
-        let error = Program::compile("output (1").expect_err("does not parse");
-        let report = error.report();
+        let diagnostics = Program::compile("output (1").expect_err("does not parse");
 
-        let error = report.error().expect("a parse error");
+        let error = diagnostics.first_error().expect("a parse error");
         assert_eq!(error.code, DiagnosticCode::UnclosedDelimiter);
         let range = error.primary_label.range;
-        assert_eq!(report.sources.len(), 1);
-        assert_eq!(report.sources[0].id, range.source);
+        assert_eq!(diagnostics.sources.len(), 1);
+        assert_eq!(diagnostics.sources[0].id, range.source);
     }
 
     #[test]
@@ -450,20 +385,26 @@ mod tests {
     fn named_programs_keep_their_name_for_parse_and_runtime_diagnostics() {
         let compile_error =
             Program::compile_named("broken.eurydice", "output (").expect_err("does not parse");
-        assert_eq!(compile_error.report().sources[0].name, "broken.eurydice");
+        assert_eq!(compile_error.sources[0].name, "broken.eurydice");
 
         let program = Program::compile_named("rules.eurydice", "output MISSING")
             .expect("runtime errors still compile");
         assert_eq!(program.source_name(), Some("rules.eurydice"));
         let report = Engine::new().run_program(&program);
-        assert_eq!(report.sources.last().unwrap().name, "rules.eurydice");
+        assert_eq!(
+            report.diagnostics.sources.last().unwrap().name,
+            "rules.eurydice"
+        );
     }
 
     #[test]
     fn direct_source_runs_can_be_named() {
         let report = Engine::new().run_named_source("request.eurydice", "output MISSING");
 
-        assert_eq!(report.sources.last().unwrap().name, "request.eurydice");
+        assert_eq!(
+            report.diagnostics.sources.last().unwrap().name,
+            "request.eurydice"
+        );
     }
 
     #[test]
@@ -525,12 +466,12 @@ mod tests {
     #[test]
     fn reports_parse_and_runtime_ranges() {
         let parse_report = Engine::new().run_source("output (");
-        let parse_error = parse_report.error().unwrap();
+        let parse_error = parse_report.diagnostics.first_error().unwrap();
         assert!(parse_error.code.is_incomplete());
         assert_eq!(parse_error.primary_label.range.range.start, 8);
 
         let runtime_report = Engine::new().run_source("output MISSING");
-        let runtime_error = runtime_report.error().unwrap();
+        let runtime_error = runtime_report.diagnostics.first_error().unwrap();
         assert!(!runtime_error.code.is_incomplete());
         assert_eq!(runtime_error.primary_label.range.range.start, 7);
     }
@@ -541,7 +482,8 @@ mod tests {
         assert!(
             engine
                 .run_source("output 1\noutput MISSING")
-                .error()
+                .diagnostics
+                .first_error()
                 .is_some()
         );
 
@@ -561,9 +503,9 @@ mod tests {
 
         for (source, code, replacement) in cases {
             let report = Engine::new().run_source(source);
-            let error = report.error().unwrap();
+            let error = report.diagnostics.first_error().unwrap();
             assert_eq!(error.code, code);
-            assert_eq!(fix(error).edits[0].replacement, replacement);
+            assert_eq!(fix(error).replacement, replacement);
         }
     }
 
@@ -580,7 +522,7 @@ mod tests {
     #[test]
     fn misplaced_keywords_are_not_mistaken_for_lowercase_variables() {
         let report = Engine::new().run_source("output result");
-        let error = report.error().unwrap();
+        let error = report.diagnostics.first_error().unwrap();
 
         assert_eq!(error.code, DiagnosticCode::UnexpectedToken);
         assert!(error.fix.is_none());
@@ -591,7 +533,7 @@ mod tests {
         let report = Engine::new().run_source("result: 1");
 
         assert_eq!(
-            report.error().map(|error| error.code),
+            report.diagnostics.first_error().map(|error| error.code),
             Some(DiagnosticCode::ResultOutsideFunction)
         );
     }
@@ -602,10 +544,10 @@ mod tests {
 
         for source in cases {
             let report = Engine::new().run_source(source);
-            let error = report.error().unwrap();
+            let error = report.diagnostics.first_error().unwrap();
 
             assert_eq!(error.code, DiagnosticCode::UnclosedDelimiter, "{source}");
-            assert_eq!(fix(error).edits[0].replacement, ")", "{source}");
+            assert_eq!(fix(error).replacement, ")", "{source}");
         }
     }
 
@@ -613,7 +555,7 @@ mod tests {
     fn explains_that_top_level_expressions_need_output() {
         for source in ["1d6", "D: d6\nD + D"] {
             let report = Engine::new().run_source(source);
-            let error = report.error().unwrap();
+            let error = report.diagnostics.first_error().unwrap();
 
             assert_eq!(error.code, DiagnosticCode::UnexpectedToken);
             assert_eq!(
@@ -629,7 +571,7 @@ mod tests {
         let mut engine = Engine::new();
         run(&mut engine, "FOOD: 1");
         let report = engine.run_source("output FOO\nFOO: 2");
-        let error = report.error().unwrap();
+        let error = report.diagnostics.first_error().unwrap();
 
         assert_eq!(error.primary_label.message, None);
         assert!(
@@ -666,16 +608,16 @@ mod tests {
             ("output [tuple 2d6 d8]", " d8]"),
         ] {
             let report = Engine::new().run_source(source);
-            let error = report.error().unwrap();
+            let error = report.diagnostics.first_error().unwrap();
 
             assert_eq!(error.code, DiagnosticCode::UndefinedFunction, "{source}");
-            let edit = &fix(error).edits[0];
+            let suggestion = fix(error);
             assert_eq!(
-                &report.sources[0].text[edit.range.range.start..],
+                &report.diagnostics.sources[0].text[suggestion.range.range.start..],
                 remainder,
                 "{source}"
             );
-            assert_eq!(edit.replacement, ",", "{source}");
+            assert_eq!(suggestion.replacement, ",", "{source}");
         }
     }
 
@@ -683,7 +625,7 @@ mod tests {
     #[test]
     fn does_not_suggest_a_comma_when_no_arity_takes_more_arguments() {
         let report = Engine::new().run_source("output [absolute 1, 2]");
-        let error = report.error().unwrap();
+        let error = report.diagnostics.first_error().unwrap();
 
         assert_eq!(error.code, DiagnosticCode::UndefinedFunction);
         assert!(error.fix.is_none());
@@ -697,7 +639,7 @@ function: pick I:n {
 }
 output [pick d3]";
         let report = Engine::new().run_source(source);
-        let error = report.error().unwrap();
+        let error = report.diagnostics.first_error().unwrap();
 
         assert_eq!(error.code, DiagnosticCode::OutOfRange);
         assert_eq!(error.trace.len(), 1);
@@ -710,7 +652,7 @@ output [pick d3]";
     fn primitive_diagnostics_identify_invalid_field_arguments() {
         let source = "output [field d2 of 1]";
         let report = Engine::new().run_source(source);
-        let error = report.error().unwrap();
+        let error = report.diagnostics.first_error().unwrap();
 
         assert_eq!(error.code, DiagnosticCode::FunctionArgument);
         assert_eq!(
@@ -732,7 +674,7 @@ output [pick d3]";
     #[test]
     fn primitive_diagnostics_report_every_bad_tuple_or_field_argument() {
         let nested = Engine::new().run_source("output [tuple [tuple 1, 2], [tuple 3, 4]]");
-        let nested_error = nested.error().unwrap();
+        let nested_error = nested.diagnostics.first_error().unwrap();
         assert_eq!(nested_error.code, DiagnosticCode::FunctionArgument);
         assert_eq!(
             nested_error.summary,
@@ -756,7 +698,7 @@ output [pick d3]";
         );
 
         let field = Engine::new().run_source("output [field [tuple 1, 2] of 1]");
-        let field_error = field.error().unwrap();
+        let field_error = field.diagnostics.first_error().unwrap();
         assert_eq!(field_error.code, DiagnosticCode::FunctionArgument);
         assert_eq!(field_error.secondary_labels.len(), 1);
         assert!(
@@ -799,7 +741,7 @@ output [pick d3]";
     #[test]
     fn primitive_diagnostics_explain_outcome_and_value_constraints() {
         let bounds = Engine::new().run_source("output [field 3 of [tuple 1, 2]]");
-        let bounds_error = bounds.error().unwrap();
+        let bounds_error = bounds.diagnostics.first_error().unwrap();
         assert_eq!(bounds_error.code, DiagnosticCode::OutOfRange);
         assert_eq!(
             bounds_error.summary,
@@ -816,7 +758,7 @@ output [pick d3]";
 
         let negative = Engine::new().run_source("output [highest -1 of 2d6]");
         assert_eq!(
-            negative.error().unwrap().summary,
+            negative.diagnostics.first_error().unwrap().summary,
             "`[highest COUNT:n of POOL:d]` needs a nonnegative count"
         );
     }
@@ -848,7 +790,7 @@ output [pick d3]";
 
         for (source, code, expected_message) in cases {
             let report = Engine::new().run_source(source);
-            let error = report.error().unwrap();
+            let error = report.diagnostics.first_error().unwrap();
             assert_eq!(error.code, code, "{source}");
             let message = error.primary_label.message.as_deref().unwrap_or_default();
             // The label names the type that was found as well as the one the
@@ -861,7 +803,7 @@ output [pick d3]";
     #[test]
     fn output_label_errors_explain_the_output_shape_and_arity() {
         let non_tuple = Engine::new().run_source("output 1 labeled \"Value\"");
-        let error = non_tuple.error().unwrap();
+        let error = non_tuple.diagnostics.first_error().unwrap();
         assert_eq!(error.code, DiagnosticCode::LabelsRequireTuple);
         assert_eq!(error.secondary_labels.len(), 1);
         assert!(
@@ -873,7 +815,7 @@ output [pick d3]";
         );
 
         let wrong_count = Engine::new().run_source("output [tuple 1 2] labeled \"Only one\"");
-        let error = wrong_count.error().unwrap();
+        let error = wrong_count.diagnostics.first_error().unwrap();
         assert_eq!(
             error.summary,
             "This tuple has 2 fields, but 1 output label was provided"
@@ -884,13 +826,21 @@ output [pick d3]";
     #[test]
     fn non_primitive_diagnostics_do_not_repeat_the_summary_as_a_label() {
         let report = Engine::new().run_source("output [missing]");
-        assert_eq!(report.error().unwrap().primary_label.message, None);
+        assert_eq!(
+            report
+                .diagnostics
+                .first_error()
+                .unwrap()
+                .primary_label
+                .message,
+            None
+        );
 
         // A label may still carry something the summary does not. Adding two
         // symbols is reported at the value that cannot be added, which the
         // summary has no room to name.
         let report = Engine::new().run_source("enum { A, B } output A + B");
-        let error = report.error().unwrap();
+        let error = report.diagnostics.first_error().unwrap();
         assert_eq!(error.summary, "this operator requires numbers");
         assert_eq!(
             error.primary_label.message.as_deref(),
@@ -898,7 +848,7 @@ output [pick d3]";
         );
 
         let operator = Engine::new().run_source("output d6 @ d6");
-        let error = operator.error().unwrap();
+        let error = operator.diagnostics.first_error().unwrap();
         assert_eq!(
             error.summary,
             "Operator `@` expects an integer or a sequence"
@@ -919,15 +869,21 @@ output [pick d3]";
 
         // The failed submission is still rendered against its own source.
         let failed = engine.run_source("output (");
-        assert_eq!(failed.sources.len(), 1);
+        assert_eq!(failed.diagnostics.sources.len(), 1);
         assert_eq!(
-            failed.error().unwrap().primary_label.range.source,
+            failed
+                .diagnostics
+                .first_error()
+                .unwrap()
+                .primary_label
+                .range
+                .source,
             SourceId(0)
         );
 
         let succeeded = engine.run_source("output 1");
-        assert_eq!(succeeded.sources.len(), 1);
-        assert_eq!(succeeded.sources[0].id, SourceId(1));
+        assert_eq!(succeeded.diagnostics.sources.len(), 1);
+        assert_eq!(succeeded.diagnostics.sources[0].id, SourceId(1));
     }
 
     /// An interactive frontend resubmits a growing program on every keystroke,
@@ -957,27 +913,27 @@ output [pick d3]";
         let mut engine = Engine::new();
         run(&mut engine, "function: broken { result: MISSING }");
         let report = engine.run_source("output [broken]");
-        let error = report.error().unwrap();
+        let error = report.diagnostics.first_error().unwrap();
 
         assert_eq!(error.primary_label.range.source, SourceId(0));
         assert_eq!(error.trace[0].call.source, SourceId(1));
-        assert_eq!(report.sources.len(), 2);
+        assert_eq!(report.diagnostics.sources.len(), 2);
     }
 
     #[test]
     fn warns_when_the_same_pool_is_sampled_independently() {
         let report = Engine::new().run_source("D: d6\noutput D + D");
-        assert!(report.error().is_none());
+        assert!(report.diagnostics.first_error().is_none());
         assert_eq!(
-            report.diagnostics[0].code,
+            report.diagnostics.entries[0].code,
             DiagnosticCode::IndependentPoolReuse
         );
-        let help = report.diagnostics[0].help.as_deref().unwrap();
+        let help = report.diagnostics.entries[0].help.as_deref().unwrap();
         assert!(help.contains("stores its distribution"));
         assert!(help.contains("To reuse one roll"));
 
         let no_warning = Engine::new().run_source("D: d6\noutput #D + #D");
-        assert!(no_warning.diagnostics.is_empty());
+        assert!(no_warning.diagnostics.entries.is_empty());
     }
 
     #[test]
@@ -989,7 +945,7 @@ output [pick d3]";
 
         for source in cases {
             let report = Engine::new().run_source(source);
-            let warning = &report.diagnostics[0];
+            let warning = &report.diagnostics.entries[0];
             assert_eq!(warning.code, DiagnosticCode::MissingResult, "{source}");
             assert_eq!(warning.code.severity(), DiagnosticSeverity::Warning);
             let help = warning.help.as_deref().unwrap();
@@ -1013,7 +969,7 @@ output [pick d3]";
 
         for source in cases {
             let report = Engine::new().run_source(source);
-            assert!(report.diagnostics.is_empty(), "{source}");
+            assert!(report.diagnostics.entries.is_empty(), "{source}");
         }
     }
 
@@ -1040,7 +996,7 @@ output [pick d3]";
             "output [reroll d{}]",
         ] {
             let report = Engine::new().run_source(source);
-            assert_eq!(report.error(), None, "{source}");
+            assert_eq!(report.diagnostics.first_error(), None, "{source}");
             assert_eq!(report.outputs.len(), 1, "{source}");
             assert_eq!(report.outputs[0].distribution.entries, vec![], "{source}");
         }
@@ -1054,7 +1010,7 @@ output [pick d3]";
     fn an_empty_die_outputs_no_outcomes_whatever_its_type() {
         for source in ["output d{}", "output d{5:0}", "output d{[tuple 5 6]:0}"] {
             let report = Engine::new().run_source(source);
-            assert_eq!(report.error(), None, "{source}");
+            assert_eq!(report.diagnostics.first_error(), None, "{source}");
             assert_eq!(report.outputs[0].distribution.entries, vec![], "{source}");
         }
     }
@@ -1078,15 +1034,18 @@ output [pick d3]";
     #[test]
     fn warns_when_depth_settings_bound_results() {
         let explode = Engine::new().run_source("output [explode d6]");
-        assert_eq!(explode.diagnostics[0].code, DiagnosticCode::ExplodeDepth);
-        let help = explode.diagnostics[0].help.as_deref().unwrap();
+        assert_eq!(
+            explode.diagnostics.entries[0].code,
+            DiagnosticCode::ExplodeDepth
+        );
+        let help = explode.diagnostics.entries[0].help.as_deref().unwrap();
         assert!(help.contains("bounded by this setting"));
         assert!(help.contains("Change it with"));
 
         let recursion = Engine::new()
             .run_source("function: recurse N:n { result: [recurse N] }\noutput [recurse 1]");
         assert_eq!(
-            recursion.diagnostics[0].code,
+            recursion.diagnostics.entries[0].code,
             DiagnosticCode::MaximumFunctionDepth
         );
     }
