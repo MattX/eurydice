@@ -339,11 +339,13 @@ fn create_anydice_result(
 ) -> Result<AnyDiceResult, &'static str> {
     match distribution.fields.as_slice() {
         [FieldSchema::Int] => {}
-        [FieldSchema::Enum { .. }] => return Err("AnyDice fixtures must have numeric outputs"),
+        [FieldSchema::Categorical { .. }] => {
+            return Err("AnyDice fixtures must have numeric outputs");
+        }
         _ => return Err("AnyDice fixtures must have a single output field"),
     }
     let probabilities = distribution
-        .probabilities
+        .entries
         .iter()
         .map(|(values, probability)| (values[0], *probability))
         .collect::<Vec<_>>();
@@ -387,12 +389,13 @@ fn create_distribution_result(name: &str, distribution: Distribution) -> Distrib
             .iter()
             .map(|field| match field {
                 FieldSchema::Int => "#".to_owned(),
-                FieldSchema::Enum { .. } => "Symbol".to_owned(),
+                FieldSchema::Categorical { .. } => "Symbol".to_owned(),
+                _ => "Value".to_owned(),
             })
             .collect()
     });
     let outcomes = distribution
-        .probabilities
+        .entries
         .into_iter()
         .map(|(values, probability)| {
             let values = values
@@ -400,11 +403,12 @@ fn create_distribution_result(name: &str, distribution: Distribution) -> Distrib
                 .zip(&distribution.fields)
                 .map(|(value, field)| match field {
                     FieldSchema::Int => value.to_string(),
-                    FieldSchema::Enum { labels, .. } => usize::try_from(value)
+                    FieldSchema::Categorical { labels, .. } => usize::try_from(value)
                         .ok()
                         .and_then(|index| labels.get(index))
                         .cloned()
                         .unwrap_or_else(|| value.to_string()),
+                    _ => value.to_string(),
                 })
                 .collect();
             (values, probability * 100.0)

@@ -6,7 +6,7 @@
  */
 export type FieldSchema =
   | { kind: "int" }
-  | { kind: "enum"; labels: string[] };
+  | { kind: "categorical"; labels: string[] };
 
 /**
  * The canonical representation of every output distribution. A scalar has one
@@ -15,7 +15,7 @@ export type FieldSchema =
 export interface Distribution {
   fields: FieldSchema[];
   fieldNames?: string[];
-  probabilities: [number[], number][];
+  entries: [number[], number][];
 }
 
 /**
@@ -25,10 +25,10 @@ export interface Distribution {
  */
 export type ScalarDistribution = Omit<
   Distribution,
-  "fields" | "probabilities"
+  "fields" | "entries"
 > & {
   fields: [FieldSchema];
-  probabilities: [[number], number][];
+  entries: [[number], number][];
 };
 
 export type NamedDistribution = [string, Distribution];

@@ -4,12 +4,12 @@ import {
 } from "../util";
 
 export function scalarDistribution(
-  probabilities: [number, number][],
+  entries: [number, number][],
   field: FieldSchema = { kind: "int" }
 ): ScalarDistribution {
   return {
     fields: [field],
-    probabilities: probabilities.map(([outcome, probability]) => [
+    entries: entries.map(([outcome, probability]) => [
       [outcome],
       probability,
     ]),

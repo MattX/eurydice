@@ -19,6 +19,7 @@ use crate::{
 /// A named distribution produced by an `output` statement.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct EngineOutput {
     pub name: String,
     pub distribution: Distribution,
@@ -27,6 +28,8 @@ pub struct EngineOutput {
 /// Outputs and diagnostics produced by one source submission.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[must_use]
+#[non_exhaustive]
 pub struct RunReport {
     pub outputs: Vec<EngineOutput>,
     pub diagnostics: Vec<EngineDiagnostic>,
@@ -36,11 +39,58 @@ pub struct RunReport {
 }
 
 impl RunReport {
-    pub fn error(&self) -> Option<&EngineDiagnostic> {
+    pub fn has_errors(&self) -> bool {
+        self.error().is_some()
+    }
+
+    pub fn errors(&self) -> impl Iterator<Item = &EngineDiagnostic> {
         self.diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     }
+
+    pub fn error(&self) -> Option<&EngineDiagnostic> {
+        self.errors().next()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompileError {
+    report: RunReport,
+}
+
+impl CompileError {
+    pub fn diagnostic(&self) -> &EngineDiagnostic {
+        self.report
+            .error()
+            .expect("a compilation error report contains an error diagnostic")
+    }
+
+    pub fn report(&self) -> &RunReport {
+        &self.report
+    }
+
+    pub fn into_report(self) -> RunReport {
+        self.report
+    }
+}
+
+impl std::fmt::Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.report.error() {
+            Some(error) => write!(f, "{}: {}", error.code, error.summary),
+            None => f.write_str("program compilation failed"),
+        }
+    }
+}
+
+impl std::error::Error for CompileError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PrintEvent {
+    pub name: Option<String>,
+    pub value: String,
 }
 
 /// A compiled program, ready to run.
@@ -55,6 +105,7 @@ impl RunReport {
 /// separate submission, exactly as if the text had been submitted again.
 #[derive(Debug, Clone)]
 pub struct Program {
+    name: Option<String>,
     text: String,
     statements: Vec<WithRange<Statement>>,
 }
@@ -65,22 +116,36 @@ impl Program {
     /// A parse failure is returned as a self-contained report whose source has
     /// ID zero. Running a source through [`Engine::run_source`] instead assigns
     /// the failure an ID from that engine's submission history.
-    pub fn compile(source: &str) -> Result<Self, RunReport> {
+    pub fn compile(source: &str) -> Result<Self, CompileError> {
+        Self::compile_with_name(None, source)
+    }
+
+    pub fn compile_named(name: impl Into<String>, source: &str) -> Result<Self, CompileError> {
+        Self::compile_with_name(Some(name.into()), source)
+    }
+
+    fn compile_with_name(name: Option<String>, source: &str) -> Result<Self, CompileError> {
         let source_id = SourceId(0);
-        compile_program(source, source_id).map_err(|diagnostic| RunReport {
-            outputs: Vec::new(),
-            diagnostics: vec![*diagnostic],
-            sources: vec![DiagnosticSource {
-                id: source_id,
-                name: "source".to_string(),
-                text: source.to_string(),
-            }],
+        compile_program(source, source_id, name.clone()).map_err(|diagnostic| CompileError {
+            report: RunReport {
+                outputs: Vec::new(),
+                diagnostics: vec![*diagnostic],
+                sources: vec![DiagnosticSource {
+                    id: source_id,
+                    name: name.unwrap_or_else(|| "source".to_string()),
+                    text: source.to_string(),
+                }],
+            },
         })
     }
 
     /// The source text this program was parsed from.
     pub fn source(&self) -> &str {
         &self.text
+    }
+
+    pub fn source_name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 }
 
@@ -113,9 +178,13 @@ impl Engine {
     /// Installs the callback used by `print` statements.
     pub fn set_print_callback<F>(&mut self, callback: F)
     where
-        F: Fn(String, String) + 'static,
+        F: FnMut(PrintEvent) + 'static,
     {
         self.evaluator.set_print_callback(Box::new(callback));
+    }
+
+    pub fn clear_print_callback(&mut self) {
+        self.evaluator.clear_print_callback();
     }
 
     /// Executes a compiled program, returning its outputs and any diagnostics
@@ -129,7 +198,7 @@ impl Engine {
     /// function, so the report carries the text of every source its own
     /// diagnostics reference.
     pub fn run_program(&mut self, program: &Program) -> RunReport {
-        let source_id = self.begin_submission(&program.text);
+        let source_id = self.begin_submission(program.name.as_deref(), &program.text);
         self.execute_report(program, source_id)
     }
 
@@ -139,17 +208,25 @@ impl Engine {
     /// To run one program repeatedly, compile it once with [`Program::compile`]
     /// and call [`Engine::run_program`] directly.
     pub fn run_source(&mut self, source: &str) -> RunReport {
-        let source_id = self.begin_submission(source);
-        match compile_program(source, source_id) {
+        self.run_source_with_name(None, source)
+    }
+
+    pub fn run_named_source(&mut self, name: impl Into<String>, source: &str) -> RunReport {
+        self.run_source_with_name(Some(name.into()), source)
+    }
+
+    fn run_source_with_name(&mut self, name: Option<String>, source: &str) -> RunReport {
+        let source_id = self.begin_submission(name.as_deref(), source);
+        match compile_program(source, source_id, name) {
             Ok(program) => self.execute_report(&program, source_id),
             Err(diagnostic) => self.report(Vec::new(), vec![*diagnostic]),
         }
     }
 
     /// Starts a fresh submission and returns the ID assigned to its source.
-    fn begin_submission(&mut self, source: &str) -> SourceId {
+    fn begin_submission(&mut self, name: Option<&str>, source: &str) -> SourceId {
         self.collect_garbage();
-        let source_id = self.register_source(source);
+        let source_id = self.register_source(name, source);
         // Outputs belong to one submission and must never leak out of a failed
         // previous run.
         self.evaluator.take_outputs();
@@ -183,12 +260,14 @@ impl Engine {
     }
 
     /// Records a submission's text so diagnostics can point into it.
-    fn register_source(&mut self, text: &str) -> SourceId {
+    fn register_source(&mut self, name: Option<&str>, text: &str) -> SourceId {
         let source_id = SourceId(self.next_source_id);
         self.next_source_id += 1;
         self.sources.push(DiagnosticSource {
             id: source_id,
-            name: format!("submission {}", source_id.0 + 1),
+            name: name
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("submission {}", source_id.0 + 1)),
             text: text.to_string(),
         });
         source_id
@@ -272,10 +351,15 @@ impl Engine {
     }
 }
 
-fn compile_program(source: &str, source_id: SourceId) -> Result<Program, Box<EngineDiagnostic>> {
+fn compile_program(
+    source: &str,
+    source_id: SourceId,
+    name: Option<String>,
+) -> Result<Program, Box<EngineDiagnostic>> {
     grammar::BodyParser::new()
         .parse(source)
         .map(|statements| Program {
+            name,
             text: source.to_string(),
             statements,
         })
@@ -304,10 +388,7 @@ mod tests {
         for _ in 0..3 {
             let report = engine.run_program(&program);
             assert_eq!(report.error(), None);
-            assert_eq!(
-                report.outputs[0].distribution.probabilities,
-                vec![(vec![1], 1.0)]
-            );
+            assert_eq!(report.outputs[0].distribution.entries, vec![(vec![1], 1.0)]);
         }
     }
 
@@ -322,7 +403,7 @@ mod tests {
 
         assert_eq!(report.error(), None);
         assert_eq!(
-            report.outputs[0].distribution.probabilities,
+            report.outputs[0].distribution.entries,
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
         // The run registered the program's text as its own submission, so the
@@ -335,7 +416,8 @@ mod tests {
     /// because rendering it needs the source the diagnostic points into.
     #[test]
     fn a_failed_compile_reports_against_its_own_source() {
-        let report = Program::compile("output (1").expect_err("does not parse");
+        let error = Program::compile("output (1").expect_err("does not parse");
+        let report = error.report();
 
         let error = report.error().expect("a parse error");
         assert_eq!(error.code, DiagnosticCode::UnclosedDelimiter);
@@ -345,13 +427,65 @@ mod tests {
     }
 
     #[test]
+    fn compile_errors_integrate_with_standard_error_handling() {
+        fn compile() -> Result<(), Box<dyn std::error::Error>> {
+            Program::compile("output (1")?;
+            Ok(())
+        }
+
+        let error = compile().expect_err("does not parse");
+        assert!(error.to_string().contains("syntax.unclosed_delimiter"));
+    }
+
+    #[test]
+    fn named_programs_keep_their_name_for_parse_and_runtime_diagnostics() {
+        let compile_error =
+            Program::compile_named("broken.eurydice", "output (").expect_err("does not parse");
+        assert_eq!(compile_error.report().sources[0].name, "broken.eurydice");
+
+        let program = Program::compile_named("rules.eurydice", "output MISSING")
+            .expect("runtime errors still compile");
+        assert_eq!(program.source_name(), Some("rules.eurydice"));
+        let report = Engine::new().run_program(&program);
+        assert_eq!(report.sources.last().unwrap().name, "rules.eurydice");
+    }
+
+    #[test]
+    fn direct_source_runs_can_be_named() {
+        let report = Engine::new().run_named_source("request.eurydice", "output MISSING");
+
+        assert_eq!(report.sources.last().unwrap().name, "request.eurydice");
+    }
+
+    #[test]
+    fn print_callbacks_are_mutable_and_removable() {
+        use std::{cell::RefCell, rc::Rc};
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let callback_events = Rc::clone(&events);
+        let mut engine = Engine::new();
+        engine.set_print_callback(move |event| callback_events.borrow_mut().push(event));
+
+        let _ = engine.run_source("print 1\nprint 2 named \"two\"");
+        engine.clear_print_callback();
+        let _ = engine.run_source("print 3");
+
+        let events = events.borrow();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name, None);
+        assert_eq!(events[0].value, "1");
+        assert_eq!(events[1].name.as_deref(), Some("two"));
+        assert_eq!(events[1].value, "2");
+    }
+
+    #[test]
     fn runs_source_to_named_distributions() {
         let outputs = run(&mut Engine::new(), "output 2d2 named \"roll\"");
 
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].name, "roll");
         assert_eq!(
-            outputs[0].distribution.probabilities,
+            outputs[0].distribution.entries,
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
     }
@@ -374,7 +508,7 @@ mod tests {
 
         let outputs = run(&mut engine, "output X");
 
-        assert_eq!(outputs[0].distribution.probabilities, vec![(vec![4], 1.0)]);
+        assert_eq!(outputs[0].distribution.entries, vec![(vec![4], 1.0)]);
     }
 
     #[test]
@@ -429,7 +563,7 @@ mod tests {
 
         let outputs = run(&mut engine, "output [f 3]");
 
-        assert_eq!(outputs[0].distribution.probabilities, vec![(vec![3], 1.0)]);
+        assert_eq!(outputs[0].distribution.entries, vec![(vec![3], 1.0)]);
     }
 
     #[test]
@@ -640,7 +774,7 @@ output [pick d3]";
             let mut engine = Engine::new();
             let outputs = run(&mut engine, source);
             assert_eq!(
-                outputs[0].distribution.probabilities,
+                outputs[0].distribution.entries,
                 vec![(vec![0], 1.0)],
                 "{source}"
             );
@@ -884,11 +1018,7 @@ output [pick d3]";
             let report = Engine::new().run_source(source);
             assert_eq!(report.error(), None, "{source}");
             assert_eq!(report.outputs.len(), 1, "{source}");
-            assert_eq!(
-                report.outputs[0].distribution.probabilities,
-                vec![],
-                "{source}"
-            );
+            assert_eq!(report.outputs[0].distribution.entries, vec![], "{source}");
         }
     }
 
@@ -901,11 +1031,7 @@ output [pick d3]";
         for source in ["output d{}", "output d{5:0}", "output d{[tuple 5 6]:0}"] {
             let report = Engine::new().run_source(source);
             assert_eq!(report.error(), None, "{source}");
-            assert_eq!(
-                report.outputs[0].distribution.probabilities,
-                vec![],
-                "{source}"
-            );
+            assert_eq!(report.outputs[0].distribution.entries, vec![], "{source}");
         }
     }
 
@@ -918,7 +1044,7 @@ output [pick d3]";
             let outputs = run(&mut Engine::new(), source);
 
             assert_eq!(
-                outputs[0].distribution.probabilities,
+                outputs[0].distribution.entries,
                 vec![(vec![0], 1.0)],
                 "{source}"
             );

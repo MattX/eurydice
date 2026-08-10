@@ -38,7 +38,7 @@ function generateWideBlock(
         escapeCSVField(outcomeLabel(outcome)),
         ...distributions.map(([, distribution]) =>
           (
-            distribution.probabilities.find(
+            distribution.entries.find(
               ([[value]]) => value === outcome
             )?.[1] ?? 0
           ).toString()
@@ -93,7 +93,7 @@ export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
     ([, distribution]) => distribution.fields.length > 1
   );
   const hasSymbols = distributions.some(
-    ([, distribution]) => distribution.fields[0].kind === "enum"
+    ([, distribution]) => distribution.fields[0].kind === "categorical"
   );
   const blocks: string[] = [];
   if (distributions.length > 0 && hasSymbols) {
@@ -102,7 +102,7 @@ export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
     const outcomes = Array.from(
       new Set(
         distributions.flatMap(([, distribution]) =>
-          distribution.probabilities.map(([[outcome]]) => outcome)
+          distribution.entries.map(([[outcome]]) => outcome)
         )
       )
     ).sort((a, b) => a - b);
@@ -131,8 +131,8 @@ export function generateAnyDiceFormatCSV(outputs: NamedDistribution[]): string {
   numericDistributions.forEach(([name, distribution], index) => {
     if (index > 0) csv += "\n";
 
-    const outcomes = distribution.probabilities.map(([[outcome]]) => outcome);
-    const probabilities = distribution.probabilities.map(
+    const outcomes = distribution.entries.map(([[outcome]]) => outcome);
+    const probabilities = distribution.entries.map(
       ([, probability]) => probability
     );
 
@@ -151,7 +151,7 @@ export function generateAnyDiceFormatCSV(outputs: NamedDistribution[]): string {
     csv += `${escapeCSVField(name)},${mean},${stdDev},${min},${max}\n`;
     csv += "#,%\n";
 
-    distribution.probabilities.forEach(([[outcome], probability]) => {
+    distribution.entries.forEach(([[outcome], probability]) => {
       csv += `${outcome},${(probability * 100).toFixed(10)}\n`;
     });
   });

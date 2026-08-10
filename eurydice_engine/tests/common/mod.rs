@@ -28,7 +28,7 @@ pub fn probabilities(program: &str) -> Vec<Vec<(Vec<i32>, f64)>> {
     run(program)
         .unwrap_or_else(|error| panic!("{program}: {}", error.summary))
         .into_iter()
-        .map(|distribution| distribution.probabilities)
+        .map(|distribution| distribution.entries)
         .collect()
 }
 

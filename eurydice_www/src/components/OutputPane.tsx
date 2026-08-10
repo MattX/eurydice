@@ -95,7 +95,7 @@ function OutputSections({
   distributions: NamedScalarDistribution[];
 }) {
   const hasSymbols = React.useMemo(
-    () => distributions.some(([, distribution]) => distribution.fields[0].kind === "enum"),
+    () => distributions.some(([, distribution]) => distribution.fields[0].kind === "categorical"),
     [distributions]
   );
   if (distributions.length === 0) return null;
@@ -138,7 +138,7 @@ function NumericOutputSection({
   // Keep the range selection plugin's offset in sync with the minimum numeric outcome.
   React.useEffect(() => {
     const outcomes = distributions.flatMap(([, distribution]) =>
-      distribution.probabilities.map(([[outcome]]) => outcome)
+      distribution.entries.map(([[outcome]]) => outcome)
     );
     if (outcomes.length > 0) {
       plugin.setOffset(Math.min(...outcomes));

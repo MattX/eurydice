@@ -27,10 +27,8 @@ cast_precision_loss = "warn"
 cast_sign_loss = "warn"
 
 [features]
-default = ["serde"]
-# Derives `Serialize` on the public types. On by default: the wasm frontend
-# serializes a whole `RunReport`, and it is what most callers want. Turn it off
-# with `default-features = false` to keep serde out of the dependency graph.
+default = []
+# Derives `Serialize` on the public types for frontends that need a wire format.
 serde = ["dep:serde"]
 
 [dependencies]

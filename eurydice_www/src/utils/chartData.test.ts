@@ -239,15 +239,15 @@ describe('chartData', () => {
       ['numeric', scalarDistribution([[1, 1]])],
       ['attack', scalarDistribution(
         [[0, 0.25], [1, 0.75]],
-        { kind: 'enum', labels: ['MISS', 'HIT'] },
+        { kind: 'categorical', labels: ['MISS', 'HIT'] },
       )],
       ['defend', scalarDistribution(
         [[0, 1]],
-        { kind: 'enum', labels: ['HIT'] },
+        { kind: 'categorical', labels: ['HIT'] },
       )],
       ['weather', scalarDistribution(
         [[0, 1]],
-        { kind: 'enum', labels: ['SUN'] },
+        { kind: 'categorical', labels: ['SUN'] },
       )],
     ];
 
@@ -269,7 +269,7 @@ describe('chartData', () => {
     it('keeps integer and symbol identities separate', () => {
       const distributions: [string, ScalarDistribution][] = [
         ['numeric', scalarDistribution([[0, 1]])],
-        ['symbol', scalarDistribution([[0, 1]], { kind: 'enum', labels: ['ZERO'] })],
+        ['symbol', scalarDistribution([[0, 1]], { kind: 'categorical', labels: ['ZERO'] })],
       ];
       const result = prepareCategoricalChartData(distributions);
       expect(result.labels).toEqual(['0', 'ZERO']);
@@ -283,7 +283,7 @@ describe('chartData', () => {
       ];
       const categorical: [string, ScalarDistribution] = [
         'symbol',
-        scalarDistribution([[0, 1]], { kind: 'enum', labels: ['FIRST'] }),
+        scalarDistribution([[0, 1]], { kind: 'categorical', labels: ['FIRST'] }),
       ];
 
       expect(numericChartOutcomeRange(numeric)).toBe(10000);

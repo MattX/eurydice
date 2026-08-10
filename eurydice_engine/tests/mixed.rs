@@ -184,14 +184,14 @@ fn tuples_carry_a_mixed_field_through_construction_and_projection() {
     assert_eq!(
         distribution.fields,
         vec![
-            FieldSchema::Enum {
+            FieldSchema::Categorical {
                 labels: vec!["0".into(), "1".into(), "2".into(), "TIMES_TWO".into()],
             },
             FieldSchema::Int,
         ]
     );
     assert_eq!(
-        distribution.probabilities,
+        distribution.entries,
         vec![
             (vec![0, 1], 2.0 / 6.0),
             (vec![1, 1], 2.0 / 6.0),
@@ -339,14 +339,11 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
     let distribution = distributions("enum { A } X: {} + {} output {X, A}").remove(0);
     assert_eq!(
         distribution.fields,
-        vec![FieldSchema::Enum {
+        vec![FieldSchema::Categorical {
             labels: vec!["0".into(), "A".into()],
         }]
     );
-    assert_eq!(
-        distribution.probabilities,
-        vec![(vec![0], 0.5), (vec![1], 0.5)]
-    );
+    assert_eq!(distribution.entries, vec![(vec![0], 0.5), (vec![1], 0.5)]);
 }
 
 /// A field with numeric and symbolic outcomes is serialized categorically. Its
@@ -358,13 +355,13 @@ fn mixed_fields_display_as_categories() {
         let distribution = distributions(program).remove(0);
         assert_eq!(
             distribution.fields,
-            vec![FieldSchema::Enum {
+            vec![FieldSchema::Categorical {
                 labels: vec!["1".into(), "A".into()],
             }],
             "{program}"
         );
         assert_eq!(
-            distribution.probabilities,
+            distribution.entries,
             vec![(vec![0], 0.5), (vec![1], 0.5)],
             "{program}"
         );
@@ -375,7 +372,7 @@ fn mixed_fields_display_as_categories() {
         distribution.fields,
         vec![
             FieldSchema::Int,
-            FieldSchema::Enum {
+            FieldSchema::Categorical {
                 labels: vec!["2".into(), "A".into()],
             },
         ]
@@ -387,7 +384,7 @@ fn mixed_fields_display_as_categories() {
 #[test]
 fn all_symbol_distributions_still_display() {
     let distribution = distributions("enum { MISS, HIT } output d{MISS, HIT}").remove(0);
-    let FieldSchema::Enum { labels } = &distribution.fields[0] else {
+    let FieldSchema::Categorical { labels } = &distribution.fields[0] else {
         panic!("expected a symbol field");
     };
     assert_eq!(labels, &["MISS", "HIT"]);

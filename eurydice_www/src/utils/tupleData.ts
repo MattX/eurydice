@@ -3,16 +3,16 @@ import { Distribution, FieldSchema, ScalarDistribution } from "../util";
 /**
  * Wire representation of an output distribution, as serialized by the engine. serde
  * encodes `FieldSchema::Int` as the bare string "Int" and the struct
- * variant as `{ Enum: { labels } }`.
+ * variant as `{ Categorical: { labels } }`.
  */
 export type WireFieldSchema =
   | "Int"
-  | { Enum: { labels: string[] } };
+  | { Categorical: { labels: string[] } };
 
 export interface WireDistribution {
   fields: WireFieldSchema[];
   field_names?: string[];
-  probabilities: [number[], number][];
+  entries: [number[], number][];
 }
 
 export function normalizeFieldSchema(
@@ -20,8 +20,8 @@ export function normalizeFieldSchema(
 ): FieldSchema {
   if (wire === "Int") return { kind: "int" };
   return {
-    kind: "enum",
-    labels: wire.Enum.labels,
+    kind: "categorical",
+    labels: wire.Categorical.labels,
   };
 }
 
@@ -29,7 +29,7 @@ export function normalizeDistribution(wire: WireDistribution): Distribution {
   return {
     fields: wire.fields.map(normalizeFieldSchema),
     fieldNames: wire.field_names,
-    probabilities: wire.probabilities,
+    entries: wire.entries,
   };
 }
 
@@ -38,7 +38,7 @@ export function fieldValueLabel(
   schema: FieldSchema,
   value: number
 ): string {
-  if (schema.kind === "enum") {
+  if (schema.kind === "categorical") {
     return schema.labels[value] ?? String(value);
   }
   return String(value);
@@ -67,7 +67,7 @@ export function fieldAxis(
   schema: FieldSchema,
   observed: number[]
 ): FieldAxis {
-  if (schema.kind === "enum") {
+  if (schema.kind === "categorical") {
     return {
       values: schema.labels.map((_, index) => index),
       labels: schema.labels.slice(),
@@ -84,25 +84,25 @@ export function observedValues(
   dist: Distribution,
   field: number
 ): number[] {
-  return dist.probabilities.map(([outcome]) => outcome[field]);
+  return dist.entries.map(([outcome]) => outcome[field]);
 }
 
 /**
  * The marginal distribution of each field, obtained by summing joint
- * probabilities over all other fields. Enum fields carry their labels through
+ * probabilities over all other fields. Categorical fields carry their labels through
  * so the result can feed the existing 1-D chart machinery.
  */
 export function computeMarginals(dist: Distribution): ScalarDistribution[] {
   return dist.fields.map((schema, field) => {
     const totals = new Map<number, number>();
-    for (const [outcome, probability] of dist.probabilities) {
+    for (const [outcome, probability] of dist.entries) {
       const value = outcome[field];
       totals.set(value, (totals.get(value) ?? 0) + probability);
     }
-    const probabilities: [[number], number][] = Array.from(totals.entries())
+    const entries: [[number], number][] = Array.from(totals.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([value, probability]) => [[value], probability]);
-    return { fields: [schema], probabilities };
+    return { fields: [schema], entries };
   });
 }
 
@@ -129,7 +129,7 @@ export function computeTuplePivot(dist: Distribution): TuplePivot {
   const xMarginal = new Map<number, number>();
   const yMarginal = new Map<number, number>();
   let maxCell = 0;
-  for (const [outcome, probability] of dist.probabilities) {
+  for (const [outcome, probability] of dist.entries) {
     const [x, y] = outcome;
     const key = `${x},${y}`;
     const next = (joint.get(key) ?? 0) + probability;
@@ -161,7 +161,7 @@ export function computeTupleRows(
   dist: Distribution,
   sort: TupleSort
 ): TupleRow[] {
-  const rows: TupleRow[] = dist.probabilities.map(([outcome, probability]) => ({
+  const rows: TupleRow[] = dist.entries.map(([outcome, probability]) => ({
     values: outcome,
     labels: outcome.map((value, field) =>
       fieldValueLabel(dist.fields[field], value)

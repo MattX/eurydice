@@ -70,16 +70,16 @@ describe('csvExport', () => {
       const mixed: NamedDistribution[] = [
         ['attack', scalarDistribution(
           [[0, 0.25], [1, 0.75]],
-          { kind: 'enum', labels: ['MISS', 'HIT'] },
+          { kind: 'categorical', labels: ['MISS', 'HIT'] },
         )],
         testDistributions[0],
         ['defend', scalarDistribution(
           [[0, 1]],
-          { kind: 'enum', labels: ['HIT'] },
+          { kind: 'categorical', labels: ['HIT'] },
         )],
         ['weather', scalarDistribution(
           [[0, 1]],
-          { kind: 'enum', labels: ['SUN'] },
+          { kind: 'categorical', labels: ['SUN'] },
         )],
       ];
 
@@ -101,7 +101,7 @@ describe('csvExport', () => {
       const result = generateSpreadsheetCSV([['round', {
           fields: [{ kind: 'int' }, { kind: 'int' }],
           fieldNames: ['Attacker losses', 'Defender losses'],
-          probabilities: [[[1, 2], 1]],
+          entries: [[[1, 2], 1]],
       }]]);
 
       expect(result).toBe([
@@ -179,7 +179,7 @@ describe('csvExport', () => {
     it('omits categorical outputs', () => {
       const categorical: NamedDistribution = ['attack', scalarDistribution(
         [[0, 0.25], [1, 0.75]],
-        { kind: 'enum', labels: ['MISS', 'HIT'] },
+        { kind: 'categorical', labels: ['MISS', 'HIT'] },
       )];
       const result = generateAnyDiceFormatCSV([
         categorical,
@@ -247,9 +247,9 @@ describe('csvExport', () => {
       ['joint', {
           fields: [
             { kind: 'int' as const },
-            { kind: 'enum' as const, labels: ['MISS', 'HIT'] },
+            { kind: 'categorical' as const, labels: ['MISS', 'HIT'] },
           ],
-          probabilities: [
+          entries: [
             [[1, 1], 0.4],
             [[1, 0], 0.1],
             [[2, 0], 0.5],

@@ -15,6 +15,7 @@ use crate::{
         LabelStyle, SourceId, SourceRange, TraceBinding, missing_return_warning, preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
+    engine::PrintEvent,
     error::{NonAdditiveSubject, ShapeMismatchError},
     operators::{apply_binary_op, apply_unary_op},
     primitives::{
@@ -144,7 +145,7 @@ pub struct Evaluator {
     explode_depth: usize,
     recursion_depth_limit: usize,
     lowest_first: bool,
-    print_callback: Option<Box<dyn Fn(String, String)>>,
+    print_callback: Option<Box<dyn FnMut(PrintEvent)>>,
     source_id: SourceId,
     diagnostics: Vec<EngineDiagnostic>,
     /// Warnings already reported, so repeated evaluations of the same
@@ -223,13 +224,18 @@ impl Evaluator {
     /// Callers check this before building a diagnostic: warnings are raised
     /// from inside evaluation loops, where the same expression can be visited
     /// once per outcome of a pool.
-    fn should_warn(&mut self, code: DiagnosticCode, source: SourceId, range: ast::Range) -> bool {
+    fn should_warn(
+        &mut self,
+        code: DiagnosticCode,
+        source: SourceId,
+        range: ast::ByteRange,
+    ) -> bool {
         self.warned.insert((code, SourceRange { source, range }))
     }
 
     /// `subject` is a plural phrase naming the two uses; it is always followed
     /// by "refer to the same pool".
-    fn warn_pool_reuse(&mut self, source: SourceId, range: ast::Range, subject: &str) {
+    fn warn_pool_reuse(&mut self, source: SourceId, range: ast::ByteRange, subject: &str) {
         const CODE: DiagnosticCode = DiagnosticCode::IndependentPoolReuse;
         if !self.should_warn(CODE, source, range) {
             return;
@@ -262,7 +268,7 @@ impl Evaluator {
     fn warn_limit(
         &mut self,
         source: SourceId,
-        range: ast::Range,
+        range: ast::ByteRange,
         code: DiagnosticCode,
         setting: &str,
         value: usize,
@@ -290,8 +296,12 @@ impl Evaluator {
         });
     }
 
-    pub fn set_print_callback(&mut self, callback: Box<dyn Fn(String, String)>) {
+    pub fn set_print_callback(&mut self, callback: Box<dyn FnMut(PrintEvent)>) {
         self.print_callback = Some(callback);
+    }
+
+    pub fn clear_print_callback(&mut self) {
+        self.print_callback = None;
     }
 
     /// The declared symbols, needed to render any value that may contain one.
@@ -318,7 +328,7 @@ impl Evaluator {
     /// Assignments, loop variables and function parameters all bind a variable,
     /// and a declared name is unavailable to all three, so they report it the
     /// same way. Which one it was is shown by where the diagnostic points.
-    fn validate_binding_name(&self, name: &str, range: ast::Range) -> Result<(), RuntimeError> {
+    fn validate_binding_name(&self, name: &str, range: ast::ByteRange) -> Result<(), RuntimeError> {
         if !self.symbols.contains(name) {
             return Ok(());
         }
@@ -335,7 +345,7 @@ impl Evaluator {
         &mut self,
         eval_context: &EvalContext,
         members: &[WithRange<String>],
-        statement_range: ast::Range,
+        statement_range: ast::ByteRange,
     ) -> Result<(), RuntimeError> {
         if eval_context.recursion_depth != 0 || eval_context.block_depth != 0 {
             return Err(RuntimeError::Semantic {
@@ -488,12 +498,16 @@ impl Evaluator {
             }
             Statement::Print { expr, named } => {
                 let value = self.evaluate(eval_context, expr)?;
-                let name = match named {
-                    Some(name) => interpolate_variable_names(name, &self.env, &self.symbols)?,
-                    None => "".to_string(),
+                let name = named
+                    .as_ref()
+                    .map(|name| interpolate_variable_names(name, &self.env, &self.symbols))
+                    .transpose()?;
+                let event = PrintEvent {
+                    name,
+                    value: value.display(&self.symbols).to_string(),
                 };
-                if let Some(ref callback) = self.print_callback {
-                    callback(value.display(&self.symbols).to_string(), name);
+                if let Some(callback) = &mut self.print_callback {
+                    callback(event);
                 }
             }
             Statement::Return { value } => {
@@ -878,7 +892,7 @@ impl Evaluator {
         eval_context: &EvalContext,
         function: &WithRange<Function>,
         args: &[RuntimeValue],
-        arg_ranges: &[ast::Range],
+        arg_ranges: &[ast::ByteRange],
     ) -> Result<RuntimeValue, RuntimeError> {
         match &function.value {
             Function::Primitive(primitive) => {
@@ -1064,7 +1078,7 @@ fn rolls_dice(expression: &Expression) -> bool {
 /// anything it would rather not meet has to be stopped here.
 fn reject_mixed_output_shapes(
     outcomes: &[&ElementValue],
-    range: ast::Range,
+    range: ast::ByteRange,
 ) -> Result<(), RuntimeError> {
     let shape_of = |outcome: &ElementValue| match outcome {
         ElementValue::Tuple(fields) => Some(fields.len()),
@@ -1093,10 +1107,10 @@ fn reject_mixed_output_shapes(
 }
 
 /// Where a list element was written, so a diagnostic can point at it.
-fn list_item_range(item: &ListItem) -> ast::Range {
+fn list_item_range(item: &ListItem) -> ast::ByteRange {
     match &item.item {
         BareListItem::Expr(expr) => expr.range,
-        BareListItem::Range(start, end) => ast::Range {
+        BareListItem::Range(start, end) => ast::ByteRange {
             start: start.range.start,
             end: end.range.end,
         },
@@ -1111,7 +1125,7 @@ fn list_item_range(item: &ListItem) -> ast::Range {
 fn coerce_arg(
     arg: RuntimeValue,
     expected: Option<StaticType>,
-    range: ast::Range,
+    range: ast::ByteRange,
 ) -> Result<RuntimeValue, RuntimeError> {
     let Some(expected) = expected else {
         return Ok(arg);
@@ -1291,7 +1305,7 @@ mod tests {
         fn ranged(s: &str) -> WithRange<String> {
             WithRange {
                 value: s.to_string(),
-                range: ast::Range {
+                range: ast::ByteRange {
                     start: 0,
                     end: s.len(),
                 },
@@ -1333,7 +1347,7 @@ mod tests {
 
     #[test]
     fn additive_identity_becomes_zero_where_an_argument_must_be_an_int() {
-        let range = ast::Range { start: 0, end: 0 };
+        let range = ast::ByteRange { start: 0, end: 0 };
 
         for argument in [
             RuntimeValue::Element(ElementValue::AdditiveIdentity),
@@ -1356,8 +1370,8 @@ mod tests {
         let printed = Rc::new(RefCell::new(None));
         let callback_result = Rc::clone(&printed);
         let mut evaluator = Evaluator::new();
-        evaluator.set_print_callback(Box::new(move |value, name| {
-            *callback_result.borrow_mut() = Some((value.to_string(), name));
+        evaluator.set_print_callback(Box::new(move |event| {
+            *callback_result.borrow_mut() = Some((event.value, event.name));
         }));
 
         let statements = crate::grammar::BodyParser::new()
@@ -1369,29 +1383,29 @@ mod tests {
 
         assert_eq!(
             printed.borrow().as_ref().unwrap(),
-            &("\u{1d452}".to_string(), "0".to_string())
+            &("\u{1d452}".to_string(), Some("0".to_string()))
         );
         let output = evaluator.take_outputs().remove(0);
         assert_eq!(output.name, "0");
         assert_eq!(
             crate::output::Distribution::from_runtime(output.value, None, evaluator.symbols())
-                .probabilities,
+                .entries,
             [(vec![0], 1.0)]
         );
     }
 
     #[test]
     fn test_division_by_zero() {
-        use crate::ast::{BinaryOp, Range};
+        use crate::ast::{BinaryOp, ByteRange};
 
         let left = 5.into();
         let right = 0.into();
         let op = WithRange {
             value: BinaryOp::Div,
-            range: Range { start: 0, end: 1 },
+            range: ByteRange { start: 0, end: 1 },
         };
 
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        let result = apply_binary_op(&op, &left, ByteRange { start: 0, end: 1 }, &right, false);
         match result {
             Err(RuntimeError::MathError { message, .. }) => {
                 assert!(message.contains("Cannot divide 5 by zero"));
@@ -1402,16 +1416,16 @@ mod tests {
 
     #[test]
     fn test_negative_exponentiation() {
-        use crate::ast::{BinaryOp, Range};
+        use crate::ast::{BinaryOp, ByteRange};
 
         let left = 2.into();
         let right = (-3).into();
         let op = WithRange {
             value: BinaryOp::Pow,
-            range: Range { start: 0, end: 1 },
+            range: ByteRange { start: 0, end: 1 },
         };
 
-        let result = apply_binary_op(&op, &left, Range { start: 0, end: 1 }, &right, false);
+        let result = apply_binary_op(&op, &left, ByteRange { start: 0, end: 1 }, &right, false);
         match result {
             Err(RuntimeError::MathError { message, .. }) => {
                 assert!(message.contains("Cannot raise 2 to negative power -3"));
@@ -1424,7 +1438,7 @@ mod tests {
     /// overflowed, so the message points at the arithmetic that failed.
     #[test]
     fn test_arithmetic_overflow() {
-        use crate::ast::{BinaryOp, Range};
+        use crate::ast::{BinaryOp, ByteRange};
 
         for (binary_op, left, right, expected_operation, expected_operands) in [
             (
@@ -1451,7 +1465,7 @@ mod tests {
             // 2^32 overflows i32.
             (BinaryOp::Pow, 2, 32, "Power overflow", "2 ^ 32".to_string()),
         ] {
-            let range = Range { start: 0, end: 1 };
+            let range = ByteRange { start: 0, end: 1 };
             let op = WithRange {
                 value: binary_op,
                 range,

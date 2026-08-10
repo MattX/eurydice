@@ -7,7 +7,7 @@ import { scalarDistribution } from "./testData";
 
 const resultDistribution: ScalarDistribution = scalarDistribution(
   [[0, 0.25], [1, 0.75]],
-  { kind: "enum", labels: ["MISS", "HIT"] }
+  { kind: "categorical", labels: ["MISS", "HIT"] }
 );
 
 describe("enum output metadata", () => {

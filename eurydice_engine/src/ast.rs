@@ -4,12 +4,12 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(any(feature = "serde", test), derive(Serialize))]
-pub struct Range {
+pub struct ByteRange {
     pub start: usize,
     pub end: usize,
 }
 
-impl From<(usize, usize)> for Range {
+impl From<(usize, usize)> for ByteRange {
     fn from(range: (usize, usize)) -> Self {
         Self {
             start: range.0,
@@ -23,14 +23,14 @@ impl From<(usize, usize)> for Range {
 pub struct WithRange<T> {
     pub value: T,
     #[cfg_attr(any(feature = "serde", test), serde(skip))]
-    pub range: Range,
+    pub range: ByteRange,
 }
 
 impl<T> WithRange<T> {
     pub fn new(start: usize, end: usize, value: T) -> Self {
         Self {
             value,
-            range: Range { start, end },
+            range: ByteRange { start, end },
         }
     }
 }
@@ -300,7 +300,7 @@ pub enum FunctionCallItem {
 }
 
 pub fn make_function_call<L: std::fmt::Debug, T: std::fmt::Debug>(
-    range: Range,
+    range: ByteRange,
     items: Vec<WithRange<FunctionCallItem>>,
 ) -> Result<Expression, ParseError<L, T, ParseActionError>> {
     let Some((first, remaining)) = items.split_first() else {
@@ -333,9 +333,9 @@ pub fn make_function_call<L: std::fmt::Debug, T: std::fmt::Debug>(
 /// but custom action code failed.
 #[derive(Debug)]
 pub enum ParseActionError {
-    InvalidIntegerLiteral { range: Range, error: String },
+    InvalidIntegerLiteral { range: ByteRange, error: String },
 
-    EmptyFunctionCall { range: Range },
+    EmptyFunctionCall { range: ByteRange },
 }
 
 /// Only so that a `ParseError` wrapping one of these can be printed. User-facing

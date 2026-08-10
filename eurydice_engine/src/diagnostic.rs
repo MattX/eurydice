@@ -5,7 +5,7 @@ use lalrpop_util::ParseError;
 use serde::Serialize;
 
 use crate::{
-    ast::{FunctionDefinition, ParseActionError, Range, Statement, WithRange},
+    ast::{ByteRange, FunctionDefinition, ParseActionError, Statement, WithRange},
     error::{ArityMismatch, NonAdditiveSubject, RuntimeError},
     primitives::primitive_signature,
     value::{ElementValue, RuntimeValue, SymbolTable},
@@ -19,6 +19,7 @@ pub struct SourceId(pub u64);
 /// Source text referenced by a diagnostic.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct DiagnosticSource {
     pub id: SourceId,
     pub name: String,
@@ -30,11 +31,12 @@ pub struct DiagnosticSource {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceRange {
     pub source: SourceId,
-    pub range: Range,
+    pub range: ByteRange,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum DiagnosticSeverity {
     Error,
     Warning,
@@ -49,6 +51,7 @@ pub enum LabelStyle {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct DiagnosticLabel {
     pub range: SourceRange,
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
@@ -58,6 +61,7 @@ pub struct DiagnosticLabel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum FixApplicability {
     MachineApplicable,
     Suggested,
@@ -72,6 +76,7 @@ pub struct TextEdit {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct SuggestedFix {
     pub message: String,
     pub applicability: FixApplicability,
@@ -88,6 +93,7 @@ pub struct TraceBinding {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct EvaluationFrame {
     pub function: String,
     pub call: SourceRange,
@@ -229,6 +235,7 @@ impl Serialize for DiagnosticCode {
 /// it; everything else is prose and spans for them to present.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct EngineDiagnostic {
     pub code: DiagnosticCode,
     pub severity: DiagnosticSeverity,
@@ -326,7 +333,7 @@ fn primitive_call(identifier: &str) -> String {
 /// A primary label reporting the value found where another type was required.
 fn type_mismatch_label(
     source: SourceId,
-    range: &Range,
+    range: &ByteRange,
     expected: &str,
     value: &RuntimeValue,
     symbols: &SymbolTable,
@@ -426,7 +433,7 @@ impl DiagnosticParts {
 /// A syntax diagnostic with a single unlabeled primary span.
 fn syntax_parts(
     source: SourceId,
-    range: Range,
+    range: ByteRange,
     code: DiagnosticCode,
     summary: impl Into<String>,
 ) -> DiagnosticParts {
@@ -450,7 +457,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
         ParseError::UnrecognizedToken {
             token, expected, ..
         } => {
-            let range = Range::from((token.0, token.2));
+            let range = ByteRange::from((token.0, token.2));
             let found = source.get(token.0..token.2).unwrap_or_default();
             if found == "=" && expected.iter().any(|item| item.contains(':')) {
                 syntax_parts(
@@ -513,7 +520,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
             }
         }
         ParseError::UnrecognizedEof { location, expected } => {
-            let range = Range::from((location, location));
+            let range = ByteRange::from((location, location));
             if let Some(closer) = expected_closer(&expected) {
                 syntax_parts(
                     source_id,
@@ -542,7 +549,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
             }
         }
         ParseError::ExtraToken { token } => {
-            let range = Range::from((token.0, token.2));
+            let range = ByteRange::from((token.0, token.2));
             syntax_parts(
                 source_id,
                 range,
@@ -555,8 +562,8 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
         }
         ParseError::InvalidToken { location } => {
             let (end, found) = next_char(source, location);
-            let range = Range::from((location, end));
-            let insertion = Range {
+            let range = ByteRange::from((location, end));
+            let insertion = ByteRange {
                 start: source.len(),
                 end: source.len(),
             };
@@ -703,7 +710,7 @@ fn block_always_returns(block: &[WithRange<Statement>]) -> bool {
 
 fn replacement_fix(
     source: SourceId,
-    range: Range,
+    range: ByteRange,
     replacement: &str,
     message: &str,
 ) -> SuggestedFix {
@@ -768,7 +775,7 @@ pub(crate) fn runtime_diagnostic(
 ) -> EngineDiagnostic {
     let mut trace = Vec::new();
     let (error, source_id) = runtime_context(error, source_id, &mut trace);
-    let primary = |range: &Range, message: String| DiagnosticLabel {
+    let primary = |range: &ByteRange, message: String| DiagnosticLabel {
         range: SourceRange {
             source: source_id,
             range: *range,
@@ -776,7 +783,7 @@ pub(crate) fn runtime_diagnostic(
         message: Some(message),
         style: LabelStyle::Primary,
     };
-    let unlabeled = |range: &Range, style: LabelStyle| DiagnosticLabel {
+    let unlabeled = |range: &ByteRange, style: LabelStyle| DiagnosticLabel {
         range: SourceRange {
             source: source_id,
             range: *range,
@@ -821,7 +828,7 @@ pub(crate) fn runtime_diagnostic(
                     edits: vec![TextEdit {
                         range: SourceRange {
                             source: source_id,
-                            range: Range {
+                            range: ByteRange {
                                 start: offset,
                                 end: offset,
                             },
@@ -1214,7 +1221,7 @@ fn runtime_context<'a>(
 
 fn placement_diagnostic(
     statement: &str,
-    range: &Range,
+    range: &ByteRange,
     source_id: SourceId,
     help: &str,
 ) -> DiagnosticParts {

@@ -25,7 +25,7 @@ export default function ExportModal({
   // AnyDice format is numeric-only, so enum and tuple outputs are dropped there.
   const omittedFromAnyDice = outputs.filter(([, distribution]) =>
     !isScalarDistribution(distribution) ||
-    distribution.fields[0].kind === "enum"
+    distribution.fields[0].kind === "categorical"
   ).length;
 
   const { csvContent, csvFilename } = React.useMemo(() => {

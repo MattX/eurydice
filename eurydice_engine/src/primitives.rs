@@ -19,13 +19,13 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PrimitiveCtx<'a> {
     /// Source ranges of the arguments, parallel to `args`.
-    pub arg_ranges: &'a [ast::Range],
+    pub arg_ranges: &'a [ast::ByteRange],
     /// The configured `set "explode depth"`.
     pub explode_depth: usize,
     /// Whether positional order is lowest-first (`set "position order"`).
     pub lowest_first: bool,
     /// Source range of the whole function call, used for error reporting.
-    pub function_range: ast::Range,
+    pub function_range: ast::ByteRange,
     /// Canonical function identifier from the primitive registry.
     pub identifier: &'static str,
 }
@@ -43,6 +43,7 @@ pub(crate) struct Primitive {
 /// Presentation metadata for a built-in function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct PrimitiveMetadata {
     /// The evaluator's canonical function identifier, with `{}` argument slots.
     pub identifier: &'static str,
@@ -747,9 +748,9 @@ fn keep_list_for_primitive(
     mode: KeepMode,
     identifier: &'static str,
     keep: i32,
-    keep_range: ast::Range,
+    keep_range: ast::ByteRange,
     pool_size: usize,
-    function_range: ast::Range,
+    function_range: ast::ByteRange,
 ) -> Result<Vec<bool>, crate::eval::RuntimeError> {
     use crate::eval::RuntimeError;
 
@@ -810,10 +811,10 @@ mod tests {
     use malachite::Natural;
 
     use super::*;
-    use crate::{ast::Range, dice::Pool};
+    use crate::{ast::ByteRange, dice::Pool};
 
-    fn dummy_range() -> Range {
-        Range { start: 0, end: 0 }
+    fn dummy_range() -> ByteRange {
+        ByteRange { start: 0, end: 0 }
     }
 
     /// The numbers in a sequence a test has just built, which it knows are all
@@ -825,7 +826,7 @@ mod tests {
             .collect()
     }
 
-    fn ctx(arg_ranges: &[Range], explode_depth: usize, lowest_first: bool) -> PrimitiveCtx<'_> {
+    fn ctx(arg_ranges: &[ByteRange], explode_depth: usize, lowest_first: bool) -> PrimitiveCtx<'_> {
         PrimitiveCtx {
             arg_ranges,
             explode_depth,

@@ -1,7 +1,7 @@
-pub mod diagnostic;
-pub mod engine;
-pub mod output;
-pub mod primitives;
+mod diagnostic;
+mod engine;
+mod output;
+mod primitives;
 
 mod ast;
 mod dice;
@@ -10,13 +10,13 @@ mod eval;
 mod operators;
 mod value;
 
-pub use ast::Range;
+pub use ast::ByteRange;
 pub use diagnostic::{
     DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic,
     EvaluationFrame, FixApplicability, LabelStyle, SourceId, SourceRange, SuggestedFix, TextEdit,
     TraceBinding,
 };
-pub use engine::{Engine, EngineOutput, Program, RunReport};
+pub use engine::{CompileError, Engine, EngineOutput, PrintEvent, Program, RunReport};
 pub use output::{Distribution, FieldSchema};
 pub use primitives::{PrimitiveMetadata, primitive_metadata};
 

@@ -285,7 +285,7 @@ impl ElementMismatch {
     /// "<action> requires summing ...".
     pub(crate) fn into_error(
         self,
-        range: ast::Range,
+        range: ast::ByteRange,
         action: &'static str,
         subject: NonAdditiveSubject,
     ) -> RuntimeError {
@@ -641,7 +641,7 @@ pub(crate) struct PoolSumFailure {
 
 impl PoolSumFailure {
     /// `action` names what forced the sum; it completes "<action> requires summing ...".
-    pub(crate) fn into_error(self, range: ast::Range, action: &'static str) -> RuntimeError {
+    pub(crate) fn into_error(self, range: ast::ByteRange, action: &'static str) -> RuntimeError {
         self.mismatch
             .into_error(range, action, NonAdditiveSubject::Pool(self.dimension))
     }

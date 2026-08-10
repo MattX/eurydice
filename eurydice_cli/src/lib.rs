@@ -2,15 +2,15 @@
 use std::collections::HashSet;
 
 use eurydice_engine::{
-    DiagnosticCode, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, LabelStyle,
-    output::{Distribution, FieldSchema},
+    DiagnosticCode, DiagnosticSeverity, DiagnosticSource, Distribution, EngineDiagnostic,
+    FieldSchema, LabelStyle,
 };
 use miette::{Diagnostic, GraphicalReportHandler, LabeledSpan, NamedSource, Severity};
 
 pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f64)> {
     let is_tuple = distribution.fields.len() > 1;
     distribution
-        .probabilities
+        .entries
         .into_iter()
         .map(|(outcome, probability)| {
             let fields = outcome
@@ -20,11 +20,12 @@ pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f
                 .map(|(index, (value, schema))| {
                     let value = match schema {
                         FieldSchema::Int => value.to_string(),
-                        FieldSchema::Enum { labels, .. } => usize::try_from(*value)
+                        FieldSchema::Categorical { labels, .. } => usize::try_from(*value)
                             .ok()
                             .and_then(|i| labels.get(i))
                             .cloned()
                             .unwrap_or_else(|| value.to_string()),
+                        _ => value.to_string(),
                     };
                     distribution
                         .field_names
@@ -83,6 +84,7 @@ pub fn format_engine_diagnostics(
                 severity: match diagnostic.severity {
                     DiagnosticSeverity::Error => Severity::Error,
                     DiagnosticSeverity::Warning => Severity::Warning,
+                    _ => Severity::Advice,
                 },
                 help: first_source.then(|| diagnostic.help.clone()).flatten(),
                 source_code: NamedSource::new(source.name.clone(), source.text.clone()),
@@ -195,14 +197,16 @@ impl Diagnostic for EngineDiagnosticAdapter {
 mod tests {
     use super::{format_engine_diagnostics, format_output_probabilities};
     use eurydice_engine::Engine;
-    use eurydice_engine::output::{Distribution, FieldSchema};
+    use eurydice_engine::{Distribution, FieldSchema};
 
     #[test]
     fn formats_labeled_and_unlabeled_tuple_outcomes() {
-        let output = |field_names| Distribution {
-            fields: vec![FieldSchema::Int, FieldSchema::Int],
-            field_names,
-            probabilities: vec![(vec![1, 2], 1.0)],
+        let output = |field_names| {
+            Distribution::new(
+                vec![FieldSchema::Int, FieldSchema::Int],
+                field_names,
+                vec![(vec![1, 2], 1.0)],
+            )
         };
 
         assert_eq!(format_output_probabilities(output(None))[0].0, "(1, 2)");
@@ -211,16 +215,16 @@ mod tests {
             "(A: 1, B: 2)"
         );
 
-        let enum_output = Distribution {
-            fields: vec![
+        let enum_output = Distribution::new(
+            vec![
                 FieldSchema::Int,
-                FieldSchema::Enum {
+                FieldSchema::Categorical {
                     labels: vec!["MISS".into(), "HIT".into()],
                 },
             ],
-            field_names: Some(vec!["Roll".into(), "Result".into()]),
-            probabilities: vec![(vec![20, 1], 1.0)],
-        };
+            Some(vec!["Roll".into(), "Result".into()]),
+            vec![(vec![20, 1], 1.0)],
+        );
         assert_eq!(
             format_output_probabilities(enum_output)[0].0,
             "(Roll: 20, Result: HIT)"

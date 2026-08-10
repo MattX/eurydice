@@ -91,7 +91,7 @@ export function categoricalOutcomes(
   for (const [, distribution] of distributions) {
     const field = distribution.fields[0];
     if (field.kind === "int") {
-      for (const [[outcome]] of distribution.probabilities) {
+      for (const [[outcome]] of distribution.entries) {
         integers.add(outcome);
       }
     } else {
@@ -115,7 +115,7 @@ export function categoricalProbabilities(
 ): Map<string, number> {
   const field = distribution.fields[0];
   const probabilities = new Map<string, number>();
-  for (const [[outcome], probability] of distribution.probabilities) {
+  for (const [[outcome], probability] of distribution.entries) {
     const key = categoricalKey(field, outcome);
     probabilities.set(key, (probabilities.get(key) ?? 0) + probability);
   }
@@ -126,11 +126,11 @@ export function categoricalProbabilities(
 export function numericChartOutcomeRange(
   distributions: NamedScalarDistribution[]
 ): number | null {
-  if (distributions.some(([, distribution]) => distribution.fields[0].kind === "enum")) {
+  if (distributions.some(([, distribution]) => distribution.fields[0].kind === "categorical")) {
     return null;
   }
   const outcomes = distributions.flatMap(([, distribution]) =>
-    distribution.probabilities.map(([[outcome]]) => outcome)
+    distribution.entries.map(([[outcome]]) => outcome)
   );
   if (outcomes.length === 0) return null;
   return Math.max(...outcomes) - Math.min(...outcomes);
@@ -169,7 +169,7 @@ export function prepareChartData(
 
   // Compute the range of outcomes
   const outcomes = Array.from(chartData).flatMap((nameAndDist) => {
-    return nameAndDist[1].probabilities.map(([[x]]) => x);
+    return nameAndDist[1].entries.map(([[x]]) => x);
   });
   const min_outcome = Math.min(...outcomes);
   const max_outcome = Math.max(...outcomes);
@@ -182,7 +182,7 @@ export function prepareChartData(
   for (const nameAndDist of chartData) {
     const [name, dist] = nameAndDist;
     const distMap = new Map(
-      dist.probabilities.map(([[outcome], probability]) => [
+      dist.entries.map(([[outcome], probability]) => [
         outcome,
         probability,
       ])
@@ -221,7 +221,7 @@ function prepareTransposedChartData(
   // Get all unique outcomes across all distributions
   const allOutcomes = new Set<number>();
   chartData.forEach(([, dist]) => {
-    dist.probabilities.forEach(([[outcome]]) => {
+    dist.entries.forEach(([[outcome]]) => {
       allOutcomes.add(outcome);
     });
   });
@@ -238,7 +238,7 @@ function prepareTransposedChartData(
     
     // For each distribution, get the probability of this outcome
     for (const [, dist] of chartData) {
-      const outcomeProb = dist.probabilities.find(
+      const outcomeProb = dist.entries.find(
         ([[value]]) => value === outcome
       );
       const probability = outcomeProb ? outcomeProb[1] * 100 : 0;

@@ -14,14 +14,14 @@ use crate::{
 #[derive(Debug)]
 pub struct PrimitiveArgumentError {
     pub name: &'static str,
-    pub range: ast::Range,
+    pub range: ast::ByteRange,
     pub expected: String,
     pub value: RuntimeValue,
 }
 
 #[derive(Debug)]
 pub struct PrimitiveArgumentsError {
-    pub range: ast::Range,
+    pub range: ast::ByteRange,
     pub function: &'static str,
     pub requirement: String,
     pub help: Option<String>,
@@ -30,11 +30,11 @@ pub struct PrimitiveArgumentsError {
 
 #[derive(Debug)]
 pub struct PrimitiveValueError {
-    pub range: ast::Range,
+    pub range: ast::ByteRange,
     pub function: &'static str,
     pub requirement: String,
     pub argument: &'static str,
-    pub found_range: ast::Range,
+    pub found_range: ast::ByteRange,
     pub value: RuntimeValue,
     pub constraint: String,
     pub help: Option<String>,
@@ -50,7 +50,7 @@ pub struct PrimitiveValueError {
 /// what the diagnostic names.
 #[derive(Debug)]
 pub struct ShapeMismatchError {
-    pub range: ast::Range,
+    pub range: ast::ByteRange,
     /// What needed the two to line up; completes "<action> requires summing ...".
     pub action: &'static str,
     pub first: ElementValue,
@@ -72,7 +72,7 @@ pub enum NonAdditiveSubject {
 /// A value that had to be summed, but whose parts cannot be added together.
 #[derive(Debug)]
 pub struct NonAdditiveSumError {
-    pub range: ast::Range,
+    pub range: ast::ByteRange,
     /// What forced the sum; completes "<action> requires summing ...".
     pub action: &'static str,
     pub subject: NonAdditiveSubject,
@@ -106,7 +106,7 @@ pub enum RuntimeError {
     /// An error raised inside a function body, wrapped with the call that
     /// reached it. Nested calls nest these.
     InFunction {
-        range: ast::Range,
+        range: ast::ByteRange,
         source: Box<RuntimeError>,
         body_source: SourceId,
         frame: Box<EvaluationFrame>,
@@ -117,72 +117,72 @@ pub enum RuntimeError {
     /// message — a second span, a note, a fix — needs a variant of its own.
     Semantic {
         code: DiagnosticCode,
-        range: ast::Range,
+        range: ast::ByteRange,
         message: String,
     },
 
     LabelsOnNonTupleOutput {
-        range: ast::Range,
-        value_range: ast::Range,
+        range: ast::ByteRange,
+        value_range: ast::ByteRange,
         value: RuntimeValue,
     },
 
     OutputLabelCountMismatch {
-        range: ast::Range,
+        range: ast::ByteRange,
         expected: usize,
         found: usize,
     },
 
     OutputNotAtTopLevel {
-        range: ast::Range,
+        range: ast::ByteRange,
     },
 
     SetNotAtTopLevel {
-        range: ast::Range,
+        range: ast::ByteRange,
     },
 
     ReturnOutsideFunction {
-        range: ast::Range,
+        range: ast::ByteRange,
     },
 
     LoopOverNonSequence {
-        range: ast::Range,
+        range: ast::ByteRange,
         value: RuntimeValue,
     },
 
     UndefinedReference {
-        range: ast::Range,
+        range: ast::ByteRange,
         name: String,
     },
 
     UndefinedFunction {
-        range: ast::Range,
+        range: ast::ByteRange,
         name: String,
         arity_mismatch: Option<ArityMismatch>,
     },
 
     InvalidCondition {
-        range: ast::Range,
+        range: ast::ByteRange,
         value: RuntimeValue,
     },
 
     RangeHasNonSequenceEndpoints {
-        range: ast::Range,
+        range: ast::ByteRange,
         value: RuntimeValue,
     },
 
     InvalidArgumentToOperator {
-        operator_range: ast::Range,
+        operator_range: ast::ByteRange,
         op: BinaryOp,
         expected: &'static str,
-        found_range: ast::Range,
+        found_range: ast::ByteRange,
         value: RuntimeValue,
     },
 
     NegativeArgumentToFunction {
-        range: ast::Range,
+        range: ast::ByteRange,
         name: String,
-        found_range: ast::Range,
+        found_range: ast::ByteRange,
         value: i32,
     },
 
@@ -195,18 +195,18 @@ pub enum RuntimeError {
     NonAdditiveSum(Box<NonAdditiveSumError>),
 
     InvalidRepeatExpression {
-        range: ast::Range,
+        range: ast::ByteRange,
         value: RuntimeValue,
     },
 
     MathError {
-        range: ast::Range,
+        range: ast::ByteRange,
         message: String,
     },
 }
 
 impl RuntimeError {
-    pub fn range(&self) -> ast::Range {
+    pub fn range(&self) -> ast::ByteRange {
         match self {
             RuntimeError::InFunction { range, .. } => *range,
             RuntimeError::Semantic { range, .. } => *range,

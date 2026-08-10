@@ -17,8 +17,5 @@ fn a_function_frame_is_popped_after_an_error() {
 
     let report = engine.run_source("output X");
     assert_eq!(report.error(), None);
-    assert_eq!(
-        report.outputs[0].distribution.probabilities,
-        vec![(vec![1], 1.0)]
-    );
+    assert_eq!(report.outputs[0].distribution.entries, vec![(vec![1], 1.0)]);
 }

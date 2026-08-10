@@ -9,28 +9,42 @@ use crate::value::display_requires_summing;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct Distribution {
     pub fields: Vec<FieldSchema>,
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub field_names: Option<Vec<String>>,
-    pub probabilities: Vec<(Vec<i32>, f64)>,
+    pub entries: Vec<(Vec<i32>, f64)>,
 }
 
 /// Describes a single output field, shared by every outcome of a distribution.
 ///
-/// Field values in the outcomes themselves are always raw `i32`s; for an enum
+/// Field values in the outcomes themselves are always raw `i32`s; for a
 /// categorical field the value is an ordinal, and the labels here map it back
 /// to a display name. This includes all-symbol fields as well as fields that mix
 /// numbers and symbols. Hoisting the schema up here keeps the (potentially
 /// large) list of outcomes free of repeated metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub enum FieldSchema {
     Int,
-    Enum { labels: Vec<String> },
+    Categorical { labels: Vec<String> },
 }
 
 impl Distribution {
+    pub fn new(
+        fields: Vec<FieldSchema>,
+        field_names: Option<Vec<String>>,
+        entries: Vec<(Vec<i32>, f64)>,
+    ) -> Self {
+        Self {
+            fields,
+            field_names,
+            entries,
+        }
+    }
+
     /// Converts an evaluated value into its serialized display representation,
     /// attaching validated tuple field names when the output supplied them.
     pub(crate) fn from_runtime(
@@ -103,13 +117,13 @@ impl FieldRender {
     fn schema(&self, symbols: &SymbolTable) -> FieldSchema {
         match self {
             FieldRender::Int => FieldSchema::Int,
-            FieldRender::Symbols(present) => FieldSchema::Enum {
+            FieldRender::Symbols(present) => FieldSchema::Categorical {
                 labels: present
                     .iter()
                     .map(|symbol| symbols.name(*symbol).to_string())
                     .collect(),
             },
-            FieldRender::Mixed(present) => FieldSchema::Enum {
+            FieldRender::Mixed(present) => FieldSchema::Categorical {
                 labels: present
                     .iter()
                     .map(|value| match value {
@@ -236,7 +250,7 @@ fn pool_output(
             .map(|render| render.schema(symbols))
             .collect(),
         field_names: if is_tuple { field_names } else { None },
-        probabilities: to_probabilities_generic(pool.ordered_outcomes())
+        entries: to_probabilities_generic(pool.ordered_outcomes())
             .into_iter()
             .map(|(value, probability)| {
                 let fields: &[ElementValue] = match &value {
@@ -288,7 +302,7 @@ mod tests {
     fn converts_int_to_distribution() {
         let distribution = distribution(RuntimeValue::from(5));
 
-        assert_eq!(distribution.probabilities, vec![(vec![5], 1.0)]);
+        assert_eq!(distribution.entries, vec![(vec![5], 1.0)]);
     }
 
     #[test]
@@ -300,7 +314,7 @@ mod tests {
         let distribution = distribution(value);
 
         assert_eq!(
-            distribution.probabilities,
+            distribution.entries,
             vec![
                 (vec![-1], 0.0625),
                 (vec![0], 0.0625),
@@ -320,7 +334,7 @@ mod tests {
         let distribution = distribution(value);
 
         assert_eq!(
-            distribution.probabilities,
+            distribution.entries,
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
     }

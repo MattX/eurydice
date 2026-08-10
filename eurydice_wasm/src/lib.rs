@@ -3,7 +3,7 @@ mod utils;
 use std::collections::HashMap;
 
 use eurydice_engine::{
-    Engine, RunReport, SourceRange, primitive_metadata as engine_primitive_metadata,
+    Engine, PrintEvent, RunReport, SourceRange, primitive_metadata as engine_primitive_metadata,
 };
 use js_sys::Function;
 use utils::set_panic_hook;
@@ -13,9 +13,10 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(js_name = runWithDiagnostics)]
 pub fn run_source(input: &str, print_callback: Function) -> JsValue {
     set_panic_hook();
-    let callback = move |value: String, name: String| {
+    let callback = move |event: PrintEvent| {
+        let name = event.name.unwrap_or_default();
         print_callback
-            .call2(&JsValue::NULL, &value.into(), &name.into())
+            .call2(&JsValue::NULL, &event.value.into(), &name.into())
             .unwrap();
     };
     let mut engine = Engine::new();

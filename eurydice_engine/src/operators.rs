@@ -17,7 +17,10 @@ use crate::{
 ///
 /// Arithmetic that overflowed is the operation's own fault and reads as a math
 /// error; values the operation is not defined for name the value at fault.
-fn op_error_at(range: ast::Range, action: &'static str) -> impl Fn(ElementOpError) -> RuntimeError {
+fn op_error_at(
+    range: ast::ByteRange,
+    action: &'static str,
+) -> impl Fn(ElementOpError) -> RuntimeError {
     move |error| match error {
         ElementOpError::Math(message) => RuntimeError::MathError { range, message },
         ElementOpError::Mismatch(mismatch) => {
@@ -217,7 +220,7 @@ fn apply_math_op(
 pub(crate) fn apply_binary_op(
     op: &WithRange<BinaryOp>,
     left: &RuntimeValue,
-    left_range: ast::Range,
+    left_range: ast::ByteRange,
     right: &RuntimeValue,
     lowest_first: bool,
 ) -> Result<RuntimeValue, RuntimeError> {
@@ -428,7 +431,7 @@ fn broadcast_binary(
     right: &RuntimeValue,
     element_op: impl Fn(&ElementValue, &ElementValue) -> Result<ElementValue, RuntimeError>,
     list_list_op: impl Fn(&[ElementValue], &[ElementValue]) -> Result<ElementValue, RuntimeError>,
-    range: ast::Range,
+    range: ast::ByteRange,
 ) -> Result<RuntimeValue, RuntimeError> {
     // Broadcasting over a sequence sums the results, so the results have to be
     // summable; that is discovered here rather than predicted beforehand.
@@ -496,7 +499,7 @@ fn comp_binary_op(
     right: &RuntimeValue,
     int_comp: impl Fn(i32, i32) -> i32,
     list_comp: impl Fn(&[i32], &[i32]) -> i32,
-    range: ast::Range,
+    range: ast::ByteRange,
 ) -> Result<RuntimeValue, RuntimeError> {
     // Ordering is only defined on numbers, so each value is asked for one as it
     // is reached.
@@ -528,7 +531,7 @@ fn equality_binary_op(
     left: &RuntimeValue,
     right: &RuntimeValue,
     equal: bool,
-    range: ast::Range,
+    range: ast::ByteRange,
 ) -> Result<RuntimeValue, RuntimeError> {
     // Equality is total: values of different kinds are simply never equal, so
     // nothing here can fail. The empty sum is the one value that compares
@@ -591,7 +594,7 @@ fn normalize_dice_count(arg: &RuntimeValue) -> Result<DiceCount, ElementMismatch
 fn make_d(
     left: Option<&RuntimeValue>,
     right: &RuntimeValue,
-    range: ast::Range,
+    range: ast::ByteRange,
 ) -> Result<RuntimeValue, RuntimeError> {
     let repeat = match left {
         Some(left) => normalize_dice_count(left).map_err(|mismatch| {

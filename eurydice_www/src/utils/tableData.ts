@@ -49,7 +49,7 @@ export function getAllUniqueOutcomes(
 ): number[] {
   const allOutcomes = new Set<number>();
   distributions.forEach(([, distribution]) => {
-    distribution.probabilities.forEach(([[outcome]]) => {
+    distribution.entries.forEach(([[outcome]]) => {
       allOutcomes.add(outcome);
     });
   });
@@ -73,7 +73,7 @@ export function computeTableData(
     distributions.forEach(([, distribution]) => {
       const probability = Math.min(
         100,
-        distribution.probabilities.reduce(
+        distribution.entries.reduce(
           (total, [[value], entryProbability]) => {
             const include =
               mode === DisplayMode.AtMost
@@ -100,7 +100,7 @@ export function computeDistributionStatistics(
   distributions: NamedScalarDistribution[]
 ): DistributionStatistics[] {
   return distributions.map(([, distribution]) => {
-    const data = distribution.probabilities;
+    const data = distribution.entries;
     const outcomes = data.map(([[outcome]]) => outcome);
     const probabilities = data.map(([, probability]) => probability);
 
@@ -137,7 +137,7 @@ export function calculateBracketingProbabilities(
   let pBetween = 0; // P(Lower <= X <= Upper)
   let pUpper = 0; // P(X > Upper)
 
-  for (const [[outcome], probability] of distribution.probabilities) {
+  for (const [[outcome], probability] of distribution.entries) {
     if (outcome < lowerBound) {
       pLower += probability;
     } else if (outcome >= lowerBound && outcome <= upperBound) {

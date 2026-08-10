@@ -1,11 +1,12 @@
 use eurydice_cli::{format_output_probabilities, print_engine_diagnostics};
-use eurydice_engine::Engine;
+use eurydice_engine::{Engine, PrintEvent};
 
 fn main() {
     let mut rl = rustyline::DefaultEditor::new().unwrap();
     let mut engine = Engine::new();
-    engine.set_print_callback(|value, name| {
-        println!("{}: {}", name, value);
+    engine.set_print_callback(|event: PrintEvent| match event.name {
+        Some(name) => println!("{}: {}", name, event.value),
+        None => println!("{}", event.value),
     });
     let mut code = String::new();
     while let Ok(line) = rl.readline(if code.is_empty() { "> " } else { ". " }) {
