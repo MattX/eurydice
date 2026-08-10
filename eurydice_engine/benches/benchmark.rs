@@ -1,37 +1,23 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use eurydice_engine::{
-    ast::{Statement, WithRange},
-    eval::Evaluator,
-    output::Distribution,
-};
+use eurydice_engine::Engine;
 
 criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
 
 fn criterion_benchmark(c: &mut Criterion) {
     for (name, source) in PROGRAMS {
-        let parsed = eurydice_engine::grammar::BodyParser::new()
-            .parse(source)
-            .unwrap_or_else(|error| panic!("`{name}` failed to parse: {error:?}"));
+        // Each program is parsed once, outside the measured closure: parsing
+        // costs a quarter to a third of a short pool program's total time,
+        // which would swamp the evaluation signal these benchmarks watch.
+        let program = Engine::new()
+            .compile(source)
+            .unwrap_or_else(|report| panic!("`{name}` failed to parse: {:?}", report.error()));
         c.bench_function(name, |b| {
-            b.iter(|| execute_all(&mut Evaluator::new(), &parsed))
+            // A fresh engine per iteration: definitions and settings persist
+            // across runs, so a shared one would not be measuring the same work
+            // twice.
+            b.iter(|| std::hint::black_box(Engine::new().run(&program)))
         });
-    }
-}
-
-fn execute_all(eval: &mut Evaluator, parsed: &[WithRange<Statement>]) {
-    for stmt in parsed {
-        eval.execute(stmt).unwrap();
-    }
-    // `output` stores its value as it stands, so summing a pool and laying out
-    // its outcomes only happens when the result is rendered. Draining the
-    // outputs here is what puts that work inside the measurement.
-    for output in eval.take_outputs() {
-        std::hint::black_box(Distribution::from_runtime(
-            output.value,
-            output.field_names,
-            eval.symbols(),
-        ));
     }
 }
 

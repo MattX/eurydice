@@ -2,6 +2,15 @@
 name = "eurydice_engine"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.90"
+description = "Dice probability engine implementing the AnyDice language, using the Icepool algorithm"
+repository = "https://github.com/MattX/eurydice"
+homepage = "https://eurydice.terbium.io"
+documentation = "https://docs.rs/eurydice_engine"
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["dice", "probability", "anydice", "rpg", "tabletop"]
+categories = ["game-development", "mathematics", "parser-implementations"]
 
 [lib]
 name = "eurydice_engine"

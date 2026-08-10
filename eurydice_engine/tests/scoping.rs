@@ -1,31 +1,24 @@
-use eurydice_engine::{
-    eval::{Evaluator, RuntimeValue},
-    grammar,
-};
+use eurydice_engine::Engine;
 
+/// An error raised inside a function unwinds the frame the call pushed. The
+/// binding the caller sees afterwards is the top-level `X: 1`, not the `9` the
+/// failing call bound to the parameter that shadows it.
+///
+/// A submission that fails is abandoned, so the surviving binding is observed
+/// from the next one — which is also how an interactive session meets it.
 #[test]
 fn a_function_frame_is_popped_after_an_error() {
-    let statements = grammar::BodyParser::new()
-        .parse(
-            r#"
-            X: 1
-            function: fail X:n { result: X / 0 }
-            output [fail 9]
-            output X
-            "#,
-        )
-        .unwrap();
-    let mut evaluator = Evaluator::new();
-    let mut statements = statements.into_iter();
+    let mut engine = Engine::new();
+    let setup = engine.run_with_diagnostics("X: 1\nfunction: fail X:n { result: X / 0 }");
+    assert_eq!(setup.error(), None);
 
-    evaluator.execute(&statements.next().unwrap()).unwrap();
-    evaluator.execute(&statements.next().unwrap()).unwrap();
-    assert!(evaluator.execute(&statements.next().unwrap()).is_err());
-    evaluator.execute(&statements.next().unwrap()).unwrap();
+    let failed = engine.run_with_diagnostics("output [fail 9]");
+    assert!(failed.error().is_some());
 
-    let outputs = evaluator.take_outputs();
-    let RuntimeValue::Element(value) = &outputs[0].value else {
-        panic!("expected an element, got {:?}", outputs[0].value);
-    };
-    assert_eq!(value.as_int(), Some(1));
+    let report = engine.run_with_diagnostics("output X");
+    assert_eq!(report.error(), None);
+    assert_eq!(
+        report.outputs[0].distribution.probabilities,
+        vec![(vec![1], 1.0)]
+    );
 }

@@ -1,7 +1,6 @@
 use malachite::base::num::conversion::traits::RoundingFrom;
 use malachite::{Natural, base::rounding_modes::RoundingMode, rational::Rational};
 use serde::Serialize;
-use std::fmt::Write;
 
 use crate::dice::Pool;
 use crate::eval::{ElementValue, RuntimeValue, SymbolTable, sum_pool};
@@ -254,7 +253,7 @@ fn pool_output(
     }
 }
 
-pub fn to_probabilities_generic<T: Clone>(ordered_outcomes: &[(T, Natural)]) -> Vec<(T, f64)> {
+fn to_probabilities_generic<T: Clone>(ordered_outcomes: &[(T, Natural)]) -> Vec<(T, f64)> {
     let total: Natural = ordered_outcomes.iter().map(|(_, count)| count).sum();
     ordered_outcomes
         .iter()
@@ -269,34 +268,6 @@ pub fn to_probabilities_generic<T: Clone>(ordered_outcomes: &[(T, Natural)]) -> 
             )
         })
         .collect()
-}
-
-pub fn export_anydice_format(name: &str, pool: &Pool) -> String {
-    let pool = pool_for_output(pool);
-    let probabilities = to_probabilities(pool.ordered_outcomes());
-    let mean = mean(&probabilities);
-    let stddev = stddev(&probabilities, mean);
-    let (min, max) = min_and_max(&probabilities);
-
-    let mut string = String::new();
-    writeln!(string, "\"{}\",{},{},{},{}", name, mean, stddev, min, max).unwrap();
-    writeln!(string, "#,%").unwrap();
-    for (outcome, prob) in probabilities {
-        writeln!(string, "{},{}", outcome, prob * 100.0).unwrap();
-    }
-    string
-}
-
-fn pool_for_output(pool: &Pool) -> Pool {
-    if pool.is_empty() {
-        pool.clone()
-    } else {
-        pool.sum()
-    }
-}
-
-pub fn to_probabilities(ordered_outcomes: &[(i32, Natural)]) -> Vec<(i32, f64)> {
-    to_probabilities_generic(ordered_outcomes)
 }
 
 pub fn mean(probabilities: &[(i32, f64)]) -> f64 {

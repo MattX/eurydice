@@ -9,8 +9,8 @@
 use approx::relative_ne;
 use csv::{ReaderBuilder, WriterBuilder};
 use eurydice_engine::{
-    eval, grammar,
-    output::{Distribution, FieldSchema, mean, min_and_max, stddev},
+    Distribution, Engine, FieldSchema,
+    output::{mean, min_and_max, stddev},
 };
 use pretty_assertions::StrComparison;
 use std::{collections::HashSet, fmt::Write, fs, path::Path};
@@ -81,30 +81,19 @@ fn run_fixture_directory(directory: &str) {
                 }
             };
 
-            let mut evaluator = eval::Evaluator::new();
-            let parser = grammar::BodyParser::new();
-
-            let statements = match parser.parse(program) {
-                Ok(expr) => expr,
-                Err(err) => {
-                    paths_with_errors.insert(path_string);
-                    println!("Parsing error in file {}: {}", path.display(), err);
-                    continue;
-                }
-            };
-
-            for statement in statements {
-                match evaluator.execute(&statement) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        paths_with_errors.insert(path_string.clone());
-                        println!("Evaluation error in file {}: {:?}", path.display(), e);
-                        continue;
-                    }
-                }
+            let report = Engine::new().run_with_diagnostics(program);
+            if let Some(error) = report.error() {
+                paths_with_errors.insert(path_string);
+                println!(
+                    "Error in file {}: [{}] {}",
+                    path.display(),
+                    error.code,
+                    error.summary
+                );
+                continue;
             }
 
-            let outputs = evaluator.take_outputs();
+            let outputs = report.outputs;
             if outputs.len() != expected_results.len() {
                 paths_with_errors.insert(path_string.clone());
                 println!(
@@ -122,12 +111,8 @@ fn run_fixture_directory(directory: &str) {
             {
                 let mismatch = match expected {
                     ExpectedResult::AnyDice(expected) => {
-                        let distribution = Distribution::from_runtime(
-                            output.value,
-                            output.field_names,
-                            evaluator.symbols(),
-                        );
-                        let actual = match create_anydice_result(&output.name, &distribution) {
+                        let actual = match create_anydice_result(&output.name, &output.distribution)
+                        {
                             Ok(actual) => actual,
                             Err(error) => {
                                 paths_with_errors.insert(path_string.clone());
@@ -143,12 +128,7 @@ fn run_fixture_directory(directory: &str) {
                             .then(|| export_anydice_result(&actual))
                     }
                     ExpectedResult::Distribution(expected) => {
-                        let distribution = Distribution::from_runtime(
-                            output.value,
-                            output.field_names,
-                            evaluator.symbols(),
-                        );
-                        let actual = create_distribution_result(&output.name, distribution);
+                        let actual = create_distribution_result(&output.name, output.distribution);
                         (!compare_distribution_results(&actual, expected))
                             .then(|| export_distribution_result(&actual))
                     }
@@ -323,11 +303,11 @@ fn parse_distribution_result<'a>(
 /// Reads an AnyDice-comparable result out of the distribution a frontend would
 /// receive.
 ///
-/// This deliberately goes through [`Distribution::from_runtime`] rather than
-/// summing the pool itself. A harness that converts outputs its own way can only
-/// test its own conversion: it once rendered `[explode d{}]` as no outcomes
-/// while the real engine rendered `0` at 100%, and the fixture asserting the
-/// AnyDice answer passed regardless.
+/// This reads the [`Distribution`] the engine itself produced rather than
+/// summing the pool. A harness that converts outputs its own way can only test
+/// its own conversion: it once rendered `[explode d{}]` as no outcomes while the
+/// real engine rendered `0` at 100%, and the fixture asserting the AnyDice
+/// answer passed regardless.
 ///
 /// An empty distribution needs no special case — it has no outcomes, and the
 /// statistics of nothing are the zeroes AnyDice reports.

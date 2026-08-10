@@ -10,7 +10,7 @@
 //!
 //! [^icepool]: Liu, A. J. (2022). Icepool: Efficient Computation of Dice Pool Probabilities.
 //! _Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital
-//! Entertainment_, 18(1), 258-265. https://doi.org/10.1609/aiide.v18i1.21971
+//! Entertainment_, 18(1), 258-265. <https://doi.org/10.1609/aiide.v18i1.21971>
 use malachite::Natural;
 use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
 use malachite::base::num::basic::traits::{One, Zero};

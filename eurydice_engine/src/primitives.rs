@@ -16,7 +16,7 @@ use crate::{
 /// Evaluation context passed to every primitive, bundling the ambient settings
 /// and per-call metadata that most primitives don't need but a few do.
 #[derive(Debug, Clone, Copy)]
-pub struct PrimitiveCtx<'a> {
+pub(crate) struct PrimitiveCtx<'a> {
     /// Source ranges of the arguments, parallel to `args`.
     pub arg_ranges: &'a [ast::Range],
     /// The configured `set "explode depth"`.
@@ -33,7 +33,7 @@ type PrimitiveExecutor =
     fn(&[RuntimeValue], PrimitiveCtx) -> Result<RuntimeValue, crate::eval::RuntimeError>;
 
 #[derive(Debug)]
-pub struct Primitive {
+pub(crate) struct Primitive {
     pub identifier: &'static str,
     pub arg_types: &'static [Option<StaticType>],
     pub execute: PrimitiveExecutor,
@@ -588,7 +588,7 @@ macro_rules! define_primitives {
         )+
     ) => {
         $(
-            pub static $constant: Primitive = Primitive {
+            pub(crate) static $constant: Primitive = Primitive {
                 identifier: $name,
                 arg_types: $arg_types,
                 execute: $execute,
@@ -783,7 +783,7 @@ fn keep_list_for_primitive(
     Ok(keep_list)
 }
 
-pub fn register_primitives(functions: &mut HashMap<String, Function>) {
+pub(crate) fn register_primitives(functions: &mut HashMap<String, Function>) {
     functions.extend(
         PRIMITIVES
             .iter()

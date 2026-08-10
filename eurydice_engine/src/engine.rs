@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use crate::{
+    ast::{Statement, WithRange},
     diagnostic::{
         DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, SourceId, UndefinedName,
         add_later_definition, parse_error, runtime_diagnostic, undefined_name,
@@ -39,9 +40,32 @@ impl RunReport {
     }
 }
 
+/// A parsed program, ready to run.
+///
+/// Parsing is a substantial share of a short program's cost — a quarter to a
+/// third of the total for a small pool program — so a caller that runs the same
+/// source repeatedly should parse it once with [`Engine::compile`] and then run
+/// it with [`Engine::run`].
+///
+/// A program carries its own source text and is independent of the engine that
+/// compiled it: it may be run on any engine, any number of times. Each run is a
+/// separate submission, exactly as if the text had been submitted again.
+#[derive(Debug, Clone)]
+pub struct Program {
+    text: String,
+    statements: Vec<WithRange<Statement>>,
+}
+
+impl Program {
+    /// The source text this program was parsed from.
+    pub fn source(&self) -> &str {
+        &self.text
+    }
+}
+
 /// Stateful façade for parsing and evaluating Eurydice programs.
 ///
-/// Definitions and settings persist between calls to
+/// Definitions and settings persist between calls to [`Engine::run`] and
 /// [`Engine::run_with_diagnostics`], making the same API suitable for both
 /// one-shot execution and interactive sessions.
 pub struct Engine {
@@ -73,14 +97,49 @@ impl Engine {
         self.evaluator.set_print_callback(Box::new(callback));
     }
 
-    /// Parses and executes a source submission, returning its outputs and any
-    /// diagnostics it produced.
+    /// Parses a submission without running it.
+    ///
+    /// On failure the parse error comes back as a whole [`RunReport`], because
+    /// rendering it needs the source text it points into as well as the
+    /// diagnostic itself.
+    pub fn compile(&mut self, source: &str) -> Result<Program, RunReport> {
+        match grammar::BodyParser::new().parse(source) {
+            Ok(statements) => Ok(Program {
+                text: source.to_string(),
+                statements,
+            }),
+            Err(error) => {
+                // A submission that fails to parse is still rendered against
+                // its own source, so it has to be registered to be pointed at.
+                self.collect_garbage();
+                let source_id = self.register_source(source);
+                let mut diagnostics = self.evaluator.take_diagnostics();
+                diagnostics.push(parse_error(error, source_id, source));
+                Err(self.report(Vec::new(), diagnostics))
+            }
+        }
+    }
+
+    /// Executes a compiled program, returning its outputs and any diagnostics
+    /// it produced.
+    ///
+    /// Each call is a fresh submission: the program's text is recorded again
+    /// under a new source, so a program may be run repeatedly and diagnostics
+    /// from each run point into that run's own submission.
     ///
     /// A diagnostic may point into an earlier submission that defined a
     /// function, so the report carries the text of every source its own
     /// diagnostics reference.
-    pub fn run_with_diagnostics(&mut self, source: &str) -> RunReport {
-        let outcome = self.run_internal(source);
+    pub fn run(&mut self, program: &Program) -> RunReport {
+        self.collect_garbage();
+        let source_id = self.register_source(&program.text);
+
+        // Outputs belong to one submission and must never leak out of a failed
+        // previous run.
+        self.evaluator.take_outputs();
+        self.evaluator.begin_submission(source_id);
+
+        let outcome = self.execute(program, source_id);
         // Warnings are collected during evaluation, so they precede the error
         // that stopped the submission.
         let mut diagnostics = self.evaluator.take_diagnostics();
@@ -92,6 +151,44 @@ impl Engine {
                 Vec::new()
             }
         };
+        self.report(outputs, diagnostics)
+    }
+
+    /// Parses and executes a source submission, returning its outputs and any
+    /// diagnostics it produced.
+    ///
+    /// This is [`Engine::compile`] followed by [`Engine::run`], which is what a
+    /// caller that runs each source once wants. To run one program repeatedly,
+    /// compile it once and call [`Engine::run`] directly.
+    pub fn run_with_diagnostics(&mut self, source: &str) -> RunReport {
+        match self.compile(source) {
+            Ok(program) => self.run(&program),
+            Err(report) => report,
+        }
+    }
+
+    /// A source outlives its submission only while a persisted function can
+    /// still be traced back to it. Dropping the rest keeps an interactive
+    /// session — which resubmits a growing program on every keystroke — from
+    /// grinding to a halt.
+    fn collect_garbage(&mut self) {
+        let live = self.evaluator.live_source_ids();
+        self.sources.retain(|source| live.contains(&source.id));
+    }
+
+    /// Records a submission's text so diagnostics can point into it.
+    fn register_source(&mut self, text: &str) -> SourceId {
+        let source_id = SourceId(self.next_source_id);
+        self.next_source_id += 1;
+        self.sources.push(DiagnosticSource {
+            id: source_id,
+            name: format!("submission {}", source_id.0 + 1),
+            text: text.to_string(),
+        });
+        source_id
+    }
+
+    fn report(&self, outputs: Vec<EngineOutput>, diagnostics: Vec<EngineDiagnostic>) -> RunReport {
         let sources = self.referenced_sources(&diagnostics);
         RunReport {
             outputs,
@@ -127,32 +224,12 @@ impl Engine {
             .collect()
     }
 
-    fn run_internal(&mut self, source: &str) -> Result<Vec<EngineOutput>, Box<EngineDiagnostic>> {
-        // A source outlives its submission only while a persisted function can
-        // still be traced back to it. Dropping the rest here keeps an
-        // interactive session — which resubmits a growing program on every
-        // keystroke — from grinding to a halt.
-        let live = self.evaluator.live_source_ids();
-        self.sources.retain(|source| live.contains(&source.id));
-
-        let source_id = SourceId(self.next_source_id);
-        self.next_source_id += 1;
-        self.sources.push(DiagnosticSource {
-            id: source_id,
-            name: format!("submission {}", source_id.0 + 1),
-            text: source.to_string(),
-        });
-
-        // Outputs belong to one submission and must never leak out of a failed
-        // previous run.
-        self.evaluator.take_outputs();
-        self.evaluator.begin_submission(source_id);
-
-        let statements = match grammar::BodyParser::new().parse(source) {
-            Ok(statements) => statements,
-            Err(error) => return Err(Box::new(parse_error(error, source_id, source))),
-        };
-
+    fn execute(
+        &mut self,
+        program: &Program,
+        source_id: SourceId,
+    ) -> Result<Vec<EngineOutput>, Box<EngineDiagnostic>> {
+        let statements = &program.statements;
         for (statement_index, statement) in statements.iter().enumerate() {
             if let Err(error) = self.evaluator.execute(statement) {
                 self.evaluator.take_outputs();
@@ -199,6 +276,79 @@ mod tests {
         let report = engine.run_with_diagnostics(source);
         assert_eq!(report.error(), None, "{source}");
         report.outputs
+    }
+
+    /// The point of compiling separately: one parse, many runs. Each run is its
+    /// own submission, so a program that binds a name binds it again.
+    #[test]
+    fn a_compiled_program_can_be_run_repeatedly() {
+        let mut engine = Engine::new();
+        let program = engine
+            .compile("X: 1\noutput X named \"x\"")
+            .expect("parses");
+
+        for _ in 0..3 {
+            let report = engine.run(&program);
+            assert_eq!(report.error(), None);
+            assert_eq!(
+                report.outputs[0].distribution.probabilities,
+                vec![(vec![1], 1.0)]
+            );
+        }
+    }
+
+    /// A program carries its own text and holds no reference to the engine that
+    /// parsed it, so it runs anywhere — including on an engine that has never
+    /// seen the source.
+    #[test]
+    fn a_program_is_independent_of_the_engine_that_compiled_it() {
+        let program = Engine::new().compile("output 2d2").expect("parses");
+
+        let report = Engine::new().run(&program);
+
+        assert_eq!(report.error(), None);
+        assert_eq!(
+            report.outputs[0].distribution.probabilities,
+            vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
+        );
+        // The run registered the program's text as its own submission, so the
+        // report can be rendered without the caller supplying the source.
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.sources[0].text, "output 2d2");
+    }
+
+    /// A failed parse comes back as a report rather than a bare diagnostic,
+    /// because rendering it needs the source the diagnostic points into.
+    #[test]
+    fn a_failed_compile_reports_against_its_own_source() {
+        let report = Engine::new()
+            .compile("output (1")
+            .expect_err("does not parse");
+
+        let error = report.error().expect("a parse error");
+        assert_eq!(error.code, DiagnosticCode::UnclosedDelimiter);
+        let range = error.primary_range().expect("a primary range");
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.sources[0].id, range.source);
+    }
+
+    /// Compiling and running separately must reach the same state as submitting
+    /// the source directly — `run_with_diagnostics` is defined as the two.
+    #[test]
+    fn compile_then_run_matches_a_direct_submission() {
+        let source = "function: double X:n { result: X * 2 }\noutput [double d3]";
+
+        let direct = Engine::new().run_with_diagnostics(source);
+
+        let mut engine = Engine::new();
+        let program = engine.compile(source).expect("parses");
+        let split = engine.run(&program);
+
+        assert_eq!(direct.error(), None);
+        assert_eq!(
+            direct.outputs[0].distribution.probabilities,
+            split.outputs[0].distribution.probabilities
+        );
     }
 
     #[test]

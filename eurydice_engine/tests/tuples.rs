@@ -1,34 +1,12 @@
-use eurydice_engine::{
-    DiagnosticCode, Engine, EngineDiagnostic,
-    eval::{EvaluatedOutput, Evaluator, SymbolTable},
-    grammar,
-    output::Distribution,
-};
+//! Tuple outcomes: construction, arity, and the operations they support.
+//!
+//! Error assertions use each diagnostic's stable code rather than its wording,
+//! which is free to change without breaking anyone.
 
-/// Runs a program, returning its outputs together with the symbol table
-/// needed to render them: a symbol value is an index, and the evaluator that
-/// assigned it does not outlive this call.
-fn run(program: &str) -> Result<(Vec<EvaluatedOutput>, SymbolTable), String> {
-    let statements = grammar::BodyParser::new()
-        .parse(program)
-        .map_err(|error| format!("{error:?}"))?;
-    let mut evaluator = Evaluator::new();
-    for statement in statements {
-        evaluator
-            .execute(&statement)
-            .map_err(|error| format!("{error:?}"))?;
-    }
-    let symbols = evaluator.symbols().clone();
-    Ok((evaluator.take_outputs(), symbols))
-}
+mod common;
 
-/// The diagnostic a failing program produces, or `None` if it succeeded.
-///
-/// Assertions here use the diagnostic's stable code rather than its wording,
-/// which is free to change without breaking anyone.
-fn diagnostic(program: &str) -> Option<EngineDiagnostic> {
-    Engine::new().run_with_diagnostics(program).error().cloned()
-}
+use common::{diagnostic, only_probabilities, probabilities};
+use eurydice_engine::DiagnosticCode;
 
 #[test]
 fn tuple_output_labels_require_tuple_outcomes_and_matching_arity() {
@@ -102,13 +80,9 @@ fn rejects_invalid_tuple_operations() {
 /// shape from, and the empty sum takes the tuple's.
 #[test]
 fn a_die_with_no_faces_is_the_identity_whatever_it_meets() {
-    let (outputs, symbols) = run("output 2d{} + [tuple 1 2] output 2d{1:0} + [tuple 1 2]")
-        .expect("a die with no faces adds nothing");
-    for output in &outputs {
-        assert_eq!(
-            Distribution::from_runtime(output.value.clone(), None, &symbols).probabilities,
-            vec![(vec![1, 2], 1.0)]
-        );
+    // A die with no faces adds nothing, however it was written.
+    for outcomes in probabilities("output 2d{} + [tuple 1 2] output 2d{1:0} + [tuple 1 2]") {
+        assert_eq!(outcomes, vec![(vec![1, 2], 1.0)]);
     }
 }
 
@@ -116,46 +90,38 @@ fn a_die_with_no_faces_is_the_identity_whatever_it_meets() {
 /// than failing — the same rule that lets a symbol be compared with a number.
 #[test]
 fn tuples_of_different_arity_compare_unequal() {
-    let (outputs, symbols) =
-        run("output [tuple 1 2] = [tuple 1 2 3] output [tuple 1 2] != [tuple 1 2 3]")
-            .expect("comparing different tuple types is not an error");
-    assert_eq!(
-        Distribution::from_runtime(outputs[0].value.clone(), None, &symbols).probabilities,
-        vec![(vec![0], 1.0)]
-    );
-    assert_eq!(
-        Distribution::from_runtime(outputs[1].value.clone(), None, &symbols).probabilities,
-        vec![(vec![1], 1.0)]
-    );
+    // Comparing different tuple types is not an error.
+    let outputs =
+        probabilities("output [tuple 1 2] = [tuple 1 2 3] output [tuple 1 2] != [tuple 1 2 3]");
+    assert_eq!(outputs[0], vec![(vec![0], 1.0)]);
+    assert_eq!(outputs[1], vec![(vec![1], 1.0)]);
 }
 
 /// Multisets work for every non-additive element type, not just bare enums.
 #[test]
 fn multidimensional_pools_of_tuples_with_enum_fields_iterate_as_multisets() {
-    let (outputs, symbols) = run(r#"
+    // Pools of tuples with an enum field are constructible.
+    let outputs = probabilities(
+        r#"
         enum { MISS, HIT }
         FACES: {[tuple 1 MISS], [tuple 2 HIT]}
         function: hits SEQ:s { result: [count {[tuple 2 HIT]} in SEQ] }
         output [hits 2dFACES]
         output [count {[tuple 2 HIT]} in 2dFACES]
-        "#)
-    .expect("pools of tuples with an enum field are constructible");
+        "#,
+    );
     let expected = vec![(vec![0], 0.25f64), (vec![1], 0.5f64), (vec![2], 0.25f64)];
-    for output in &outputs {
-        assert_eq!(
-            Distribution::from_runtime(output.value.clone(), None, &symbols).probabilities,
-            expected
-        );
+    for outcomes in &outputs {
+        assert_eq!(outcomes, &expected);
     }
 }
 
 /// Loosening pool construction must not stop all-`int` tuples from summing.
 #[test]
 fn multidimensional_pools_of_int_tuples_still_sum_componentwise() {
-    let (outputs, symbols) = run("output 2d{[tuple 1 10], [tuple 2 20]}")
-        .expect("pools of additive tuples are summable");
+    // Pools of additive tuples are summable.
     assert_eq!(
-        Distribution::from_runtime(outputs[0].value.clone(), None, &symbols).probabilities,
+        only_probabilities("output 2d{[tuple 1 10], [tuple 2 20]}"),
         vec![
             (vec![2, 20], 0.25f64),
             (vec![3, 30], 0.5f64),

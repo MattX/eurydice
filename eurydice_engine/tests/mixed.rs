@@ -3,48 +3,10 @@
 //! The motivating shape is a die with mostly numeric faces plus a symbolic
 //! one, such as `d{0:2, 1:2, 2, TIMES_TWO}`.
 
-use eurydice_engine::{
-    DiagnosticCode, Engine, EngineDiagnostic, LabelStyle,
-    eval::{EvaluatedOutput, Evaluator, SymbolTable},
-    grammar,
-    output::{Distribution, FieldSchema},
-};
+mod common;
 
-/// Runs a program, returning its outputs together with the symbol table needed
-/// to render them: a symbol value is an index, and the evaluator that assigned
-/// it does not outlive this call.
-fn run(program: &str) -> Result<(Vec<EvaluatedOutput>, SymbolTable), String> {
-    let statements = grammar::BodyParser::new()
-        .parse(program)
-        .map_err(|error| format!("{error:?}"))?;
-    let mut evaluator = Evaluator::new();
-    for statement in statements {
-        evaluator
-            .execute(&statement)
-            .map_err(|error| format!("{error:?}"))?;
-    }
-    let symbols = evaluator.symbols().clone();
-    Ok((evaluator.take_outputs(), symbols))
-}
-
-/// The probabilities of every output of a program that is expected to run.
-fn probabilities(program: &str) -> Vec<Vec<(Vec<i32>, f64)>> {
-    let (outputs, symbols) = run(program).unwrap_or_else(|error| panic!("{program}: {error}"));
-    outputs
-        .into_iter()
-        .map(|output| {
-            Distribution::from_runtime(output.value, output.field_names, &symbols).probabilities
-        })
-        .collect()
-}
-
-fn error(program: &str) -> EngineDiagnostic {
-    Engine::new()
-        .run_with_diagnostics(program)
-        .error()
-        .unwrap_or_else(|| panic!("expected an error for {program}"))
-        .clone()
-}
+use common::{distributions, error, probabilities, run};
+use eurydice_engine::{DiagnosticCode, FieldSchema, LabelStyle};
 
 /// The die this feature exists for, declared as a list and as a pool.
 const DIE: &str = "enum { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
@@ -218,8 +180,7 @@ fn tuples_carry_a_mixed_field_through_construction_and_projection() {
         ]]
     );
 
-    let (outputs, symbols) = run(&format!("{DIE} output [tuple DIE 1]")).expect("runs");
-    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+    let distribution = distributions(&format!("{DIE} output [tuple DIE 1]")).remove(0);
     assert_eq!(
         distribution.fields,
         vec![
@@ -375,8 +336,7 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
         vec![vec![(vec![0], 0.5f64), (vec![1], 0.5f64)]]
     );
 
-    let (outputs, symbols) = run("enum { A } X: {} + {} output {X, A}").expect("mixed output runs");
-    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+    let distribution = distributions("enum { A } X: {} + {} output {X, A}").remove(0);
     assert_eq!(
         distribution.fields,
         vec![FieldSchema::Enum {
@@ -395,8 +355,7 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
 #[test]
 fn mixed_fields_display_as_categories() {
     for program in ["enum { A } output {A, 1}", "enum { A } output d{A, 1}"] {
-        let (outputs, symbols) = run(program).expect("mixed output runs");
-        let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+        let distribution = distributions(program).remove(0);
         assert_eq!(
             distribution.fields,
             vec![FieldSchema::Enum {
@@ -411,9 +370,7 @@ fn mixed_fields_display_as_categories() {
         );
     }
 
-    let (outputs, symbols) =
-        run("enum { A } output [tuple 1, d{A, 2}]").expect("mixed tuple output runs");
-    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+    let distribution = distributions("enum { A } output [tuple 1, d{A, 2}]").remove(0);
     assert_eq!(
         distribution.fields,
         vec![
@@ -429,8 +386,7 @@ fn mixed_fields_display_as_categories() {
 /// though its outcome type is the same one a mixed pool has.
 #[test]
 fn all_symbol_distributions_still_display() {
-    let (outputs, symbols) = run("enum { MISS, HIT } output d{MISS, HIT}").expect("runs");
-    let distribution = Distribution::from_runtime(outputs[0].value.clone(), None, &symbols);
+    let distribution = distributions("enum { MISS, HIT } output d{MISS, HIT}").remove(0);
     let FieldSchema::Enum { labels } = &distribution.fields[0] else {
         panic!("expected a symbol field");
     };

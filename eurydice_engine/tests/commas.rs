@@ -1,10 +1,9 @@
 //! Invalid uses of optional comma separators between function arguments.
 
-use eurydice_engine::{DiagnosticCode, Engine, EngineDiagnostic};
+mod common;
 
-fn diagnostic(program: &str) -> Option<EngineDiagnostic> {
-    Engine::new().run_with_diagnostics(program).error().cloned()
-}
+use common::diagnostic;
+use eurydice_engine::{DiagnosticCode, EngineDiagnostic};
 
 fn mentions_a_comma(diagnostic: &EngineDiagnostic) -> bool {
     diagnostic
