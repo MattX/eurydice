@@ -39,7 +39,9 @@ export default function Toc({ contentRef }: TocProps) {
     const content = contentRef.current;
     if (!content) return;
 
-    const headings = Array.from(content.querySelectorAll<HTMLHeadingElement>("h2[id], h3[id]"));
+    const headings = Array.from(
+      content.querySelectorAll<HTMLHeadingElement>("h2[id], h3[id]"),
+    );
     const nextEntries = headings.map((heading) => ({
       id: heading.id,
       level: heading.tagName === "H2" ? (2 as const) : (3 as const),
@@ -47,7 +49,9 @@ export default function Toc({ contentRef }: TocProps) {
     }));
 
     const findCurrentHeading = () => {
-      const passedHeadings = headings.filter((heading) => heading.getBoundingClientRect().top <= 112);
+      const passedHeadings = headings.filter(
+        (heading) => heading.getBoundingClientRect().top <= 112,
+      );
       const current = passedHeadings[passedHeadings.length - 1];
       return current?.id ?? headings[0]?.id ?? "";
     };
@@ -72,9 +76,9 @@ export default function Toc({ contentRef }: TocProps) {
 
   useEffect(() => {
     const nav = desktopNavRef.current;
-    const activeLink = Array.from(nav?.querySelectorAll<HTMLAnchorElement>("a") ?? []).find(
-      (link) => link.hash === `#${activeId}`,
-    );
+    const activeLink = Array.from(
+      nav?.querySelectorAll<HTMLAnchorElement>("a") ?? [],
+    ).find((link) => link.hash === `#${activeId}`);
     if (!nav || !activeLink) return;
 
     const navBounds = nav.getBoundingClientRect();
@@ -83,7 +87,10 @@ export default function Toc({ contentRef }: TocProps) {
     if (linkBounds.top < navBounds.top) {
       nav.scrollBy({ top: linkBounds.top - navBounds.top, behavior: "smooth" });
     } else if (linkBounds.bottom > navBounds.bottom) {
-      nav.scrollBy({ top: linkBounds.bottom - navBounds.bottom, behavior: "smooth" });
+      nav.scrollBy({
+        top: linkBounds.bottom - navBounds.bottom,
+        behavior: "smooth",
+      });
     }
   }, [activeId]);
 
@@ -134,7 +141,10 @@ export default function Toc({ contentRef }: TocProps) {
         style={{ background: "var(--surface-2)", borderColor: "var(--border)" }}
       >
         <summary className="cursor-pointer font-semibold">On this page</summary>
-        <nav className="mt-3 max-h-80 overflow-y-auto" aria-label="Specification contents">
+        <nav
+          className="mt-3 max-h-80 overflow-y-auto"
+          aria-label="Specification contents"
+        >
           {contents}
         </nav>
       </details>
@@ -145,7 +155,9 @@ export default function Toc({ contentRef }: TocProps) {
           className="max-h-[calc(100vh-2rem)] overflow-y-auto pr-3"
           aria-label="Specification contents"
         >
-          <p className="mb-2 text-sm font-semibold text-slate-950 dark:text-slate-100">On this page</p>
+          <p className="mb-2 text-sm font-semibold text-slate-950 dark:text-slate-100">
+            On this page
+          </p>
           {contents}
         </nav>
       </aside>

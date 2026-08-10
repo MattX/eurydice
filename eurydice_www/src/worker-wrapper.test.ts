@@ -50,7 +50,9 @@ describe("WorkerWrapper", () => {
   it("buffers readiness and later events until a callback is attached", () => {
     const worker = fakeWorker();
     const wrapper = new WorkerWrapper(worker);
-    const ready = new MessageEvent("message", { data: { Ready: { primitives: [] } } });
+    const ready = new MessageEvent("message", {
+      data: { Ready: { primitives: [] } },
+    });
     worker.onmessage?.(ready);
     const report = new MessageEvent("message", { data: { Report: {} } });
     worker.onmessage?.(report);
@@ -58,6 +60,9 @@ describe("WorkerWrapper", () => {
 
     wrapper.setOnMessage(callback);
 
-    expect(callback.mock.calls.map(([event]) => event)).toEqual([ready, report]);
+    expect(callback.mock.calls.map(([event]) => event)).toEqual([
+      ready,
+      report,
+    ]);
   });
 });

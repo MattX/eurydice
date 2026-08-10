@@ -40,7 +40,8 @@ export function primitiveCompletionSource(
       ? bracketPrefix.from + 1
       : (wordPrefix?.from ?? context.pos);
     const closingBracket =
-      insideBracket && context.state.doc.sliceString(context.pos, context.pos + 1) === "]";
+      insideBracket &&
+      context.state.doc.sliceString(context.pos, context.pos + 1) === "]";
 
     return {
       from,

@@ -11,7 +11,10 @@ export default function SpecPage() {
       <Header />
       <div className="mx-auto grid max-w-7xl px-4 pt-6 pb-8 lg:grid-cols-[16rem_minmax(0,56rem)] lg:gap-10">
         <Toc contentRef={contentRef} />
-        <main ref={contentRef} className="document-content prose dark:prose-invert min-w-0 max-w-none">
+        <main
+          ref={contentRef}
+          className="document-content prose dark:prose-invert min-w-0 max-w-none"
+        >
           <Spec />
         </main>
       </div>

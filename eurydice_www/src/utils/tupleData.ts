@@ -5,9 +5,7 @@ import { Distribution, FieldSchema, ScalarDistribution } from "../util";
  * encodes `FieldSchema::Int` as the bare string "Int" and the struct
  * variant as `{ Categorical: { labels } }`.
  */
-export type WireFieldSchema =
-  | "Int"
-  | { Categorical: { labels: string[] } };
+export type WireFieldSchema = "Int" | { Categorical: { labels: string[] } };
 
 export interface WireDistribution {
   fields: WireFieldSchema[];
@@ -15,9 +13,7 @@ export interface WireDistribution {
   entries: [number[], number][];
 }
 
-export function normalizeFieldSchema(
-  wire: WireFieldSchema
-): FieldSchema {
+export function normalizeFieldSchema(wire: WireFieldSchema): FieldSchema {
   if (wire === "Int") return { kind: "int" };
   return {
     kind: "categorical",
@@ -34,10 +30,7 @@ export function normalizeDistribution(wire: WireDistribution): Distribution {
 }
 
 /** Display label for a single raw field value under its schema. */
-export function fieldValueLabel(
-  schema: FieldSchema,
-  value: number
-): string {
+export function fieldValueLabel(schema: FieldSchema, value: number): string {
   if (schema.kind === "categorical") {
     return schema.labels[value] ?? String(value);
   }
@@ -63,10 +56,7 @@ export interface FieldAxis {
  * the values observed in the distribution; integer fields fill the observed
  * range so gaps render as empty cells, matching the 1-D numeric chart.
  */
-export function fieldAxis(
-  schema: FieldSchema,
-  observed: number[]
-): FieldAxis {
+export function fieldAxis(schema: FieldSchema, observed: number[]): FieldAxis {
   if (schema.kind === "categorical") {
     return {
       values: schema.labels.map((_, index) => index),
@@ -80,10 +70,7 @@ export function fieldAxis(
   return { values, labels: values.map((value) => String(value)) };
 }
 
-export function observedValues(
-  dist: Distribution,
-  field: number
-): number[] {
+export function observedValues(dist: Distribution, field: number): number[] {
   return dist.entries.map(([outcome]) => outcome[field]);
 }
 
@@ -159,12 +146,12 @@ export interface TupleRow {
 /** Flattens a joint distribution into rows for the list-out table. */
 export function computeTupleRows(
   dist: Distribution,
-  sort: TupleSort
+  sort: TupleSort,
 ): TupleRow[] {
   const rows: TupleRow[] = dist.entries.map(([outcome, probability]) => ({
     values: outcome,
     labels: outcome.map((value, field) =>
-      fieldValueLabel(dist.fields[field], value)
+      fieldValueLabel(dist.fields[field], value),
     ),
     probability,
   }));

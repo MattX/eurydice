@@ -1,5 +1,9 @@
 import { ChartData } from "chart.js";
-import { FieldSchema, NamedScalarDistribution, ScalarDistribution } from "../util";
+import {
+  FieldSchema,
+  NamedScalarDistribution,
+  ScalarDistribution,
+} from "../util";
 
 export interface CategoricalOutcome {
   key: string;
@@ -84,7 +88,7 @@ function categoricalKey(field: FieldSchema, outcome: number): string {
 
 /** Numeric outcomes first, then observed symbols in their first displayed order. */
 export function categoricalOutcomes(
-  distributions: NamedScalarDistribution[]
+  distributions: NamedScalarDistribution[],
 ): CategoricalOutcome[] {
   const integers = new Set<number>();
   const symbols = new Map<string, string>();
@@ -111,7 +115,7 @@ export function categoricalOutcomes(
 }
 
 export function categoricalProbabilities(
-  distribution: ScalarDistribution
+  distribution: ScalarDistribution,
 ): Map<string, number> {
   const field = distribution.fields[0];
   const probabilities = new Map<string, number>();
@@ -124,13 +128,17 @@ export function categoricalProbabilities(
 
 /** Dense numeric range used by the line chart, or null for categorical data. */
 export function numericChartOutcomeRange(
-  distributions: NamedScalarDistribution[]
+  distributions: NamedScalarDistribution[],
 ): number | null {
-  if (distributions.some(([, distribution]) => distribution.fields[0].kind === "categorical")) {
+  if (
+    distributions.some(
+      ([, distribution]) => distribution.fields[0].kind === "categorical",
+    )
+  ) {
     return null;
   }
   const outcomes = distributions.flatMap(([, distribution]) =>
-    distribution.entries.map(([[outcome]]) => outcome)
+    distribution.entries.map(([[outcome]]) => outcome),
   );
   if (outcomes.length === 0) return null;
   return Math.max(...outcomes) - Math.min(...outcomes);
@@ -138,7 +146,7 @@ export function numericChartOutcomeRange(
 
 export function prepareCategoricalChartData(
   distributions: NamedScalarDistribution[],
-  isDarkMode = false
+  isDarkMode = false,
 ): ChartData<"bar", number[], string> {
   const outcomes = categoricalOutcomes(distributions);
   const colorGenerator = new ColorGenerator(isDarkMode);
@@ -161,7 +169,7 @@ export function prepareCategoricalChartData(
 export function prepareChartData(
   chartData: NamedScalarDistribution[],
   mode: DisplayMode,
-  isDarkMode = false
+  isDarkMode = false,
 ): ChartData<"line", number[], string> {
   if (mode === DisplayMode.Transposed) {
     return prepareTransposedChartData(chartData, isDarkMode);
@@ -175,17 +183,14 @@ export function prepareChartData(
   const max_outcome = Math.max(...outcomes);
   const range = Array.from(
     { length: max_outcome - min_outcome + 1 },
-    (_, i) => i + min_outcome
+    (_, i) => i + min_outcome,
   );
   const datasets = [];
   const colorGenerator = new ColorGenerator(isDarkMode);
   for (const nameAndDist of chartData) {
     const [name, dist] = nameAndDist;
     const distMap = new Map(
-      dist.entries.map(([[outcome], probability]) => [
-        outcome,
-        probability,
-      ])
+      dist.entries.map(([[outcome], probability]) => [outcome, probability]),
     );
     let data = range.map((x) => (distMap.get(x) ?? 0) * 100);
 
@@ -216,7 +221,7 @@ export function prepareChartData(
 
 function prepareTransposedChartData(
   chartData: NamedScalarDistribution[],
-  isDarkMode = false
+  isDarkMode = false,
 ): ChartData<"line", number[], string> {
   // Get all unique outcomes across all distributions
   const allOutcomes = new Set<number>();
@@ -225,26 +230,24 @@ function prepareTransposedChartData(
       allOutcomes.add(outcome);
     });
   });
-  
+
   const sortedOutcomes = Array.from(allOutcomes).sort((a, b) => a - b);
   const distributionNames = chartData.map(([name]) => name);
-  
+
   // Create a dataset for each outcome value
   const datasets = [];
   const colorGenerator = new ColorGenerator(isDarkMode);
 
   for (const outcome of sortedOutcomes) {
     const data: number[] = [];
-    
+
     // For each distribution, get the probability of this outcome
     for (const [, dist] of chartData) {
-      const outcomeProb = dist.entries.find(
-        ([[value]]) => value === outcome
-      );
+      const outcomeProb = dist.entries.find(([[value]]) => value === outcome);
       const probability = outcomeProb ? outcomeProb[1] * 100 : 0;
       data.push(probability);
     }
-    
+
     const color = colorGenerator.nextColor();
     datasets.push({
       label: outcome.toString(),
@@ -253,7 +256,7 @@ function prepareTransposedChartData(
       backgroundColor: color,
     });
   }
-  
+
   return {
     labels: distributionNames,
     datasets,

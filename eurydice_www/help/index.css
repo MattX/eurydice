@@ -1,8 +1,8 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 /* Header and Toc are shared with the app and reference these tokens.
    Must stay with the other @import rules: a CSS @import after any other
    at-rule (such as @plugin) is invalid and gets dropped silently. */
-@import '../src/theme.css';
+@import "../src/theme.css";
 
 @plugin '@tailwindcss/typography';
 

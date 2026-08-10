@@ -37,14 +37,16 @@ function AppInner() {
       : localStorage.getItem("eurydice0_editor_program") || "output 1d6 + 2";
   });
   const [output, setOutput] = React.useState<NamedDistribution[]>([]);
-  const [diagnostics, setDiagnostics] = React.useState<EurydiceDiagnostic[]>([]);
+  const [diagnostics, setDiagnostics] = React.useState<EurydiceDiagnostic[]>(
+    [],
+  );
   // The submission the diagnostics describe, kept whole so a suggested fix can
   // check that the editor still holds the text its offsets were measured in.
   const [diagnosticSource, setDiagnosticSource] =
     React.useState<DiagnosticSource | null>(null);
   const [primitives, setPrimitives] = React.useState<PrimitiveMetadata[]>([]);
   const [runLive, setRunLiveInner] = React.useState(
-    () => localStorage.getItem("eurydice0_run_live") !== "false"
+    () => localStorage.getItem("eurydice0_run_live") !== "false",
   );
   const [running, setRunning] = React.useState(false);
   const [printOutputs, setPrintOutputs] = React.useState<[string, string][]>(
@@ -52,8 +54,8 @@ function AppInner() {
   );
   const [showTutorial, setShowTutorial] = React.useState(false);
   const [showExportModal, setShowExportModal] = React.useState(false);
-  const [isDesktopLayout, setIsDesktopLayout] = React.useState(() =>
-    window.matchMedia("(min-width: 768px)").matches
+  const [isDesktopLayout, setIsDesktopLayout] = React.useState(
+    () => window.matchMedia("(min-width: 768px)").matches,
   );
   const runLiveRef = useRef(runLive);
   const initialEditorTextRef = useRef(editorText);
@@ -98,7 +100,10 @@ function AppInner() {
         setDiagnosticSource(source);
 
         const distributions: NamedDistribution[] = report.outputs.map(
-          ({ name, distribution }) => [name, normalizeDistribution(distribution)]
+          ({ name, distribution }) => [
+            name,
+            normalizeDistribution(distribution),
+          ],
         );
         const chartData = distributions.filter(isNamedScalarDistribution);
 
@@ -109,8 +114,8 @@ function AppInner() {
         if (range !== null && range >= 5000) {
           setOutput(
             distributions.filter(
-              ([, distribution]) => distribution.fields.length > 1
-            )
+              ([, distribution]) => distribution.fields.length > 1,
+            ),
           );
           nextDiagnostics.push(
             frontendDiagnostic(
@@ -118,7 +123,9 @@ function AppInner() {
               sourceId,
             ),
           );
-        } else if (!nextDiagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+        } else if (
+          !nextDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+        ) {
           setOutput(distributions);
         }
         setDiagnostics(nextDiagnostics);
@@ -126,9 +133,7 @@ function AppInner() {
         runningRef.current = false;
         setRunning(false);
         setDiagnosticSource(null);
-        setDiagnostics([
-          frontendDiagnostic(event.data.InternalError, null),
-        ]);
+        setDiagnostics([frontendDiagnostic(event.data.InternalError, null)]);
       } else if ("Print" in event.data) {
         const printOutput = event.data.Print;
         setPrintOutputs((printOutputs) => [...printOutputs, printOutput]);
@@ -136,25 +141,28 @@ function AppInner() {
     });
   }, []);
 
-  const run = useCallback((val: string) => {
-    let worker = workerRef.current;
-    if (worker === null) {
-      worker = new WorkerWrapper(new EurydiceWorker());
-      attachOnMessage(worker);
-      workerRef.current = worker;
-    }
-    if (runningRef.current) {
-      worker.terminate();
-      worker = new WorkerWrapper(new EurydiceWorker());
-      attachOnMessage(worker);
-      workerRef.current = worker;
-    }
-    runningRef.current = true;
-    setRunning(true);
-    setPrintOutputs([]);
-    setDiagnostics([]);
-    worker.postMessage(val);
-  }, [attachOnMessage]);
+  const run = useCallback(
+    (val: string) => {
+      let worker = workerRef.current;
+      if (worker === null) {
+        worker = new WorkerWrapper(new EurydiceWorker());
+        attachOnMessage(worker);
+        workerRef.current = worker;
+      }
+      if (runningRef.current) {
+        worker.terminate();
+        worker = new WorkerWrapper(new EurydiceWorker());
+        attachOnMessage(worker);
+        workerRef.current = worker;
+      }
+      runningRef.current = true;
+      setRunning(true);
+      setPrintOutputs([]);
+      setDiagnostics([]);
+      worker.postMessage(val);
+    },
+    [attachOnMessage],
+  );
 
   useEffect(() => {
     const worker = new WorkerWrapper(new EurydiceWorker());
@@ -174,13 +182,16 @@ function AppInner() {
     }
   }, [run]);
 
-  const onChange = useCallback((val: string) => {
-    setEditorText(val);
-    localStorage.setItem("eurydice0_editor_program", val);
-    if (runLiveRef.current) {
-      run(val);
-    }
-  }, [run]);
+  const onChange = useCallback(
+    (val: string) => {
+      setEditorText(val);
+      localStorage.setItem("eurydice0_editor_program", val);
+      if (runLiveRef.current) {
+        run(val);
+      }
+    },
+    [run],
+  );
 
   const tutorial = showTutorial ? (
     <Tutorial
@@ -288,11 +299,13 @@ function frontendDiagnostic(
     labels:
       sourceId === null
         ? []
-        : [{
-            range: { source: sourceId, range: { start: 0, end: 0 } },
-            message: "",
-            style: "primary",
-          }],
+        : [
+            {
+              range: { source: sourceId, range: { start: 0, end: 0 } },
+              message: "",
+              style: "primary",
+            },
+          ],
     help: null,
     fix: null,
     trace: [],

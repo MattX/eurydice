@@ -30,7 +30,10 @@ export default function Tutorial(props: TutorialProps) {
   return (
     <div
       className="mb-4 rounded-lg border p-4"
-      style={{ background: "var(--accent-soft)", borderColor: "var(--accent-border)" }}
+      style={{
+        background: "var(--accent-soft)",
+        borderColor: "var(--accent-border)",
+      }}
     >
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-semibold tracking-wide uppercase text-[var(--accent)]">

@@ -42,7 +42,10 @@ export function Github({ className = "size-5" }: { className?: string }) {
 // Unceremoniously stolen from https://github.com/n3r4zzurr0/svg-spinners/blob/main/svg-css/3-dots-move.svg
 export function Spinner() {
   return (
-    <span className="grid place-content-center" style={{ color: "var(--accent)" }}>
+    <span
+      className="grid place-content-center"
+      style={{ color: "var(--accent)" }}
+    >
       <svg
         viewBox="0 0 24 24"
         xmlns="http://www.w3.org/2000/svg"

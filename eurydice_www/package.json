@@ -6,8 +6,11 @@
   "scripts": {
     "predev": "wasm-pack build ../eurydice_wasm",
     "dev": "vite",
-    "build": "tsc -b && vite build --ssr help/entry-server.tsx && vite build",
+    "build": "npm run typecheck && vite build --ssr help/entry-server.tsx && vite build",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "preview": "vite preview",
     "test": "vitest",
     "prepare": "lezer-generator src/grammar/eurydice.grammar --typeScript -o src/grammar/eurydice.ts"
@@ -51,6 +54,7 @@
     "eslint-plugin-react-refresh": "0.5.3",
     "globals": "17.7.0",
     "postcss": "8.5.26",
+    "prettier": "3.9.6",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.5.3",
     "typescript-eslint": "8.65.0",

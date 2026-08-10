@@ -19,13 +19,14 @@ export default function ExportModal({
   onClose,
 }: ExportModalProps) {
   const [csvFormat, setCsvFormat] = React.useState<"spreadsheet" | "anydice">(
-    "spreadsheet"
+    "spreadsheet",
   );
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   // AnyDice format is numeric-only, so enum and tuple outputs are dropped there.
-  const omittedFromAnyDice = outputs.filter(([, distribution]) =>
-    !isScalarDistribution(distribution) ||
-    distribution.fields[0].kind === "categorical"
+  const omittedFromAnyDice = outputs.filter(
+    ([, distribution]) =>
+      !isScalarDistribution(distribution) ||
+      distribution.fields[0].kind === "categorical",
   ).length;
 
   const { csvContent, csvFilename } = React.useMemo(() => {

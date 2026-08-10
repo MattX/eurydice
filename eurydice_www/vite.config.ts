@@ -45,7 +45,8 @@ function prerenderHelp() {
         throw new Error(`Pre-rendering ${route} produced empty markup`);
       }
 
-      const rootPattern = /(<div\b[^>]*\bid=["']root["'][^>]*>)([\s\S]*?)(<\/div>)/g;
+      const rootPattern =
+        /(<div\b[^>]*\bid=["']root["'][^>]*>)([\s\S]*?)(<\/div>)/g;
       const roots = Array.from(html.matchAll(rootPattern));
       if (roots.length !== 1) {
         throw new Error(
@@ -57,13 +58,16 @@ function prerenderHelp() {
       }
 
       renderedRoutes.add(route);
-      return html.replace(rootPattern, (_match, open, _contents, close) =>
-        `${open}${markup}${close}`,
+      return html.replace(
+        rootPattern,
+        (_match, open, _contents, close) => `${open}${markup}${close}`,
       );
     },
     async writeBundle() {
       const { routes } = await loadRenderer();
-      const missingRoutes = routes.filter((route) => !renderedRoutes.has(route));
+      const missingRoutes = routes.filter(
+        (route) => !renderedRoutes.has(route),
+      );
       if (missingRoutes.length > 0) {
         throw new Error(
           `No output HTML was generated for: ${missingRoutes.join(", ")}`,
@@ -151,11 +155,7 @@ export default defineConfig(({ isSsrBuild }) => ({
             },
             output: {
               manualChunks: {
-                charts: [
-                  "chart.js",
-                  "chartjs-chart-matrix",
-                  "react-chartjs-2",
-                ],
+                charts: ["chart.js", "chartjs-chart-matrix", "react-chartjs-2"],
                 editor: [
                   "@codemirror/language",
                   "@codemirror/lint",

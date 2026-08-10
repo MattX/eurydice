@@ -8,9 +8,7 @@ interface HeaderProps {
 const linkClass =
   "block rounded px-2 py-1 text-sm font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]";
 
-export default function Header({
-  onTutorialClick,
-}: HeaderProps) {
+export default function Header({ onTutorialClick }: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const close = () => setIsMenuOpen(false);
 

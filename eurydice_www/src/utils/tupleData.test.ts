@@ -13,10 +13,7 @@ import {
 
 // A 2x2 joint distribution: field 0 is an int (1..2), field 1 is an enum.
 const jointIntEnum: Distribution = {
-  fields: [
-    { kind: "int" },
-    { kind: "categorical", labels: ["MISS", "HIT"] },
-  ],
+  fields: [{ kind: "int" }, { kind: "categorical", labels: ["MISS", "HIT"] }],
   entries: [
     [[1, 0], 0.1],
     [[1, 1], 0.2],
@@ -29,7 +26,7 @@ describe("tupleData normalization", () => {
   it("normalizes wire field schemas", () => {
     expect(normalizeFieldSchema("Int")).toEqual({ kind: "int" });
     expect(
-      normalizeFieldSchema({ Categorical: { labels: ["A", "B"] } })
+      normalizeFieldSchema({ Categorical: { labels: ["A", "B"] } }),
     ).toEqual({ kind: "categorical", labels: ["A", "B"] });
   });
 
@@ -48,9 +45,7 @@ describe("tupleData normalization", () => {
       fields: [{ Categorical: { labels: ["A", "B"] } }],
       entries: [[[1], 1]],
     });
-    expect(dist.fields).toEqual([
-      { kind: "categorical", labels: ["A", "B"] },
-    ]);
+    expect(dist.fields).toEqual([{ kind: "categorical", labels: ["A", "B"] }]);
     expect(dist.entries).toEqual([[[1], 1]]);
   });
 });
@@ -60,14 +55,14 @@ describe("tupleData labels and axes", () => {
     expect(fieldName(jointIntEnum, 0)).toBe("Field 1");
     expect(fieldName(jointIntEnum, 1)).toBe("Field 2");
     expect(
-      fieldName({ ...jointIntEnum, fieldNames: ["Roll", "Outcome"] }, 1)
+      fieldName({ ...jointIntEnum, fieldNames: ["Roll", "Outcome"] }, 1),
     ).toBe("Outcome");
   });
 
   it("labels enum fields by member name and ints by value", () => {
     expect(fieldValueLabel({ kind: "int" }, 7)).toBe("7");
     expect(
-      fieldValueLabel({ kind: "categorical", labels: ["MISS", "HIT"] }, 1)
+      fieldValueLabel({ kind: "categorical", labels: ["MISS", "HIT"] }, 1),
     ).toBe("HIT");
   });
 
@@ -76,10 +71,7 @@ describe("tupleData labels and axes", () => {
   });
 
   it("uses every observed symbol in the field dictionary", () => {
-    const axis = fieldAxis(
-      { kind: "categorical", labels: ["A", "C"] },
-      [0, 1]
-    );
+    const axis = fieldAxis({ kind: "categorical", labels: ["A", "C"] }, [0, 1]);
     expect(axis.values).toEqual([0, 1]);
     expect(axis.labels).toEqual(["A", "C"]);
   });
@@ -98,10 +90,7 @@ describe("tupleData marginals", () => {
       { kind: "categorical", labels: ["MISS", "HIT"] },
     ]);
     const byValue = new Map(
-      marginal1.entries.map(([[value], probability]) => [
-        value,
-        probability,
-      ])
+      marginal1.entries.map(([[value], probability]) => [value, probability]),
     );
     expect(byValue.get(0)).toBeCloseTo(0.4);
     expect(byValue.get(1)).toBeCloseTo(0.6);

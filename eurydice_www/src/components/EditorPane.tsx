@@ -121,7 +121,10 @@ export default function EditorPane(props: EditorPaneProps) {
       );
     });
     outputs = (
-      <div className="mt-4 rounded-lg border p-3" style={{ background: "var(--surface-2)" }}>
+      <div
+        className="mt-4 rounded-lg border p-3"
+        style={{ background: "var(--surface-2)" }}
+      >
         <h3 className="mb-2 text-xs font-semibold tracking-wide uppercase text-[var(--text-muted)]">
           Print log
         </h3>
@@ -226,7 +229,8 @@ export function DiagnosticCard({
   canApplyFix: (fix: SuggestedFix) => boolean;
   applyFix: (fix: SuggestedFix) => void;
 }) {
-  const color = diagnostic.severity === "error" ? "var(--danger)" : "var(--warning)";
+  const color =
+    diagnostic.severity === "error" ? "var(--danger)" : "var(--warning)";
   // Bound so the guard below narrows it for the click handler.
   const fix = diagnostic.fix;
   const supportingMessages = Array.from(
@@ -244,7 +248,11 @@ export function DiagnosticCard({
   return (
     <section
       className="rounded-lg border p-2 text-sm"
-      style={{ borderLeftColor: color, borderLeftWidth: 3, background: "var(--surface-2)" }}
+      style={{
+        borderLeftColor: color,
+        borderLeftWidth: 3,
+        background: "var(--surface-2)",
+      }}
     >
       <div className="flex items-start gap-2">
         <Warning color={color} className="mt-0.5 size-5" />

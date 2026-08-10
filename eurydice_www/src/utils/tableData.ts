@@ -13,10 +13,10 @@ export interface TableRowData {
 
 /** Table rows for a categorical chart containing numeric and symbol outputs. */
 export function computeCategoricalTableData(
-  distributions: NamedScalarDistribution[]
+  distributions: NamedScalarDistribution[],
 ): TableRowData[] {
   const probabilities = distributions.map(([, distribution]) =>
-    categoricalProbabilities(distribution)
+    categoricalProbabilities(distribution),
   );
   return categoricalOutcomes(distributions).map(({ key, label }) => ({
     outcome: key,
@@ -45,7 +45,7 @@ export interface BracketingProbabilities {
  * Gets all unique outcomes across all distributions, sorted in ascending order
  */
 export function getAllUniqueOutcomes(
-  distributions: NamedScalarDistribution[]
+  distributions: NamedScalarDistribution[],
 ): number[] {
   const allOutcomes = new Set<number>();
   distributions.forEach(([, distribution]) => {
@@ -62,7 +62,7 @@ export function getAllUniqueOutcomes(
 export function computeTableData(
   distributions: NamedScalarDistribution[],
   mode: DisplayMode,
-  sortedOutcomes: number[]
+  sortedOutcomes: number[],
 ): TableRowData[] {
   return sortedOutcomes.map((outcome) => {
     const row = {
@@ -73,18 +73,15 @@ export function computeTableData(
     distributions.forEach(([, distribution]) => {
       const probability = Math.min(
         100,
-        distribution.entries.reduce(
-          (total, [[value], entryProbability]) => {
-            const include =
-              mode === DisplayMode.AtMost
-                ? value <= outcome
-                : mode === DisplayMode.AtLeast
-                  ? value >= outcome
-                  : value === outcome;
-            return include ? total + entryProbability * 100 : total;
-          },
-          0
-        )
+        distribution.entries.reduce((total, [[value], entryProbability]) => {
+          const include =
+            mode === DisplayMode.AtMost
+              ? value <= outcome
+              : mode === DisplayMode.AtLeast
+                ? value >= outcome
+                : value === outcome;
+          return include ? total + entryProbability * 100 : total;
+        }, 0),
       );
 
       row.values.push(probability > 0 ? `${probability.toFixed(2)}%` : "-");
@@ -97,7 +94,7 @@ export function computeTableData(
  * Pre-computes statistics for each distribution
  */
 export function computeDistributionStatistics(
-  distributions: NamedScalarDistribution[]
+  distributions: NamedScalarDistribution[],
 ): DistributionStatistics[] {
   return distributions.map(([, distribution]) => {
     const data = distribution.entries;
@@ -106,11 +103,11 @@ export function computeDistributionStatistics(
 
     const mean = outcomes.reduce(
       (sum, val, i) => sum + val * probabilities[i],
-      0
+      0,
     );
     const variance = outcomes.reduce(
       (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
-      0
+      0,
     );
     const stdDev = Math.sqrt(variance);
     const min = Math.min(...outcomes);
@@ -131,7 +128,7 @@ export function computeDistributionStatistics(
 export function calculateBracketingProbabilities(
   distribution: ScalarDistribution,
   lowerBound: number,
-  upperBound: number
+  upperBound: number,
 ): BracketingProbabilities {
   let pLower = 0; // P(X < Lower)
   let pBetween = 0; // P(Lower <= X <= Upper)

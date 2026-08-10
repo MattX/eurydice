@@ -5,8 +5,7 @@
  * this representation for all-symbol fields and mixed number/symbol fields.
  */
 export type FieldSchema =
-  | { kind: "int" }
-  | { kind: "categorical"; labels: string[] };
+  { kind: "int" } | { kind: "categorical"; labels: string[] };
 
 /**
  * The canonical representation of every output distribution. A scalar has one
@@ -23,10 +22,7 @@ export interface Distribution {
  * outputs in their canonical representation avoids maintaining a second,
  * chart-specific copy of field metadata.
  */
-export type ScalarDistribution = Omit<
-  Distribution,
-  "fields" | "entries"
-> & {
+export type ScalarDistribution = Omit<Distribution, "fields" | "entries"> & {
   fields: [FieldSchema];
   entries: [[number], number][];
 };
@@ -35,13 +31,13 @@ export type NamedDistribution = [string, Distribution];
 export type NamedScalarDistribution = [string, ScalarDistribution];
 
 export function isScalarDistribution(
-  distribution: Distribution
+  distribution: Distribution,
 ): distribution is ScalarDistribution {
   return distribution.fields.length === 1;
 }
 
 export function isNamedScalarDistribution(
-  output: NamedDistribution
+  output: NamedDistribution,
 ): output is NamedScalarDistribution {
   return isScalarDistribution(output[1]);
 }

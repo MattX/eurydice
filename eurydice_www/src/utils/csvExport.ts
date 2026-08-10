@@ -25,11 +25,13 @@ function generateWideBlock(
   title: string,
   distributions: NamedScalarDistribution[],
   outcomes: number[],
-  outcomeLabel: (outcome: number) => string
+  outcomeLabel: (outcome: number) => string,
 ): string {
   const rows = [
     escapeCSVField(title),
-    ["Outcome", ...distributions.map(([name]) => escapeCSVField(name))].join(","),
+    ["Outcome", ...distributions.map(([name]) => escapeCSVField(name))].join(
+      ",",
+    ),
   ];
 
   for (const outcome of outcomes) {
@@ -38,12 +40,11 @@ function generateWideBlock(
         escapeCSVField(outcomeLabel(outcome)),
         ...distributions.map(([, distribution]) =>
           (
-            distribution.entries.find(
-              ([[value]]) => value === outcome
-            )?.[1] ?? 0
-          ).toString()
+            distribution.entries.find(([[value]]) => value === outcome)?.[1] ??
+            0
+          ).toString(),
         ),
-      ].join(",")
+      ].join(","),
     );
   }
 
@@ -51,23 +52,25 @@ function generateWideBlock(
 }
 
 function generateCategoricalWideBlock(
-  distributions: NamedScalarDistribution[]
+  distributions: NamedScalarDistribution[],
 ): string {
   const probabilities = distributions.map(([, distribution]) =>
-    categoricalProbabilities(distribution)
+    categoricalProbabilities(distribution),
   );
   const rows = [
     "Outcomes",
-    ["Outcome", ...distributions.map(([name]) => escapeCSVField(name))].join(","),
+    ["Outcome", ...distributions.map(([name]) => escapeCSVField(name))].join(
+      ",",
+    ),
   ];
   for (const { key, label } of categoricalOutcomes(distributions)) {
     rows.push(
       [
         escapeCSVField(label),
         ...probabilities.map((distribution) =>
-          (distribution.get(key) ?? 0).toString()
+          (distribution.get(key) ?? 0).toString(),
         ),
-      ].join(",")
+      ].join(","),
     );
   }
   return rows.join("\n");
@@ -77,12 +80,12 @@ function generateCategoricalWideBlock(
 function generateTupleBlock([name, distribution]: NamedDistribution): string {
   const header = [
     ...distribution.fields.map((_, index) =>
-      escapeCSVField(fieldName(distribution, index))
+      escapeCSVField(fieldName(distribution, index)),
     ),
     "Probability",
   ].join(",");
   const rows = computeTupleRows(distribution, "lexicographic").map((row) =>
-    [...row.labels.map(escapeCSVField), row.probability.toString()].join(",")
+    [...row.labels.map(escapeCSVField), row.probability.toString()].join(","),
   );
   return [escapeCSVField(name), header, ...rows].join("\n");
 }
@@ -90,10 +93,10 @@ function generateTupleBlock([name, distribution]: NamedDistribution): string {
 export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
   const distributions = outputs.filter(isNamedScalarDistribution);
   const tuples = outputs.filter(
-    ([, distribution]) => distribution.fields.length > 1
+    ([, distribution]) => distribution.fields.length > 1,
   );
   const hasSymbols = distributions.some(
-    ([, distribution]) => distribution.fields[0].kind === "categorical"
+    ([, distribution]) => distribution.fields[0].kind === "categorical",
   );
   const blocks: string[] = [];
   if (distributions.length > 0 && hasSymbols) {
@@ -102,17 +105,17 @@ export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
     const outcomes = Array.from(
       new Set(
         distributions.flatMap(([, distribution]) =>
-          distribution.entries.map(([[outcome]]) => outcome)
-        )
-      )
+          distribution.entries.map(([[outcome]]) => outcome),
+        ),
+      ),
     ).sort((a, b) => a - b);
     blocks.push(
       generateWideBlock(
         "Numeric outcomes",
         distributions,
         outcomes,
-        (outcome) => outcome.toString()
-      )
+        (outcome) => outcome.toString(),
+      ),
     );
   }
 
@@ -124,25 +127,23 @@ export function generateAnyDiceFormatCSV(outputs: NamedDistribution[]): string {
 
   const numericDistributions = outputs
     .filter(isNamedScalarDistribution)
-    .filter(
-      ([, distribution]) => distribution.fields[0].kind === "int"
-    );
+    .filter(([, distribution]) => distribution.fields[0].kind === "int");
 
   numericDistributions.forEach(([name, distribution], index) => {
     if (index > 0) csv += "\n";
 
     const outcomes = distribution.entries.map(([[outcome]]) => outcome);
     const probabilities = distribution.entries.map(
-      ([, probability]) => probability
+      ([, probability]) => probability,
     );
 
     const mean = outcomes.reduce(
       (sum, val, i) => sum + val * probabilities[i],
-      0
+      0,
     );
     const variance = outcomes.reduce(
       (sum, val, i) => sum + Math.pow(val - mean, 2) * probabilities[i],
-      0
+      0,
     );
     const stdDev = Math.sqrt(variance);
     const min = outcomes.length > 0 ? Math.min(...outcomes) : 0;

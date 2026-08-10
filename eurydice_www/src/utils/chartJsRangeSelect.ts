@@ -21,7 +21,7 @@ export interface ChartJsRangeSelect {
 }
 
 export function makeChartJsRangeSelect(
-  options: ChartJsRangeSelectOptions
+  options: ChartJsRangeSelectOptions,
 ): ChartJsRangeSelect {
   let enabled = true; // Controls interaction
   let active = false; // Controls visual display
@@ -75,10 +75,7 @@ export function makeChartJsRangeSelect(
     active = true;
     startValue = chart.scales["x"].getValueForPixel(event.offsetX) ?? 0;
     endValue = startValue;
-    options.onRangeChange?.(
-      startValue + offset,
-      endValue + offset
-    );
+    options.onRangeChange?.(startValue + offset, endValue + offset);
   };
 
   const mouseUp = () => {
@@ -94,10 +91,7 @@ export function makeChartJsRangeSelect(
     }
 
     endValue = chart.scales["x"].getValueForPixel(event.offsetX) ?? 0;
-    options.onRangeChange?.(
-      startValue + offset,
-      endValue + offset
-    );
+    options.onRangeChange?.(startValue + offset, endValue + offset);
   };
 
   const plugin: Plugin = {
@@ -135,7 +129,7 @@ export function makeChartJsRangeSelect(
         startX,
         chart.chartArea.top,
         endX - startX,
-        chart.chartArea.height
+        chart.chartArea.height,
       );
     },
   };

@@ -64,10 +64,10 @@ function formatPercent(probability: number, digits = 2): string {
 export default function OutputPane(props: OutputPaneProps) {
   const scalarDistributions = React.useMemo(
     () => props.distributions.filter(isNamedScalarDistribution),
-    [props.distributions]
+    [props.distributions],
   );
   const tupleDistributions = props.distributions.filter(
-    ([, distribution]) => distribution.fields.length > 1
+    ([, distribution]) => distribution.fields.length > 1,
   );
 
   return (
@@ -95,8 +95,11 @@ function OutputSections({
   distributions: NamedScalarDistribution[];
 }) {
   const hasSymbols = React.useMemo(
-    () => distributions.some(([, distribution]) => distribution.fields[0].kind === "categorical"),
-    [distributions]
+    () =>
+      distributions.some(
+        ([, distribution]) => distribution.fields[0].kind === "categorical",
+      ),
+    [distributions],
   );
   if (distributions.length === 0) return null;
   return hasSymbols ? (
@@ -112,7 +115,7 @@ function NumericOutputSection({
   distributions: NamedScalarDistribution[];
 }) {
   const [displayMode, setDisplayMode] = React.useState(
-    DisplayMode.Distribution
+    DisplayMode.Distribution,
   );
   const [tableMode, setTableMode] = React.useState(false);
   const [showBracketing, setShowBracketing] = React.useState(false);
@@ -132,13 +135,13 @@ function NumericOutputSection({
           setShowBracketing(true);
         }
       },
-    })
+    }),
   );
 
   // Keep the range selection plugin's offset in sync with the minimum numeric outcome.
   React.useEffect(() => {
     const outcomes = distributions.flatMap(([, distribution]) =>
-      distribution.entries.map(([[outcome]]) => outcome)
+      distribution.entries.map(([[outcome]]) => outcome),
     );
     if (outcomes.length > 0) {
       plugin.setOffset(Math.min(...outcomes));
@@ -219,7 +222,9 @@ function NumericOutputSection({
             }
             data-tooltip={bracketUnavailableMessage}
             className={`btn-toggle${bracketUnavailableMessage ? " tooltip-control" : ""}`}
-            aria-pressed={showBracketing && displayMode !== DisplayMode.Transposed}
+            aria-pressed={
+              showBracketing && displayMode !== DisplayMode.Transposed
+            }
           >
             Bracket {showBracketing ? "▲" : "▼"}
           </button>
@@ -238,13 +243,10 @@ function NumericOutputSection({
                     setLowerBound(Number(e.target.value));
                     const newUpperBound = Math.max(
                       Number(e.target.value),
-                      upperBound
+                      upperBound,
                     );
                     setUpperBound(newUpperBound);
-                    plugin.setRange(
-                      Number(e.target.value),
-                      newUpperBound
-                    );
+                    plugin.setRange(Number(e.target.value), newUpperBound);
                   }}
                   className="field"
                   style={{ width: "5em" }}
@@ -259,13 +261,10 @@ function NumericOutputSection({
                     setUpperBound(Number(e.target.value));
                     const newLowerBound = Math.min(
                       Number(e.target.value),
-                      lowerBound
+                      lowerBound,
                     );
                     setLowerBound(newLowerBound);
-                    plugin.setRange(
-                      newLowerBound,
-                      Number(e.target.value)
-                    );
+                    plugin.setRange(newLowerBound, Number(e.target.value));
                   }}
                   className="field"
                   style={{ width: "5em" }}
@@ -320,7 +319,10 @@ function CategoricalOutputSection({
       {tableMode ? (
         <CategoricalProbabilityTable distributions={distributions} />
       ) : (
-        <CategoricalChart distributions={distributions} isDarkMode={isDarkMode} />
+        <CategoricalChart
+          distributions={distributions}
+          isDarkMode={isDarkMode}
+        />
       )}
     </section>
   );
@@ -415,7 +417,9 @@ function viridis(t: number): [number, number, number] {
   return [0, 1, 2].map((i) => {
     const v =
       c0[i] +
-      x * (c1[i] + x * (c2[i] + x * (c3[i] + x * (c4[i] + x * (c5[i] + x * c6[i])))));
+      x *
+        (c1[i] +
+          x * (c2[i] + x * (c3[i] + x * (c4[i] + x * (c5[i] + x * c6[i])))));
     return Math.round(Math.min(1, Math.max(0, v)) * 255);
   }) as [number, number, number];
 }
@@ -448,7 +452,7 @@ function TupleHeatmap({
 }) {
   const pivot = React.useMemo(
     () => computeTuplePivot(distribution),
-    [distribution]
+    [distribution],
   );
   const { xAxis, yAxis, maxCell } = pivot;
   const xCount = xAxis.values.length;
@@ -533,7 +537,11 @@ function TupleHeatmap({
         type: "category",
         labels: xAxis.labels,
         offset: true,
-        title: { display: true, text: fieldName(distribution, 0), color: textColor },
+        title: {
+          display: true,
+          text: fieldName(distribution, 0),
+          color: textColor,
+        },
         ticks: { color: textColor, font: { size: 11 }, autoSkipPadding: 8 },
         grid: { display: false },
       },
@@ -542,7 +550,11 @@ function TupleHeatmap({
         // Reverse so the first field value sits at the top, as in the table.
         labels: [...yAxis.labels].reverse(),
         offset: true,
-        title: { display: true, text: fieldName(distribution, 1), color: textColor },
+        title: {
+          display: true,
+          text: fieldName(distribution, 1),
+          color: textColor,
+        },
         ticks: { color: textColor, font: { size: 11 }, autoSkipPadding: 8 },
         grid: { display: false },
       },
@@ -587,7 +599,7 @@ function TupleContingencyTable({
 }) {
   const pivot = React.useMemo(
     () => computeTuplePivot(distribution),
-    [distribution]
+    [distribution],
   );
   const { xAxis, yAxis } = pivot;
 
@@ -610,7 +622,8 @@ function TupleContingencyTable({
   return (
     <div>
       <div className="mb-2 text-xs text-[var(--text-muted)]">
-        Columns: {fieldName(distribution, 0)} · Rows: {fieldName(distribution, 1)}
+        Columns: {fieldName(distribution, 0)} · Rows:{" "}
+        {fieldName(distribution, 1)}
       </div>
       <div className="dice-table overflow-x-auto rounded-lg border">
         <table
@@ -644,7 +657,9 @@ function TupleContingencyTable({
                     </td>
                   );
                 })}
-                <td className={marginalCell}>{formatPercent(pivot.yMarginal(y))}</td>
+                <td className={marginalCell}>
+                  {formatPercent(pivot.yMarginal(y))}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -672,7 +687,7 @@ function TupleListTable({ distribution }: { distribution: Distribution }) {
   const [sort, setSort] = React.useState<TupleSort>("probability");
   const rows = React.useMemo(
     () => computeTupleRows(distribution, sort),
-    [distribution, sort]
+    [distribution, sort],
   );
   const shown = rows.slice(0, MAX_LIST_ROWS);
   const truncated = rows.length - shown.length;
@@ -746,12 +761,12 @@ function TupleMarginals({ distribution }: { distribution: Distribution }) {
   // the same combined renderer as top-level outputs.
   const marginals = React.useMemo(
     () => computeMarginals(distribution),
-    [distribution]
+    [distribution],
   );
   const named = React.useMemo(
     (): NamedScalarDistribution[] =>
       marginals.map((marginal, i) => [fieldName(distribution, i), marginal]),
-    [distribution, marginals]
+    [distribution, marginals],
   );
 
   return <OutputSections distributions={named} />;
@@ -764,7 +779,12 @@ interface NumericChartProps {
   plugin: ChartJsRangeSelect;
 }
 
-function NumericChart({ distributions, mode, isDarkMode, plugin }: NumericChartProps) {
+function NumericChart({
+  distributions,
+  mode,
+  isDarkMode,
+  plugin,
+}: NumericChartProps) {
   const { gridColor, textColor, tooltipBg, tooltipText, tooltipBorder } =
     chartTheme(isDarkMode);
   const grid = { color: gridColor, tickColor: gridColor };
@@ -855,7 +875,10 @@ function CategoricalChart({
 }) {
   const { gridColor, textColor, tooltipBg, tooltipText, tooltipBorder } =
     chartTheme(isDarkMode);
-  const height = Math.max(180, categoricalOutcomes(distributions).length * 42 + 70);
+  const height = Math.max(
+    180,
+    categoricalOutcomes(distributions).length * 42 + 70,
+  );
 
   return (
     <div className="relative" style={{ height }}>
@@ -950,7 +973,7 @@ function NumericProbabilityTable({
       rows={computeTableData(
         distributions,
         mode,
-        getAllUniqueOutcomes(distributions)
+        getAllUniqueOutcomes(distributions),
       )}
       statistics={computeDistributionStatistics(distributions)}
     />
@@ -1017,23 +1040,30 @@ function ProbabilityTable({
             </tr>
           ))}
         </tbody>
-        {statistics && <tbody className="dice-stats">
-          {[
-            ["Mean", "mean"],
-            ["Std dev", "stdDev"],
-            ["Min", "min"],
-            ["Max", "max"],
-          ].map(([stat, key]) => (
-            <tr key={stat} className="dice-row">
-              <td className={`${rowHeader} text-[var(--text-muted)]`}>{stat}</td>
-              {statistics.map((stats, index) => (
-                <td key={index} className={`${cell} text-[var(--text-muted)]`}>
-                  {stats[key as keyof DistributionStatistics]}
+        {statistics && (
+          <tbody className="dice-stats">
+            {[
+              ["Mean", "mean"],
+              ["Std dev", "stdDev"],
+              ["Min", "min"],
+              ["Max", "max"],
+            ].map(([stat, key]) => (
+              <tr key={stat} className="dice-row">
+                <td className={`${rowHeader} text-[var(--text-muted)]`}>
+                  {stat}
                 </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>}
+                {statistics.map((stats, index) => (
+                  <td
+                    key={index}
+                    className={`${cell} text-[var(--text-muted)]`}
+                  >
+                    {stats[key as keyof DistributionStatistics]}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        )}
       </table>
     </div>
   );
@@ -1068,11 +1098,12 @@ function BracketingTable({
         </thead>
         <tbody>
           {distributions.map(([name, distribution], index) => {
-            const { pLower, pBetween, pUpper } = calculateBracketingProbabilities(
-              distribution,
-              lowerBound,
-              upperBound
-            );
+            const { pLower, pBetween, pUpper } =
+              calculateBracketingProbabilities(
+                distribution,
+                lowerBound,
+                upperBound,
+              );
             return (
               <tr key={index} className="dice-row">
                 <td className={rowHeader}>

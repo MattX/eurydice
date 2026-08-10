@@ -54,10 +54,14 @@ describe("primitive autocomplete", () => {
     const state = EditorState.create({ doc: "[" });
     const source = primitiveCompletionSource(() => available);
 
-    expect((await source(new CompletionContext(state, 1, false)))?.options).toHaveLength(0);
+    expect(
+      (await source(new CompletionContext(state, 1, false)))?.options,
+    ).toHaveLength(0);
 
     available = [primitive];
-    expect((await source(new CompletionContext(state, 1, false)))?.options).toHaveLength(1);
+    expect(
+      (await source(new CompletionContext(state, 1, false)))?.options,
+    ).toHaveLength(1);
   });
 
   it("does not complete inside strings or comments", async () => {

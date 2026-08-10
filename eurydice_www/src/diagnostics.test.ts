@@ -17,10 +17,7 @@ const edit = (start: number, end: number, replacement: string): TextEdit => ({
 describe("structured diagnostics", () => {
   it("applies multi-edit fixes without shifting later ranges", () => {
     expect(
-      applyTextEdits("output 1 == 1;", [
-        edit(10, 11, ""),
-        edit(13, 14, ""),
-      ]),
+      applyTextEdits("output 1 == 1;", [edit(10, 11, ""), edit(13, 14, "")]),
     ).toBe("output 1 = 1");
   });
 });
@@ -46,11 +43,15 @@ describe("isApplicableFix", () => {
   it("withholds a fix that edits an earlier submission", () => {
     const elsewhere: SuggestedFix = {
       ...fix,
-      edits: [{ ...fix.edits[0], range: { source: 1, range: { start: 0, end: 0 } } }],
+      edits: [
+        { ...fix.edits[0], range: { source: 1, range: { start: 0, end: 0 } } },
+      ],
     };
 
     expect(isApplicableFix(elsewhere, submitted, submitted.text)).toBe(false);
-    expect(isApplicableFix({ ...fix, edits: [] }, submitted, submitted.text)).toBe(false);
+    expect(
+      isApplicableFix({ ...fix, edits: [] }, submitted, submitted.text),
+    ).toBe(false);
   });
 });
 

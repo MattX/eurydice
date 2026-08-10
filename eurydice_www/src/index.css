@@ -1,8 +1,8 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 /* Design tokens and shared button classes, also used by the help pages.
    Must stay with the other @import rules: a CSS @import after any other
    at-rule (such as @plugin) is invalid and gets dropped silently. */
-@import './theme.css';
+@import "./theme.css";
 
 @plugin '@tailwindcss/typography';
 
@@ -50,17 +50,17 @@
     outline: 2px solid var(--ring);
     outline-offset: 1px;
   }
-  .btn-toggle[aria-pressed='true'] {
+  .btn-toggle[aria-pressed="true"] {
     background: var(--accent-soft);
     color: var(--accent);
     border-color: var(--accent-border);
   }
-  .btn-toggle[aria-disabled='true'],
-  .segmented > button[aria-disabled='true'] {
+  .btn-toggle[aria-disabled="true"],
+  .segmented > button[aria-disabled="true"] {
     @apply cursor-not-allowed opacity-50;
   }
-  .btn-toggle[aria-disabled='true']:hover,
-  .segmented > button[aria-disabled='true']:hover {
+  .btn-toggle[aria-disabled="true"]:hover,
+  .segmented > button[aria-disabled="true"]:hover {
     color: var(--text-muted);
     border-color: var(--border);
   }
@@ -98,7 +98,7 @@
     outline: 2px solid var(--ring);
     outline-offset: 1px;
   }
-  .segmented > button[aria-pressed='true'] {
+  .segmented > button[aria-pressed="true"] {
     background: var(--surface);
     color: var(--text);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
@@ -156,11 +156,11 @@
     inset-block: 0;
     left: 50%;
     width: 12px;
-    content: '';
+    content: "";
     transform: translateX(-50%);
   }
   .split-pane-separator:hover,
-  .split-pane-separator[data-separator='active'] {
+  .split-pane-separator[data-separator="active"] {
     background: var(--accent);
   }
   .split-pane-separator:focus-visible {
