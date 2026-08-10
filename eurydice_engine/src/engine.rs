@@ -58,8 +58,9 @@ impl Program {
     /// Compiles source without involving an engine session.
     ///
     /// A parse failure comes back as [`Diagnostics`] carrying its own source,
-    /// whose ID is zero. Running a source through [`Engine::run_source`] instead
-    /// assigns the failure an ID from that engine's submission history.
+    /// whose ID is zero. Running a source through [`Engine::run_source`]
+    /// instead assigns the failure an ID from that engine's submission
+    /// history.
     pub fn compile(source: &str) -> Result<Self, Diagnostics> {
         Self::compile_with_name(None, source)
     }

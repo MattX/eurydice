@@ -99,9 +99,9 @@ fn multidimensional_enum_pools_are_usable_without_being_summed() {
     assert_eq!(outputs[3], vec![(vec![2], 1.0f64)]);
 }
 
-/// Multisets are sorted by declaration order, and `position order` picks the end
-/// they start from. Selecting a single position is the only way to observe this,
-/// since enum members support no ordering comparisons of their own.
+/// Multisets are sorted by declaration order, and `position order` picks the
+/// end they start from. Selecting a single position is the only way to observe
+/// this, since enum members support no ordering comparisons of their own.
 #[test]
 fn enum_multisets_are_ordered_by_declaration_and_respect_position_order() {
     let program = |setting: &str| {

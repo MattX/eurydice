@@ -18,8 +18,8 @@ pub struct SourceId(pub u64);
 
 /// A block of source text referenced by a diagnostic.
 ///
-/// A new `DiagnosticSource` is created each time a block of text is submitted to
-/// an [`crate::Engine`].
+/// A new `DiagnosticSource` is created each time a block of text is submitted
+/// to an [`crate::Engine`].
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
@@ -32,7 +32,8 @@ pub struct DiagnosticSource {
     pub text: String,
 }
 
-/// Diagnostics produced by compiling or running a program, together with every source text needed to render them.
+/// Diagnostics produced by compiling or running a program, together with every
+/// source text needed to render them.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
@@ -92,8 +93,8 @@ pub struct SourceRange {
 pub enum DiagnosticSeverity {
     /// Used when a diagnostic caused a compilation or execution failure.
     Error,
-    /// Used for diagnostics that did not cause a compilation or execution failure,
-    /// but may provide useful information to the user.
+    /// Used for diagnostics that did not cause a compilation or execution
+    /// failure, but may provide useful information to the user.
     Warning,
 }
 
@@ -114,7 +115,8 @@ pub struct DiagnosticLabel {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct SuggestedFix {
-    /// How to offer the fix, phrased as the action it takes (e.g. "Insert `:`" or "Remove the second `=`").
+    /// How to offer the fix, phrased as the action it takes (e.g. "Insert `:`"
+    /// or "Remove the second `=`").
     pub message: String,
     /// The range of text that should be replaced to apply this fix.
     pub range: SourceRange,
@@ -141,8 +143,8 @@ pub struct EvaluationFrame {
     pub function: String,
     /// Source code range where the function was called.
     pub call: SourceRange,
-    /// Source code range where the function was defined, if known. This will be absent
-    /// for primitives.
+    /// Source code range where the function was defined, if known. This will be
+    /// absent for primitives.
     pub definition: Option<SourceRange>,
     /// Bindings of the function's arguments to their values at this call site.
     pub bindings: Vec<TraceBinding>,
@@ -160,8 +162,8 @@ pub struct EvaluationFrame {
 /// not a breaking change. [`DiagnosticCode::ALL`] lists every code this version
 /// defines. The declaration table below generates that list and
 /// [`as_str`](DiagnosticCode::as_str), [`severity`](DiagnosticCode::severity),
-/// and [`is_incomplete`](DiagnosticCode::is_incomplete), keeping them exhaustive
-/// by construction.
+/// and [`is_incomplete`](DiagnosticCode::is_incomplete), keeping them
+/// exhaustive by construction.
 macro_rules! define_diagnostic_codes {
     ($( $(#[$metadata:meta])* $variant:ident => ($wire:literal, $severity:ident, $incomplete:literal), )+) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -294,7 +296,8 @@ impl Serialize for DiagnosticCode {
     }
 }
 
-/// Errors, warnings, or other information produced by the engine about a span of code.
+/// Errors, warnings, or other information produced by the engine about a span
+/// of code.
 ///
 /// The `code` classifies the diagnostic for consumers that want to branch on
 /// it. Other fields provide additional context to an end user.
@@ -310,7 +313,8 @@ pub struct Diagnostic {
     pub primary_label: DiagnosticLabel,
     /// Code spans that provide additional context for this diagnostic.
     pub secondary_labels: Vec<DiagnosticLabel>,
-    /// Optional human-readable context or description of how to fix the diagnostic.
+    /// Optional human-readable context or description of how to fix the
+    /// diagnostic.
     pub help: Option<String>,
     /// An optional fix for the diagnostic.
     pub fix: Option<SuggestedFix>,

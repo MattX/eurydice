@@ -16,10 +16,9 @@ pub use diagnostic::{
     EvaluationFrame, SourceId, SourceRange, SuggestedFix, TraceBinding,
 };
 pub use engine::{Engine, EngineOutput, PrintEvent, Program, RunReport};
+use lalrpop_util::lalrpop_mod;
 pub use output::{Distribution, Field, FieldSchema};
 pub use primitives::{PrimitiveMetadata, primitive_metadata};
-
-use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(
     #[allow(
         clippy::cast_sign_loss,

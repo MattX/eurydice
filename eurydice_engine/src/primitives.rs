@@ -818,7 +818,8 @@ mod tests {
     }
 
     /// The numbers in a sequence a test has just built, which it knows are all
-    /// numbers — unlike `numeric_list`, which exists to report when they are not.
+    /// numbers — unlike `numeric_list`, which exists to report when they are
+    /// not.
     fn ints(values: &[ElementValue]) -> Vec<i32> {
         values
             .iter()

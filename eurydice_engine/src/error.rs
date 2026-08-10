@@ -51,7 +51,8 @@ pub struct PrimitiveValueError {
 #[derive(Debug)]
 pub struct ShapeMismatchError {
     pub range: ast::ByteRange,
-    /// What needed the two to line up; completes "<action> requires summing ...".
+    /// What needed the two to line up; completes "<action> requires summing
+    /// ...".
     pub action: &'static str,
     pub first: ElementValue,
     pub second: ElementValue,

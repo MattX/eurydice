@@ -4,9 +4,11 @@ use std::{collections::HashSet, fmt::Write, rc::Rc};
 
 use malachite::{Natural, base::num::basic::traits::One};
 
-use crate::ast;
-use crate::dice::Pool;
-use crate::error::{NonAdditiveSubject, NonAdditiveSumError, RuntimeError, ShapeMismatchError};
+use crate::{
+    ast,
+    dice::Pool,
+    error::{NonAdditiveSubject, NonAdditiveSumError, RuntimeError, ShapeMismatchError},
+};
 
 /// Every symbol declared so far, in declaration order.
 ///
@@ -336,7 +338,8 @@ impl From<ElementMismatch> for ElementOpError {
 ///
 /// Symbol values are bare indices, so rendering one needs the [`SymbolTable`];
 /// this wrapper carries it to `Display` rather than putting it back into every
-/// value. Obtain one with [`ElementValue::display`] or [`RuntimeValue::display`].
+/// value. Obtain one with [`ElementValue::display`] or
+/// [`RuntimeValue::display`].
 pub struct Displayed<'a, T> {
     value: &'a T,
     symbols: &'a SymbolTable,
@@ -640,7 +643,8 @@ pub(crate) struct PoolSumFailure {
 }
 
 impl PoolSumFailure {
-    /// `action` names what forced the sum; it completes "<action> requires summing ...".
+    /// `action` names what forced the sum; it completes "<action> requires
+    /// summing ...".
     pub(crate) fn into_error(self, range: ast::ByteRange, action: &'static str) -> RuntimeError {
         self.mismatch
             .into_error(range, action, NonAdditiveSubject::Pool(self.dimension))

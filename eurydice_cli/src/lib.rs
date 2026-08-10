@@ -195,9 +195,9 @@ impl MietteDiagnostic for MietteDiagnosticAdapter {
 
 #[cfg(test)]
 mod tests {
+    use eurydice_engine::{Distribution, Engine, Field, FieldSchema};
+
     use super::{format_engine_diagnostics, format_output_probabilities};
-    use eurydice_engine::Engine;
-    use eurydice_engine::{Distribution, Field, FieldSchema};
 
     #[test]
     fn formats_labeled_and_unlabeled_tuple_outcomes() {

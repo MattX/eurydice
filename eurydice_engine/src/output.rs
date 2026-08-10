@@ -1,11 +1,16 @@
-use malachite::base::num::conversion::traits::RoundingFrom;
-use malachite::{Natural, base::rounding_modes::RoundingMode, rational::Rational};
+use malachite::{
+    Natural,
+    base::{num::conversion::traits::RoundingFrom, rounding_modes::RoundingMode},
+    rational::Rational,
+};
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
-use crate::dice::Pool;
-use crate::eval::{ElementValue, RuntimeValue, SymbolTable, sum_pool};
-use crate::value::display_requires_summing;
+use crate::{
+    dice::Pool,
+    eval::{ElementValue, RuntimeValue, SymbolTable, sum_pool},
+    value::display_requires_summing,
+};
 
 /// A distribution of outcomes, each with a probability.
 #[derive(Debug, Clone)]
@@ -14,14 +19,18 @@ use crate::value::display_requires_summing;
 pub struct Distribution {
     /// Describes the type and name of each field in the outcomes.
     ///
-    /// In the simple case of a scalar integer field, this vector will have a single entry with [`FieldSchema::Int`].
+    /// In the simple case of a scalar integer field, this vector will have a
+    /// single entry with [`FieldSchema::Int`].
     pub fields: Vec<Field>,
 
     // TODO: can we reduce vec nesting?
     /// The values in this distribution and their probabilities.
     ///
-    /// Each entry in `entries` is a pair of an outcome (`Vec<i32>`) and its probability (`f64`).
-    /// Each entry's outcome will have the same length as `fields`. If a given field's schema is [`FieldSchema::Categorical`], the corresponding value in the outcome will be a non-negative ordinal index into the schema's labels.
+    /// Each entry in `entries` is a pair of an outcome (`Vec<i32>`) and its
+    /// probability (`f64`). Each entry's outcome will have the same length
+    /// as `fields`. If a given field's schema is [`FieldSchema::Categorical`],
+    /// the corresponding value in the outcome will be a non-negative ordinal
+    /// index into the schema's labels.
     pub entries: Vec<(Vec<i32>, f64)>,
 }
 
@@ -45,8 +54,8 @@ pub struct Field {
 ///
 /// Field values in the outcomes themselves are always raw `i32`s; for a
 /// categorical field the value is an ordinal, and the labels here map it back
-/// to a display name. This includes all-symbol fields as well as fields that mix
-/// numbers and symbols. Hoisting the schema up here keeps the (potentially
+/// to a display name. This includes all-symbol fields as well as fields that
+/// mix numbers and symbols. Hoisting the schema up here keeps the (potentially
 /// large) list of outcomes free of repeated metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]

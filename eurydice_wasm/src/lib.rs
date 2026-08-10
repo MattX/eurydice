@@ -90,8 +90,9 @@ fn convert_report_offsets(report: &mut RunReport) {
 
 #[cfg(test)]
 mod tests {
-    use super::{byte_to_utf16, convert_report_offsets};
     use eurydice_engine::Engine;
+
+    use super::{byte_to_utf16, convert_report_offsets};
 
     #[test]
     fn labeled_tuple_metadata_reaches_wasm_output() {

@@ -332,8 +332,8 @@ pub fn make_function_call<L: std::fmt::Debug, T: std::fmt::Debug>(
     })
 }
 
-/// This corresponds to inner errors in the grammar - when the LR parser succeeded,
-/// but custom action code failed.
+/// This corresponds to inner errors in the grammar - when the LR parser
+/// succeeded, but custom action code failed.
 #[derive(Debug)]
 pub enum ParseActionError {
     InvalidIntegerLiteral { range: ByteRange, error: String },
@@ -341,8 +341,9 @@ pub enum ParseActionError {
     EmptyFunctionCall { range: ByteRange },
 }
 
-/// Only so that a `ParseError` wrapping one of these can be printed. User-facing
-/// wording for these lives in [`crate::diagnostic`], like every other error's.
+/// Only so that a `ParseError` wrapping one of these can be printed.
+/// User-facing wording for these lives in [`crate::diagnostic`], like every
+/// other error's.
 impl std::fmt::Display for ParseActionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

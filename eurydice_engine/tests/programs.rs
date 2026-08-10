@@ -6,11 +6,12 @@
 //! integer field, `Symbol` marks an enum field, and labeled tuple fields use
 //! their labels. Outcome rows contain rendered field values and a percentage.
 
+use std::{collections::HashSet, fmt::Write, fs, path::Path};
+
 use approx::relative_ne;
 use csv::{ReaderBuilder, WriterBuilder};
 use eurydice_engine::{Distribution, Engine, FieldSchema};
 use pretty_assertions::StrComparison;
-use std::{collections::HashSet, fmt::Write, fs, path::Path};
 use thiserror::Error;
 
 /// Fixtures whose expected output was captured from AnyDice itself, and so
@@ -327,8 +328,8 @@ fn parse_distribution_result<'a>(
 ///
 /// This reads the [`Distribution`] the engine itself produced rather than
 /// summing the pool. A harness that converts outputs its own way can only test
-/// its own conversion: it once rendered `[explode d{}]` as no outcomes while the
-/// real engine rendered `0` at 100%, and the fixture asserting the AnyDice
+/// its own conversion: it once rendered `[explode d{}]` as no outcomes while
+/// the real engine rendered `0` at 100%, and the fixture asserting the AnyDice
 /// answer passed regardless.
 ///
 /// An empty distribution needs no special case — it has no outcomes, and the

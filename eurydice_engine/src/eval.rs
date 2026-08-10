@@ -5,6 +5,7 @@ use std::{
     rc::Rc,
 };
 
+pub(crate) use crate::value::sum_pool;
 use crate::{
     ast::{
         self, BareListItem, Expression, FunctionDefinition, ListItem, PositionOrder, SetParam,
@@ -24,14 +25,13 @@ use crate::{
     },
     value::{display_requires_summing, sum_elements},
 };
-
-pub(crate) use crate::value::sum_pool;
 pub use crate::{
     error::{ArityMismatch, RuntimeError},
     value::{ElementValue, RuntimeValue, SymbolTable},
 };
 
-/// Runtime bindings, organized as a stack of dynamically scoped function frames.
+/// Runtime bindings, organized as a stack of dynamically scoped function
+/// frames.
 #[derive(Debug)]
 struct ValEnv {
     frames: Vec<HashMap<String, RuntimeValue>>,
@@ -370,7 +370,8 @@ impl Evaluator {
         Ok(())
     }
 
-    /// Executes a statement; returns a value if a `return` statement is encountered.
+    /// Executes a statement; returns a value if a `return` statement is
+    /// encountered.
     fn execute_statement(
         &mut self,
         eval_context: &EvalContext,
@@ -687,7 +688,8 @@ impl Evaluator {
 
     /// Evaluates a list literal item.
     ///
-    /// This doesn't take precomputed values, because literals can contain special non-expression syntax.
+    /// This doesn't take precomputed values, because literals can contain
+    /// special non-expression syntax.
     fn evaluate_list_literal_item(
         &mut self,
         eval_context: &EvalContext,
@@ -804,8 +806,9 @@ impl Evaluator {
             .map(|(arg, expected)| coerce_arg(arg.value, *expected, arg.range))
             .collect::<Result<Vec<_>, _>>()?;
 
-        // This vector will contain references to pools which match an int or list arguments. These
-        // are the pools over which we need to iterate to get the argument values.
+        // This vector will contain references to pools which match an int or list
+        // arguments. These are the pools over which we need to iterate to get
+        // the argument values.
         let mut pools = Vec::new();
         // Contains (index, is_element) for the corresponding pool.
         let mut pool_iterator_info = Vec::new();
@@ -818,8 +821,8 @@ impl Evaluator {
                 if !matches!(shape, StaticType::Int | StaticType::List) {
                     continue;
                 }
-                // If the expected type is an Int, `coerce_arg` has already turned the pool into a sum,
-                // with outcomes of length 1.
+                // If the expected type is an Int, `coerce_arg` has already turned the pool into
+                // a sum, with outcomes of length 1.
                 pools.push(p);
                 pool_iterator_info.push((i, *shape == StaticType::Int));
             }

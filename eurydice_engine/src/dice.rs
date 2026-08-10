@@ -5,23 +5,27 @@
 //! can be expressed as an iterated function from `(state, outcome, count)` to
 //! `distribution(state)`, with a small state.
 //!
-//! In this module, distributions are represented as counts of states, not floating-point
-//! probabilities.
+//! In this module, distributions are represented as counts of states, not
+//! floating-point probabilities.
 //!
 //! [^icepool]: Liu, A. J. (2022). Icepool: Efficient Computation of Dice Pool Probabilities.
-//! _Proceedings of the AAAI Conference on Artificial Intelligence and Interactive Digital
-//! Entertainment_, 18(1), 258-265. <https://doi.org/10.1609/aiide.v18i1.21971>
-use malachite::Natural;
-use malachite::base::num::arithmetic::traits::{DivExact, Factorial, Lcm, Pow};
-use malachite::base::num::basic::traits::{One, Zero};
-use std::collections::BTreeMap;
-use std::convert::Infallible;
-use std::rc::Rc;
+//! _Proceedings of the AAAI Conference on Artificial Intelligence and
+//! Interactive Digital Entertainment_, 18(1), 258-265. <https://doi.org/10.1609/aiide.v18i1.21971>
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    convert::Infallible,
     fmt::Debug,
     hash::Hash,
+    rc::Rc,
     sync::{LazyLock, RwLock},
+};
+
+use malachite::{
+    Natural,
+    base::num::{
+        arithmetic::traits::{DivExact, Factorial, Lcm, Pow},
+        basic::traits::{One, Zero},
+    },
 };
 
 /// Represents a pool of identical independent dice whose faces have type `T`.
@@ -36,10 +40,11 @@ pub struct Pool<T = i32> {
     ordered_outcomes: Vec<(T, Natural)>,
 }
 
-/// Cache key for the Icepool algorithm. `n` is the number of dice remaining, and
-/// `remaining_count` is the number of outcomes remaining.
+/// Cache key for the Icepool algorithm. `n` is the number of dice remaining,
+/// and `remaining_count` is the number of outcomes remaining.
 ///
-/// The outcomes that remain in consideration are the `remaining_count` smallest outcomes.
+/// The outcomes that remain in consideration are the `remaining_count` smallest
+/// outcomes.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Copy)]
 struct SubPool {
     dimension: u32,
@@ -66,7 +71,8 @@ impl Pool<i32> {
         }
     }
 
-    /// Sums the distribution; the resulting pool is guaranteed to have dimension 1.
+    /// Sums the distribution; the resulting pool is guaranteed to have
+    /// dimension 1.
     pub fn sum(&self) -> Pool<i32> {
         if self.dimension == 0 {
             return self.clone();
@@ -86,7 +92,8 @@ impl<T> Pool<T>
 where
     T: Clone + Ord,
 {
-    /// Creates a new pool from a list of outcomes. Repeats are allowed and will count as multiple weights.
+    /// Creates a new pool from a list of outcomes. Repeats are allowed and will
+    /// count as multiple weights.
     pub fn from_list(dimension: u32, outcomes: Vec<T>) -> Self {
         let mut outcomes_map = BTreeMap::new();
         for outcome in outcomes {
@@ -109,8 +116,9 @@ where
         self.dimension
     }
 
-    /// Maps the outcomes of the pool using the given function. The function can be non-injective,
-    /// in which case the weights of the outcomes are summed.
+    /// Maps the outcomes of the pool using the given function. The function can
+    /// be non-injective, in which case the weights of the outcomes are
+    /// summed.
     pub fn map_outcomes<U>(self, f: impl Fn(T) -> U) -> Pool<U>
     where
         U: Clone + Ord,
@@ -241,8 +249,9 @@ where
         } else {
             let mut result = HashMap::new();
             for num_with_outcome in 0..=sub_pool.dimension {
-                // Replace num_with_outcome with the actual number of dice to keep in the considered range.
-                // Ignore anything in the keep list above index `sub_pool.n`, and below `sub_pool.n - num_with_outcome`.
+                // Replace num_with_outcome with the actual number of dice to keep in the
+                // considered range. Ignore anything in the keep list above
+                // index `sub_pool.n`, and below `sub_pool.n - num_with_outcome`.
                 let num_kept = self.num_kept(keep_list, sub_pool, num_with_outcome);
 
                 let sub_sub_pool = SubPool {
@@ -300,7 +309,8 @@ where
         .collect()
     }
 
-    /// Counts dice whose outcomes occur in `needles` using the Icepool algorithm.
+    /// Counts dice whose outcomes occur in `needles` using the Icepool
+    /// algorithm.
     ///
     /// Repeated needles count repeatedly. The resulting pool is guaranteed to
     /// have dimension 1.
@@ -517,8 +527,8 @@ where
             .map(|&i| self.pool.ordered_outcomes[i].0.clone())
             .collect::<Vec<T>>();
 
-        // Compute the number of ways to get this outcome, and multiply by the weight of all
-        // elements that make it up.
+        // Compute the number of ways to get this outcome, and multiply by the weight of
+        // all elements that make it up.
         let weight: Natural = self
             .positions
             .iter()
@@ -591,7 +601,8 @@ where
             }
         }
         if !stopped {
-            // If *every* iterator had to be reset, we've already gone through every permutation.
+            // If *every* iterator had to be reset, we've already gone through every
+            // permutation.
             self.values = None;
         }
     }
@@ -711,7 +722,8 @@ fn sum_mapper(state: &i32, outcome: &i32, count: u32) -> i32 {
     state + outcome * i32::try_from(count).expect("count fits in i32")
 }
 
-/// Cache for binomial coefficients. Rows are either missing or fully calculated.
+/// Cache for binomial coefficients. Rows are either missing or fully
+/// calculated.
 static BINOM_CACHE: LazyLock<RwLock<Vec<Vec<Natural>>>> =
     LazyLock::new(|| RwLock::new(vec![vec![Natural::ONE]]));
 
@@ -860,12 +872,13 @@ mod tests {
         );
     }
 
-    /// The first value represents the current sum, or None if the target is already reached.
-    /// The second value represents the number of rolls made so far.
+    /// The first value represents the current sum, or None if the target is
+    /// already reached. The second value represents the number of rolls
+    /// made so far.
     type MaxDiceToReachState = (Option<i32>, i32);
 
-    /// Returns a mapper that calculates the minimum number of dice to sum, starting from the
-    /// lowest dice, to reach the target.
+    /// Returns a mapper that calculates the minimum number of dice to sum,
+    /// starting from the lowest dice, to reach the target.
     #[allow(clippy::type_complexity)]
     pub fn make_max_dice_to_reach_mapper(
         target: i32,
@@ -901,8 +914,9 @@ mod tests {
         let result = Pool::ndn(3, 6).apply(mapper, &keep_list);
         let mut keep_count_only = HashMap::new();
         for (k, v) in result {
-            // If the sum is None, we've already reached the target. Replace with a number of rolls.
-            // Otherwise, return None as we haven't reached the target.
+            // If the sum is None, we've already reached the target. Replace with a number
+            // of rolls. Otherwise, return None as we haven't reached the
+            // target.
             let key = if k.0.is_some() { None } else { Some(k.1) };
             *keep_count_only.entry(key).or_default() += v;
         }
