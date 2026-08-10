@@ -6,7 +6,7 @@
 mod common;
 
 use common::{distributions, error, probabilities, run};
-use eurydice_engine::{DiagnosticCode, FieldSchema, LabelStyle};
+use eurydice_engine::{DiagnosticCode, FieldSchema};
 
 /// The die this feature exists for, declared as a list and as a pool.
 const DIE: &str = "enum { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
@@ -43,7 +43,7 @@ fn a_long_sequence_fails_at_the_value_that_cannot_be_added() {
             diagnostic.summary
         );
         assert_eq!(
-            diagnostic.labels[0].message.as_deref(),
+            diagnostic.primary_label.message.as_deref(),
             Some("values like `ODD_ONE_OUT` are not numbers"),
             "{summing}"
         );
@@ -241,12 +241,11 @@ fn a_shape_mismatch_names_both_shapes_and_values() {
         diagnostic.summary,
         "A tuple of 2 fields and a single value cannot be combined"
     );
-    let primary = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.style == LabelStyle::Primary)
-        .expect("a primary label");
-    let message = primary.message.as_deref().expect("a labelled primary");
+    let message = diagnostic
+        .primary_label
+        .message
+        .as_deref()
+        .expect("a labelled primary");
     assert!(message.contains("displaying a distribution"), "{message}");
     assert!(
         message.contains("`(1, 2)` is a tuple of 2 fields"),
@@ -272,7 +271,8 @@ fn mismatched_function_results_are_reported_when_displayed() {
         diagnostic.summary,
         "A single value and a tuple of 2 fields cannot be combined"
     );
-    let message = diagnostic.labels[0]
+    let message = diagnostic
+        .primary_label
         .message
         .as_deref()
         .expect("a labelled primary");
@@ -293,7 +293,7 @@ fn a_non_additive_sum_names_the_offending_value() {
         "displaying a pool requires summing a pool of 2 dice, but they cannot be added together"
     );
     assert_eq!(
-        scalar.labels[0].message.as_deref(),
+        scalar.primary_label.message.as_deref(),
         Some("outcomes like `A` are not numbers")
     );
     assert!(
@@ -304,7 +304,7 @@ fn a_non_additive_sum_names_the_offending_value() {
 
     let tuple = error("enum { A } output 2d{[tuple 1 2 A]}");
     assert_eq!(
-        tuple.labels[0].message.as_deref(),
+        tuple.primary_label.message.as_deref(),
         Some("field 3 of outcomes like `(1, 2, A)` is not a number")
     );
     assert!(
@@ -321,7 +321,7 @@ fn a_non_additive_sum_names_the_offending_value() {
         sequence.summary
     );
     assert_eq!(
-        sequence.labels[0].message.as_deref(),
+        sequence.primary_label.message.as_deref(),
         Some("values like `A` are not numbers")
     );
 }

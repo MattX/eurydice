@@ -9,7 +9,6 @@ export interface SourceRange {
 export interface DiagnosticLabel {
   range: SourceRange;
   message?: string;
-  style: "primary" | "secondary";
 }
 
 export interface TextEdit {
@@ -29,15 +28,26 @@ export interface EvaluationFrame {
   bindings: { name: string; value: string }[];
 }
 
-export interface EurydiceDiagnostic {
+interface DiagnosticFields {
   code: string;
   severity: "error" | "warning";
   summary: string;
-  labels: DiagnosticLabel[];
   help: string | null;
   fix: SuggestedFix | null;
   trace: EvaluationFrame[];
 }
+
+export interface Diagnostic extends DiagnosticFields {
+  primary_label: DiagnosticLabel;
+  secondary_labels: DiagnosticLabel[];
+}
+
+interface FrontendDiagnostic extends DiagnosticFields {
+  primary_label: null;
+  secondary_labels: [];
+}
+
+export type EurydiceDiagnostic = Diagnostic | FrontendDiagnostic;
 
 export interface DiagnosticSource {
   id: number;
@@ -47,7 +57,7 @@ export interface DiagnosticSource {
 
 export interface RunReport {
   outputs: { name: string; distribution: WireDistribution }[];
-  diagnostics: EurydiceDiagnostic[];
+  diagnostics: Diagnostic[];
   sources: DiagnosticSource[];
 }
 
@@ -98,10 +108,18 @@ export function editorDiagnostics(
   documentLength: number,
 ): CodeMirrorDiagnostic[] {
   return diagnostics.flatMap((diagnostic) => {
-    const marks = diagnostic.labels
-      .filter((label) => label.range.source === diagnosticSourceId)
-      .map((label) => {
-        const isPrimary = label.style === "primary";
+    const labels = [
+      ...(diagnostic.primary_label === null
+        ? []
+        : [{ label: diagnostic.primary_label, isPrimary: true }]),
+      ...diagnostic.secondary_labels.map((label) => ({
+        label,
+        isPrimary: false,
+      })),
+    ];
+    const marks = labels
+      .filter(({ label }) => label.range.source === diagnosticSourceId)
+      .map(({ label, isPrimary }) => {
         return {
           range: label.range,
           // CodeMirror already supplies severity styling and the source underline.
@@ -135,6 +153,14 @@ export function editorDiagnostics(
       severity: mark.severity,
     }));
   });
+}
+
+export function diagnosticLabels(
+  diagnostic: EurydiceDiagnostic,
+): DiagnosticLabel[] {
+  return diagnostic.primary_label === null
+    ? diagnostic.secondary_labels
+    : [diagnostic.primary_label, ...diagnostic.secondary_labels];
 }
 
 function stripCode(message: string): string {

@@ -54,16 +54,6 @@ pub enum DiagnosticSeverity {
     Warning,
 }
 
-/// The level of relevance a span has to a diagnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize), serde(rename_all = "snake_case"))]
-pub enum LabelStyle {
-    /// Used when a span is a primary cause of the diagnostic.
-    Primary,
-    /// Used when a span provides additional context for the diagnostic.
-    Secondary,
-}
-
 /// A span of source text that is relevant to a diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
@@ -74,8 +64,6 @@ pub struct DiagnosticLabel {
     /// An optional explanation for the span's relevance to the diagnostic.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub message: Option<String>,
-    /// Describes the relevance the span has to the diagnostic.
-    pub style: LabelStyle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,13 +252,15 @@ impl Serialize for DiagnosticCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
-pub struct EngineDiagnostic {
+pub struct Diagnostic {
     /// The error type.
     pub code: DiagnosticCode,
     /// A human-readable description of the summary.
     pub summary: String,
-    /// A collection of code spans that relate to this diagnostic.
-    pub labels: Vec<DiagnosticLabel>,
+    /// The code span that is the primary cause of this diagnostic.
+    pub primary_label: DiagnosticLabel,
+    /// Code spans that provide additional context for this diagnostic.
+    pub secondary_labels: Vec<DiagnosticLabel>,
     /// Optional human-readable context or description of how to fix the diagnostic.
     pub help: Option<String>,
     /// An optional fix for the diagnostic.
@@ -279,13 +269,15 @@ pub struct EngineDiagnostic {
     pub trace: Vec<EvaluationFrame>,
 }
 
-impl EngineDiagnostic {
-    pub fn primary_range(&self) -> Option<SourceRange> {
-        self.labels
-            .iter()
-            .find(|label| label.style == LabelStyle::Primary)
-            .or_else(|| self.labels.first())
-            .map(|label| label.range)
+impl Diagnostic {
+    /// Every label associated with this diagnostic, primary first.
+    pub fn labels(&self) -> impl Iterator<Item = &DiagnosticLabel> {
+        std::iter::once(&self.primary_label).chain(&self.secondary_labels)
+    }
+
+    /// Every label associated with this diagnostic, primary first.
+    pub fn labels_mut(&mut self) -> impl Iterator<Item = &mut DiagnosticLabel> {
+        std::iter::once(&mut self.primary_label).chain(&mut self.secondary_labels)
     }
 }
 
@@ -379,7 +371,6 @@ fn type_mismatch_label(
             preview_value(value, symbols),
             describe_value(value)
         )),
-        style: LabelStyle::Primary,
     }
 }
 
@@ -401,31 +392,43 @@ fn argument_mismatch_message(
 struct DiagnosticParts {
     code: DiagnosticCode,
     summary: String,
-    labels: Vec<DiagnosticLabel>,
+    primary_label: DiagnosticLabel,
+    secondary_labels: Vec<DiagnosticLabel>,
     help: Option<String>,
     fix: Option<SuggestedFix>,
 }
 
 impl DiagnosticParts {
-    fn new(code: DiagnosticCode, summary: impl Into<String>, labels: Vec<DiagnosticLabel>) -> Self {
+    fn new(
+        code: DiagnosticCode,
+        summary: impl Into<String>,
+        primary_label: DiagnosticLabel,
+    ) -> Self {
         Self {
             code,
             summary: summary.into(),
-            labels,
+            primary_label,
+            secondary_labels: Vec::new(),
             help: None,
             fix: None,
         }
     }
 
-    fn finish(self, trace: Vec<EvaluationFrame>) -> EngineDiagnostic {
-        EngineDiagnostic {
+    fn finish(self, trace: Vec<EvaluationFrame>) -> Diagnostic {
+        Diagnostic {
             code: self.code,
             summary: self.summary,
-            labels: self.labels,
+            primary_label: self.primary_label,
+            secondary_labels: self.secondary_labels,
             help: self.help,
             fix: self.fix,
             trace,
         }
+    }
+
+    fn secondary_labels(mut self, labels: Vec<DiagnosticLabel>) -> Self {
+        self.secondary_labels = labels;
+        self
     }
 
     fn help(mut self, help: impl Into<String>) -> Self {
@@ -454,11 +457,10 @@ fn syntax_parts(
     DiagnosticParts::new(
         code,
         summary,
-        vec![DiagnosticLabel {
+        DiagnosticLabel {
             range: SourceRange { source, range },
             message: None,
-            style: LabelStyle::Primary,
-        }],
+        },
     )
 }
 
@@ -466,7 +468,7 @@ pub(crate) fn parse_error<T: std::fmt::Display>(
     error: ParseError<usize, T, ParseActionError>,
     source_id: SourceId,
     source: &str,
-) -> EngineDiagnostic {
+) -> Diagnostic {
     let parts = match error {
         ParseError::UnrecognizedToken {
             token, expected, ..
@@ -672,23 +674,23 @@ fn is_plain_word(word: &str) -> bool {
 pub(crate) fn missing_return_warning(
     source: SourceId,
     definition: &FunctionDefinition,
-) -> Option<EngineDiagnostic> {
+) -> Option<Diagnostic> {
     if block_always_returns(&definition.body) {
         return None;
     }
 
     let function = definition.name.value.replace("{}", "…");
-    Some(EngineDiagnostic {
+    Some(Diagnostic {
         code: DiagnosticCode::MissingResult,
         summary: format!("Function `[{function}]` may finish without a result"),
-        labels: vec![DiagnosticLabel {
+        primary_label: DiagnosticLabel {
             range: SourceRange {
                 source,
                 range: definition.name.range,
             },
             message: Some("not every path reaches `result:`".to_string()),
-            style: LabelStyle::Primary,
-        }],
+        },
+        secondary_labels: Vec::new(),
         help: Some(
             "When execution reaches the end of a function, the function produces an empty die. \
              Add `result:` on every path through this function."
@@ -779,7 +781,7 @@ pub(crate) fn runtime_diagnostic(
     source_id: SourceId,
     suggestions: &[String],
     symbols: &SymbolTable,
-) -> EngineDiagnostic {
+) -> Diagnostic {
     let mut trace = Vec::new();
     let (error, source_id) = runtime_context(error, source_id, &mut trace);
     let primary = |range: &ByteRange, message: String| DiagnosticLabel {
@@ -788,22 +790,20 @@ pub(crate) fn runtime_diagnostic(
             range: *range,
         },
         message: Some(message),
-        style: LabelStyle::Primary,
     };
-    let unlabeled = |range: &ByteRange, style: LabelStyle| DiagnosticLabel {
+    let unlabeled = |range: &ByteRange| DiagnosticLabel {
         range: SourceRange {
             source: source_id,
             range: *range,
         },
         message: None,
-        style,
     };
 
     let parts = match error {
         RuntimeError::UndefinedReference { range, name } => DiagnosticParts::new(
             DiagnosticCode::UndefinedVariable,
             format!("Variable `{name}` is not defined"),
-            vec![unlabeled(range, LabelStyle::Primary)],
+            unlabeled(range),
         )
         .help(suggestion_help(
             "Variable names are uppercase and must be assigned before use.",
@@ -817,7 +817,7 @@ pub(crate) fn runtime_diagnostic(
             let parts = DiagnosticParts::new(
                 DiagnosticCode::UndefinedFunction,
                 format!("Function `[{}]` is not defined", name.replace("{}", "…")),
-                vec![unlabeled(range, LabelStyle::Primary)],
+                unlabeled(range),
             )
             .help(arity_mismatch.as_ref().map_or_else(
                 || {
@@ -849,13 +849,7 @@ pub(crate) fn runtime_diagnostic(
             let parts = DiagnosticParts::new(
                 DiagnosticCode::ExpectedSequence,
                 "A loop can only iterate over a sequence",
-                vec![type_mismatch_label(
-                    source_id,
-                    range,
-                    "a sequence",
-                    value,
-                    symbols,
-                )],
+                type_mismatch_label(source_id, range, "a sequence", value, symbols),
             );
             if matches!(value, RuntimeValue::Pool(_)) {
                 parts.help(
@@ -870,13 +864,7 @@ pub(crate) fn runtime_diagnostic(
             let parts = DiagnosticParts::new(
                 DiagnosticCode::ExpectedNumber,
                 "An `if` condition must be an integer",
-                vec![type_mismatch_label(
-                    source_id,
-                    range,
-                    "an integer",
-                    value,
-                    symbols,
-                )],
+                type_mismatch_label(source_id, range, "an integer", value, symbols),
             );
             if matches!(value, RuntimeValue::Pool(_)) {
                 parts.help(
@@ -896,18 +884,16 @@ pub(crate) fn runtime_diagnostic(
         } => DiagnosticParts::new(
             DiagnosticCode::OperatorArgument,
             format!("Operator `{op}` expects {expected}"),
-            vec![
-                unlabeled(operator_range, LabelStyle::Secondary),
-                primary(
-                    found_range,
-                    format!(
-                        "`{}` is {}",
-                        preview_value(value, symbols),
-                        describe_value(value)
-                    ),
+            primary(
+                found_range,
+                format!(
+                    "`{}` is {}",
+                    preview_value(value, symbols),
+                    describe_value(value)
                 ),
-            ],
-        ),
+            ),
+        )
+        .secondary_labels(vec![unlabeled(operator_range)]),
         RuntimeError::NegativeArgumentToFunction {
             range,
             name,
@@ -916,48 +902,40 @@ pub(crate) fn runtime_diagnostic(
         } => DiagnosticParts::new(
             DiagnosticCode::NonnegativeRequired,
             format!("`{}` needs a nonnegative count", primitive_call(name)),
-            vec![
-                unlabeled(range, LabelStyle::Secondary),
-                primary(found_range, format!("this evaluates to {value}")),
-            ],
-        ),
+            primary(found_range, format!("this evaluates to {value}")),
+        )
+        .secondary_labels(vec![unlabeled(range)]),
         RuntimeError::InvalidPrimitiveArguments(error) => {
-            let labels = error
-                .arguments
-                .iter()
-                .enumerate()
-                .map(|(index, argument)| DiagnosticLabel {
-                    range: SourceRange {
-                        source: source_id,
-                        range: argument.range,
-                    },
-                    message: Some(argument_mismatch_message(
-                        argument.name,
-                        &argument.value,
-                        &argument.expected,
-                        symbols,
-                    )),
-                    style: if index == 0 {
-                        LabelStyle::Primary
-                    } else {
-                        LabelStyle::Secondary
-                    },
-                })
-                .collect::<Vec<_>>();
+            let mut labels = error.arguments.iter().map(|argument| DiagnosticLabel {
+                range: SourceRange {
+                    source: source_id,
+                    range: argument.range,
+                },
+                message: Some(argument_mismatch_message(
+                    argument.name,
+                    &argument.value,
+                    &argument.expected,
+                    symbols,
+                )),
+            });
+            let primary_label = labels
+                .next()
+                .expect("an invalid primitive argument report has an invalid argument");
             DiagnosticParts::new(
                 DiagnosticCode::FunctionArgument,
                 format!("`{}` {}", primitive_call(error.function), error.requirement),
-                labels,
+                primary_label,
             )
+            .secondary_labels(labels.collect())
             .maybe_help(error.help.clone())
         }
         RuntimeError::InvalidPrimitiveValue(error) => DiagnosticParts::new(
             DiagnosticCode::OutOfRange,
             format!("`{}` {}", primitive_call(error.function), error.requirement),
-            vec![primary(
+            primary(
                 &error.found_range,
                 argument_mismatch_message(error.argument, &error.value, &error.constraint, symbols),
-            )],
+            ),
         )
         .maybe_help(error.help.clone()),
         RuntimeError::ShapeMismatch(error) => {
@@ -968,7 +946,7 @@ pub(crate) fn runtime_diagnostic(
             DiagnosticParts::new(
                 DiagnosticCode::OutcomeMismatch,
                 summary,
-                vec![primary(
+                primary(
                     &error.range,
                     format!(
                         "{} needs them to line up, but `{}` is {first} and `{}` is {second}",
@@ -976,7 +954,7 @@ pub(crate) fn runtime_diagnostic(
                         error.first.display(symbols),
                         error.second.display(symbols)
                     ),
-                )],
+                ),
             )
             .help(
                 "Values may be numbers or symbols and still share a sequence or a pool, but an \
@@ -1017,7 +995,7 @@ pub(crate) fn runtime_diagnostic(
             DiagnosticParts::new(
                 DiagnosticCode::NonAdditiveValue,
                 summary,
-                vec![primary(&error.range, label)],
+                primary(&error.range, label),
             )
             .help(match error.field {
                 Some(_) => {
@@ -1030,11 +1008,9 @@ pub(crate) fn runtime_diagnostic(
                 }
             })
         }
-        RuntimeError::MathError { range, message } => DiagnosticParts::new(
-            DiagnosticCode::ArithmeticError,
-            message,
-            vec![unlabeled(range, LabelStyle::Primary)],
-        ),
+        RuntimeError::MathError { range, message } => {
+            DiagnosticParts::new(DiagnosticCode::ArithmeticError, message, unlabeled(range))
+        }
         RuntimeError::OutputNotAtTopLevel { range } => placement_diagnostic(
             "output",
             range,
@@ -1050,7 +1026,7 @@ pub(crate) fn runtime_diagnostic(
         RuntimeError::ReturnOutsideFunction { range } => DiagnosticParts::new(
             DiagnosticCode::ResultOutsideFunction,
             "`result:` can only appear inside a function",
-            vec![unlabeled(range, LabelStyle::Primary)],
+            unlabeled(range),
         ),
         RuntimeError::LabelsOnNonTupleOutput {
             range,
@@ -1059,11 +1035,9 @@ pub(crate) fn runtime_diagnostic(
         } => DiagnosticParts::new(
             DiagnosticCode::LabelsRequireTuple,
             "Output labels require a tuple-valued output",
-            vec![
-                unlabeled(range, LabelStyle::Secondary),
-                type_mismatch_label(source_id, value_range, "a tuple", value, symbols),
-            ],
-        ),
+            type_mismatch_label(source_id, value_range, "a tuple", value, symbols),
+        )
+        .secondary_labels(vec![unlabeled(range)]),
         RuntimeError::OutputLabelCountMismatch {
             range,
             expected,
@@ -1078,35 +1052,23 @@ pub(crate) fn runtime_diagnostic(
                     "labels were"
                 }
             ),
-            vec![unlabeled(range, LabelStyle::Primary)],
+            unlabeled(range),
         ),
         RuntimeError::InvalidRepeatExpression { range, value } => DiagnosticParts::new(
             DiagnosticCode::RepeatCount,
             "A repetition count must be an integer",
-            vec![type_mismatch_label(
-                source_id,
-                range,
-                "an integer",
-                value,
-                symbols,
-            )],
+            type_mismatch_label(source_id, range, "an integer", value, symbols),
         ),
         RuntimeError::RangeHasNonSequenceEndpoints { range, value } => DiagnosticParts::new(
             DiagnosticCode::RangeEndpoint,
             "Both ends of a range must be integers",
-            vec![type_mismatch_label(
-                source_id,
-                range,
-                "an integer",
-                value,
-                symbols,
-            )],
+            type_mismatch_label(source_id, range, "an integer", value, symbols),
         ),
         RuntimeError::Semantic {
             code,
             range,
             message,
-        } => DiagnosticParts::new(*code, message, vec![unlabeled(range, LabelStyle::Primary)]),
+        } => DiagnosticParts::new(*code, message, unlabeled(range)),
         RuntimeError::InFunction { .. } => {
             unreachable!("function contexts were peeled before rendering")
         }
@@ -1173,7 +1135,7 @@ pub(crate) fn undefined_name(error: &RuntimeError) -> Option<UndefinedName<'_>> 
 }
 
 pub(crate) fn add_later_definition(
-    diagnostic: &mut EngineDiagnostic,
+    diagnostic: &mut Diagnostic,
     error: &RuntimeError,
     later: &[crate::ast::WithRange<crate::ast::Statement>],
     source: SourceId,
@@ -1195,10 +1157,9 @@ pub(crate) fn add_later_definition(
         _ => None,
     });
     if let Some(range) = definition {
-        diagnostic.labels.push(DiagnosticLabel {
+        diagnostic.secondary_labels.push(DiagnosticLabel {
             range: SourceRange { source, range },
             message: Some("defined later".to_string()),
-            style: LabelStyle::Secondary,
         });
         let context = "Statements execute in order, so this definition is not available yet.";
         match &mut diagnostic.help {
@@ -1239,14 +1200,13 @@ fn placement_diagnostic(
     DiagnosticParts::new(
         DiagnosticCode::TopLevelOnly,
         format!("`{statement}` can only appear at the top level"),
-        vec![DiagnosticLabel {
+        DiagnosticLabel {
             range: SourceRange {
                 source: source_id,
                 range: *range,
             },
             message: None,
-            style: LabelStyle::Primary,
-        }],
+        },
     )
     .help(help)
 }

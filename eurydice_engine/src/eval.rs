@@ -11,8 +11,8 @@ use crate::{
         Statement, StaticType, WithRange,
     },
     diagnostic::{
-        DiagnosticCode, DiagnosticLabel, EngineDiagnostic, EvaluationFrame, LabelStyle, SourceId,
-        SourceRange, TraceBinding, missing_return_warning, preview_value,
+        Diagnostic, DiagnosticCode, DiagnosticLabel, EvaluationFrame, SourceId, SourceRange,
+        TraceBinding, missing_return_warning, preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
     engine::PrintEvent,
@@ -147,7 +147,7 @@ pub struct Evaluator {
     lowest_first: bool,
     print_callback: Option<Box<dyn FnMut(PrintEvent)>>,
     source_id: SourceId,
-    diagnostics: Vec<EngineDiagnostic>,
+    diagnostics: Vec<Diagnostic>,
     /// Warnings already reported, so repeated evaluations of the same
     /// expression do not build a diagnostic only to discard it.
     warned: HashSet<(DiagnosticCode, SourceRange)>,
@@ -192,7 +192,7 @@ impl Evaluator {
         self.warned.clear();
     }
 
-    pub fn take_diagnostics(&mut self) -> Vec<EngineDiagnostic> {
+    pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
         std::mem::take(&mut self.diagnostics)
     }
 
@@ -240,14 +240,14 @@ impl Evaluator {
         if !self.should_warn(CODE, source, range) {
             return;
         }
-        self.diagnostics.push(EngineDiagnostic {
+        self.diagnostics.push(Diagnostic {
             code: CODE,
             summary: "The same dice pool is sampled independently more than once".to_string(),
-            labels: vec![DiagnosticLabel {
+            primary_label: DiagnosticLabel {
                 range: SourceRange { source, range },
                 message: Some(format!("{subject} refer to the same pool")),
-                style: LabelStyle::Primary,
-            }],
+            },
+            secondary_labels: Vec::new(),
             help: Some(
                 "Assigning a dice pool to a variable stores its distribution; it does not roll \
                  the dice and remember one result. To reuse one roll, pass the pool to an `n` \
@@ -271,14 +271,14 @@ impl Evaluator {
         if !self.should_warn(code, source, range) {
             return;
         }
-        self.diagnostics.push(EngineDiagnostic {
+        self.diagnostics.push(Diagnostic {
             code,
             summary: summary.to_string(),
-            labels: vec![DiagnosticLabel {
+            primary_label: DiagnosticLabel {
                 range: SourceRange { source, range },
                 message: Some(format!("`{setting}` is currently {value}")),
-                style: LabelStyle::Primary,
-            }],
+            },
+            secondary_labels: Vec::new(),
             help: Some(format!(
                 "The returned distribution is bounded by this setting. Change it with \
                  `set \"{setting}\" to N` if you need a different bound."

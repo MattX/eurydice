@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::{
     ast::{Statement, WithRange},
     diagnostic::{
-        DiagnosticSeverity, DiagnosticSource, EngineDiagnostic, SourceId, UndefinedName,
+        Diagnostic, DiagnosticSeverity, DiagnosticSource, SourceId, UndefinedName,
         add_later_definition, parse_error, runtime_diagnostic, undefined_name,
     },
     eval::Evaluator,
@@ -32,7 +32,7 @@ pub struct EngineOutput {
 #[non_exhaustive]
 pub struct RunReport {
     pub outputs: Vec<EngineOutput>,
-    pub diagnostics: Vec<EngineDiagnostic>,
+    pub diagnostics: Vec<Diagnostic>,
     /// Every source the report's diagnostics point into, plus the submission
     /// that produced it. The submission is always last.
     pub sources: Vec<DiagnosticSource>,
@@ -43,13 +43,13 @@ impl RunReport {
         self.error().is_some()
     }
 
-    pub fn errors(&self) -> impl Iterator<Item = &EngineDiagnostic> {
+    pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
         self.diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.code.severity() == DiagnosticSeverity::Error)
     }
 
-    pub fn error(&self) -> Option<&EngineDiagnostic> {
+    pub fn error(&self) -> Option<&Diagnostic> {
         self.errors().next()
     }
 }
@@ -62,7 +62,7 @@ pub struct CompileError {
 
 impl CompileError {
     /// Returns the diagnostic that caused the compilation to fail.
-    pub fn diagnostic(&self) -> &EngineDiagnostic {
+    pub fn diagnostic(&self) -> &Diagnostic {
         self.report
             .error()
             .expect("a compilation error report contains an error diagnostic")
@@ -277,7 +277,7 @@ impl Engine {
         source_id
     }
 
-    fn report(&self, outputs: Vec<EngineOutput>, diagnostics: Vec<EngineDiagnostic>) -> RunReport {
+    fn report(&self, outputs: Vec<EngineOutput>, diagnostics: Vec<Diagnostic>) -> RunReport {
         let sources = self.referenced_sources(&diagnostics);
         RunReport {
             outputs,
@@ -287,11 +287,11 @@ impl Engine {
     }
 
     /// The sources the report needs to render, in submission order.
-    fn referenced_sources(&self, diagnostics: &[EngineDiagnostic]) -> Vec<DiagnosticSource> {
+    fn referenced_sources(&self, diagnostics: &[Diagnostic]) -> Vec<DiagnosticSource> {
         let mut referenced = diagnostics
             .iter()
             .flat_map(|diagnostic| {
-                let labels = diagnostic.labels.iter().map(|label| label.range.source);
+                let labels = diagnostic.labels().map(|label| label.range.source);
                 let edits = diagnostic
                     .fix
                     .iter()
@@ -317,7 +317,7 @@ impl Engine {
         &mut self,
         program: &Program,
         source_id: SourceId,
-    ) -> Result<Vec<EngineOutput>, Box<EngineDiagnostic>> {
+    ) -> Result<Vec<EngineOutput>, Box<Diagnostic>> {
         let statements = &program.statements;
         for (statement_index, statement) in statements.iter().enumerate() {
             if let Err(error) = self.evaluator.execute(statement) {
@@ -359,7 +359,7 @@ fn compile_program(
     source: &str,
     source_id: SourceId,
     name: Option<String>,
-) -> Result<Program, Box<EngineDiagnostic>> {
+) -> Result<Program, Box<Diagnostic>> {
     grammar::BodyParser::new()
         .parse(source)
         .map(|statements| Program {
@@ -376,7 +376,7 @@ mod tests {
     use crate::diagnostic::{DiagnosticCode, SuggestedFix};
 
     /// The fix a diagnostic is expected to carry.
-    fn fix(diagnostic: &EngineDiagnostic) -> &SuggestedFix {
+    fn fix(diagnostic: &Diagnostic) -> &SuggestedFix {
         diagnostic.fix.as_ref().expect("diagnostic carries a fix")
     }
 
@@ -430,7 +430,7 @@ mod tests {
 
         let error = report.error().expect("a parse error");
         assert_eq!(error.code, DiagnosticCode::UnclosedDelimiter);
-        let range = error.primary_range().expect("a primary range");
+        let range = error.primary_label.range;
         assert_eq!(report.sources.len(), 1);
         assert_eq!(report.sources[0].id, range.source);
     }
@@ -506,6 +506,8 @@ mod tests {
         let serialized = serde_lexpr::to_string(&report).expect("report serializes");
 
         assert!(serialized.contains("evaluation.independent_pool_reuse"));
+        assert!(serialized.contains("primary_label"));
+        assert!(serialized.contains("secondary_labels"));
         assert!(serialized.contains("sum"));
         assert!(serialized.contains("D: d6\\noutput D + D"));
     }
@@ -525,12 +527,12 @@ mod tests {
         let parse_report = Engine::new().run_source("output (");
         let parse_error = parse_report.error().unwrap();
         assert!(parse_error.code.is_incomplete());
-        assert_eq!(parse_error.primary_range().unwrap().range.start, 8);
+        assert_eq!(parse_error.primary_label.range.range.start, 8);
 
         let runtime_report = Engine::new().run_source("output MISSING");
         let runtime_error = runtime_report.error().unwrap();
         assert!(!runtime_error.code.is_incomplete());
-        assert_eq!(runtime_error.primary_range().unwrap().range.start, 7);
+        assert_eq!(runtime_error.primary_label.range.range.start, 7);
     }
 
     #[test]
@@ -629,7 +631,7 @@ mod tests {
         let report = engine.run_source("output FOO\nFOO: 2");
         let error = report.error().unwrap();
 
-        assert_eq!(error.labels[0].message, None);
+        assert_eq!(error.primary_label.message, None);
         assert!(
             error
                 .help
@@ -648,7 +650,7 @@ mod tests {
         );
         assert!(
             error
-                .labels
+                .secondary_labels
                 .iter()
                 .any(|label| label.message.as_deref() == Some("defined later"))
         );
@@ -715,8 +717,8 @@ output [pick d3]";
             error.summary,
             "`[field INDEX:n of TUPLE:n]` requires `INDEX` to be an integer and `TUPLE` to be a tuple"
         );
-        assert_eq!(error.labels.len(), 1);
-        let label = &error.labels[0];
+        assert!(error.secondary_labels.is_empty());
+        let label = &error.primary_label;
         assert_eq!(&source[label.range.range.start..label.range.range.end], "1");
         let message = label.message.as_deref().unwrap();
         assert!(message.contains("`TUPLE` is an integer: `1`"));
@@ -736,16 +738,17 @@ output [pick d3]";
             nested_error.summary,
             "`[tuple A:n B:n]` cannot contain another tuple"
         );
-        assert_eq!(nested_error.labels.len(), 2);
+        assert_eq!(nested_error.secondary_labels.len(), 1);
         assert!(
-            nested_error.labels[0]
+            nested_error
+                .primary_label
                 .message
                 .as_deref()
                 .unwrap()
                 .contains("`A` is a tuple")
         );
         assert!(
-            nested_error.labels[1]
+            nested_error.secondary_labels[0]
                 .message
                 .as_deref()
                 .unwrap()
@@ -755,16 +758,17 @@ output [pick d3]";
         let field = Engine::new().run_source("output [field [tuple 1, 2] of 1]");
         let field_error = field.error().unwrap();
         assert_eq!(field_error.code, DiagnosticCode::FunctionArgument);
-        assert_eq!(field_error.labels.len(), 2);
+        assert_eq!(field_error.secondary_labels.len(), 1);
         assert!(
-            field_error.labels[0]
+            field_error
+                .primary_label
                 .message
                 .as_deref()
                 .unwrap()
                 .contains("`INDEX` is a tuple")
         );
         assert!(
-            field_error.labels[1]
+            field_error.secondary_labels[0]
                 .message
                 .as_deref()
                 .unwrap()
@@ -802,7 +806,8 @@ output [pick d3]";
             "`[field INDEX:n of TUPLE:n]` cannot select field `3`"
         );
         assert!(
-            bounds_error.labels[0]
+            bounds_error
+                .primary_label
                 .message
                 .as_deref()
                 .unwrap()
@@ -845,7 +850,7 @@ output [pick d3]";
             let report = Engine::new().run_source(source);
             let error = report.error().unwrap();
             assert_eq!(error.code, code, "{source}");
-            let message = error.labels[0].message.as_deref().unwrap_or_default();
+            let message = error.primary_label.message.as_deref().unwrap_or_default();
             // The label names the type that was found as well as the one the
             // position required.
             assert!(message.contains(expected_message), "{source}: {message}");
@@ -858,9 +863,10 @@ output [pick d3]";
         let non_tuple = Engine::new().run_source("output 1 labeled \"Value\"");
         let error = non_tuple.error().unwrap();
         assert_eq!(error.code, DiagnosticCode::LabelsRequireTuple);
-        assert_eq!(error.labels.len(), 2);
+        assert_eq!(error.secondary_labels.len(), 1);
         assert!(
-            error.labels[1]
+            error
+                .primary_label
                 .message
                 .as_deref()
                 .is_some_and(|message| message.contains("`1` is an integer; expected a tuple"))
@@ -872,13 +878,13 @@ output [pick d3]";
             error.summary,
             "This tuple has 2 fields, but 1 output label was provided"
         );
-        assert_eq!(error.labels[0].message, None);
+        assert_eq!(error.primary_label.message, None);
     }
 
     #[test]
     fn non_primitive_diagnostics_do_not_repeat_the_summary_as_a_label() {
         let report = Engine::new().run_source("output [missing]");
-        assert_eq!(report.error().unwrap().labels[0].message, None);
+        assert_eq!(report.error().unwrap().primary_label.message, None);
 
         // A label may still carry something the summary does not. Adding two
         // symbols is reported at the value that cannot be added, which the
@@ -887,7 +893,7 @@ output [pick d3]";
         let error = report.error().unwrap();
         assert_eq!(error.summary, "this operator requires numbers");
         assert_eq!(
-            error.labels[0].message.as_deref(),
+            error.primary_label.message.as_deref(),
             Some("values like `B` are not numbers")
         );
 
@@ -897,9 +903,10 @@ output [pick d3]";
             error.summary,
             "Operator `@` expects an integer or a sequence"
         );
-        assert_eq!(error.labels[0].message, None);
+        assert_eq!(error.secondary_labels[0].message, None);
         assert!(
-            error.labels[1]
+            error
+                .primary_label
                 .message
                 .as_deref()
                 .is_some_and(|message| message.contains("is a dice pool"))
@@ -914,7 +921,7 @@ output [pick d3]";
         let failed = engine.run_source("output (");
         assert_eq!(failed.sources.len(), 1);
         assert_eq!(
-            failed.error().unwrap().primary_range().unwrap().source,
+            failed.error().unwrap().primary_label.range.source,
             SourceId(0)
         );
 
@@ -952,7 +959,7 @@ output [pick d3]";
         let report = engine.run_source("output [broken]");
         let error = report.error().unwrap();
 
-        assert_eq!(error.labels[0].range.source, SourceId(0));
+        assert_eq!(error.primary_label.range.source, SourceId(0));
         assert_eq!(error.trace[0].call.source, SourceId(1));
         assert_eq!(report.sources.len(), 2);
     }

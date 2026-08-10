@@ -10,15 +10,13 @@ describe("DiagnosticCard", () => {
       code: "type.function_argument",
       severity: "error",
       summary: "`[field INDEX:n of TUPLE:n]` requires a tuple",
-      labels: [
-        {
-          range: { source: 0, range: { start: 20, end: 21 } },
-          message: "`TUPLE` is an integer: `1`; expected a tuple",
-          style: "primary",
-        },
+      primary_label: {
+        range: { source: 0, range: { start: 20, end: 21 } },
+        message: "`TUPLE` is an integer: `1`; expected a tuple",
+      },
+      secondary_labels: [
         {
           range: { source: 0, range: { start: 0, end: 0 } },
-          style: "secondary",
         },
       ],
       help: "Tuple values contain two or more fields. Build a tuple with `[tuple A B]`.",
@@ -75,12 +73,10 @@ describe("DiagnosticCard", () => {
       code: "name.undefined_variable",
       severity: "error",
       summary: "Variable `POOL` is not defined",
-      labels: [
-        {
-          range: { source: 0, range: { start: 7, end: 11 } },
-          style: "primary",
-        },
-      ],
+      primary_label: {
+        range: { source: 0, range: { start: 7, end: 11 } },
+      },
+      secondary_labels: [],
       help: "Variable names are uppercase and must be assigned before use.",
       fix: null,
       trace: [],

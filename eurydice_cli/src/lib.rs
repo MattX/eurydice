@@ -2,10 +2,11 @@
 use std::collections::HashSet;
 
 use eurydice_engine::{
-    DiagnosticCode, DiagnosticSeverity, DiagnosticSource, Distribution, EngineDiagnostic,
-    FieldSchema, LabelStyle,
+    Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSource, Distribution, FieldSchema,
 };
-use miette::{Diagnostic, GraphicalReportHandler, LabeledSpan, NamedSource, Severity};
+use miette::{
+    Diagnostic as MietteDiagnostic, GraphicalReportHandler, LabeledSpan, NamedSource, Severity,
+};
 
 pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f64)> {
     let is_tuple = distribution.fields.len() > 1;
@@ -46,15 +47,14 @@ pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f
 
 /// Renders the engine's frontend-neutral diagnostics for terminal users.
 pub fn format_engine_diagnostics(
-    diagnostics: &[EngineDiagnostic],
+    diagnostics: &[Diagnostic],
     sources: &[DiagnosticSource],
 ) -> String {
     let handler = GraphicalReportHandler::new();
     let mut rendered = String::new();
     for diagnostic in diagnostics {
         let source_ids = diagnostic
-            .labels
-            .iter()
+            .labels()
             .map(|label| label.range.source)
             .collect::<HashSet<_>>();
         let mut first_source = true;
@@ -62,23 +62,32 @@ pub fn format_engine_diagnostics(
             .iter()
             .filter(|source| source_ids.contains(&source.id))
         {
-            let labels = diagnostic
-                .labels
-                .iter()
-                .filter(|label| label.range.source == source.id)
-                .map(|label| {
-                    let span = (
-                        label.range.range.start,
-                        label.range.range.end - label.range.range.start,
-                    );
-                    if label.style == LabelStyle::Primary {
-                        LabeledSpan::new_primary_with_span(label.message.clone(), span)
-                    } else {
+            let mut labels = Vec::new();
+            if diagnostic.primary_label.range.source == source.id {
+                let label = &diagnostic.primary_label;
+                let span = (
+                    label.range.range.start,
+                    label.range.range.end - label.range.range.start,
+                );
+                labels.push(LabeledSpan::new_primary_with_span(
+                    label.message.clone(),
+                    span,
+                ));
+            }
+            labels.extend(
+                diagnostic
+                    .secondary_labels
+                    .iter()
+                    .filter(|label| label.range.source == source.id)
+                    .map(|label| {
+                        let span = (
+                            label.range.range.start,
+                            label.range.range.end - label.range.range.start,
+                        );
                         LabeledSpan::new_with_span(label.message.clone(), span)
-                    }
-                })
-                .collect();
-            let adapter = EngineDiagnosticAdapter {
+                    }),
+            );
+            let adapter = MietteDiagnosticAdapter {
                 summary: diagnostic.summary.clone(),
                 code: diagnostic.code,
                 severity: match diagnostic.code.severity() {
@@ -126,7 +135,7 @@ pub fn format_engine_diagnostics(
     rendered
 }
 
-pub fn print_engine_diagnostics(diagnostics: &[EngineDiagnostic], sources: &[DiagnosticSource]) {
+pub fn print_engine_diagnostics(diagnostics: &[Diagnostic], sources: &[DiagnosticSource]) {
     eprint!("{}", format_engine_diagnostics(diagnostics, sources));
 }
 
@@ -140,7 +149,7 @@ fn line_column(source: &str, byte_offset: usize) -> (usize, usize) {
     (line, column)
 }
 
-struct EngineDiagnosticAdapter {
+struct MietteDiagnosticAdapter {
     summary: String,
     code: DiagnosticCode,
     severity: Severity,
@@ -149,24 +158,24 @@ struct EngineDiagnosticAdapter {
     labels: Vec<LabeledSpan>,
 }
 
-impl std::fmt::Display for EngineDiagnosticAdapter {
+impl std::fmt::Display for MietteDiagnosticAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.summary)
     }
 }
 
-impl std::fmt::Debug for EngineDiagnosticAdapter {
+impl std::fmt::Debug for MietteDiagnosticAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EngineDiagnosticAdapter")
+        f.debug_struct("MietteDiagnosticAdapter")
             .field("code", &self.code)
             .field("summary", &self.summary)
             .finish()
     }
 }
 
-impl std::error::Error for EngineDiagnosticAdapter {}
+impl std::error::Error for MietteDiagnosticAdapter {}
 
-impl Diagnostic for EngineDiagnosticAdapter {
+impl MietteDiagnostic for MietteDiagnosticAdapter {
     fn source_code(&self) -> Option<&dyn miette::SourceCode> {
         Some(&self.source_code)
     }

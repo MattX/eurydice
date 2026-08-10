@@ -3,9 +3,9 @@
 mod common;
 
 use common::diagnostic;
-use eurydice_engine::{DiagnosticCode, EngineDiagnostic};
+use eurydice_engine::{Diagnostic, DiagnosticCode};
 
-fn mentions_a_comma(diagnostic: &EngineDiagnostic) -> bool {
+fn mentions_a_comma(diagnostic: &Diagnostic) -> bool {
     diagnostic
         .help
         .as_deref()

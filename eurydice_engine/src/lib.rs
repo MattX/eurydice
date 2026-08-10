@@ -12,8 +12,8 @@ mod value;
 
 pub use ast::ByteRange;
 pub use diagnostic::{
-    DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, EngineDiagnostic,
-    EvaluationFrame, LabelStyle, SourceId, SourceRange, SuggestedFix, TextEdit, TraceBinding,
+    Diagnostic, DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource,
+    EvaluationFrame, SourceId, SourceRange, SuggestedFix, TextEdit, TraceBinding,
 };
 pub use engine::{CompileError, Engine, EngineOutput, PrintEvent, Program, RunReport};
 pub use output::{Distribution, FieldSchema};

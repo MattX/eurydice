@@ -73,7 +73,7 @@ fn convert_report_offsets(report: &mut RunReport) {
     };
 
     for diagnostic in diagnostics {
-        for label in &mut diagnostic.labels {
+        for label in diagnostic.labels_mut() {
             convert(&mut label.range);
         }
         if let Some(fix) = &mut diagnostic.fix {
@@ -115,11 +115,11 @@ mod tests {
     fn converts_every_structured_diagnostic_range() {
         let input = "print 1 named \"é\"\noutput MISSING";
         let mut report = Engine::new().run_source(input);
-        let byte_start = report.error().unwrap().labels[0].range.range.start;
+        let byte_start = report.error().unwrap().primary_label.range.range.start;
         convert_report_offsets(&mut report);
 
         assert_eq!(
-            report.error().unwrap().labels[0].range.range.start,
+            report.error().unwrap().primary_label.range.range.start,
             input[..byte_start].encode_utf16().count()
         );
     }

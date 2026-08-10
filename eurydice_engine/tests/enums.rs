@@ -31,7 +31,7 @@ fn declared_names_cannot_be_bound_as_variables() {
         ("enum { A } A : 1", "A"),
         ("enum { A } loop A over {1} { output 1 }", "A"),
     ] {
-        let range = error(program).primary_range().expect("a primary range");
+        let range = error(program).primary_label.range;
         assert_eq!(
             &program[range.range.start..range.range.end],
             name,

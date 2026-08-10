@@ -7,11 +7,11 @@
 // Each test binary compiles this module separately and uses only part of it.
 #![allow(dead_code)]
 
-use eurydice_engine::{Distribution, Engine, EngineDiagnostic};
+use eurydice_engine::{Diagnostic, Distribution, Engine};
 
 /// Runs a program, returning one distribution per `output` statement, or the
 /// diagnostic that stopped it.
-pub fn run(program: &str) -> Result<Vec<Distribution>, Box<EngineDiagnostic>> {
+pub fn run(program: &str) -> Result<Vec<Distribution>, Box<Diagnostic>> {
     let report = Engine::new().run_source(program);
     match report.error() {
         Some(error) => Err(Box::new(error.clone())),
@@ -45,7 +45,7 @@ pub fn distributions(program: &str) -> Vec<Distribution> {
 }
 
 /// The diagnostic a failing program produces.
-pub fn error(program: &str) -> EngineDiagnostic {
+pub fn error(program: &str) -> Diagnostic {
     match run(program) {
         Err(error) => *error,
         Ok(_) => panic!("expected an error for {program}"),
@@ -53,7 +53,7 @@ pub fn error(program: &str) -> EngineDiagnostic {
 }
 
 /// The diagnostic a program produces, or `None` if it succeeded.
-pub fn diagnostic(program: &str) -> Option<EngineDiagnostic> {
+pub fn diagnostic(program: &str) -> Option<Diagnostic> {
     run(program).err().map(|error| *error)
 }
 

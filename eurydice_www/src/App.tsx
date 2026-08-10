@@ -96,7 +96,7 @@ function AppInner() {
         const report = event.data.Report;
         const source = currentSource(report);
         const sourceId = source?.id ?? null;
-        const nextDiagnostics = [...report.diagnostics];
+        const nextDiagnostics: EurydiceDiagnostic[] = [...report.diagnostics];
         setDiagnosticSource(source);
 
         const distributions: NamedDistribution[] = report.outputs.map(
@@ -296,16 +296,14 @@ function frontendDiagnostic(
     code: "frontend.display_error",
     severity: "error",
     summary,
-    labels:
+    primary_label:
       sourceId === null
-        ? []
-        : [
-            {
-              range: { source: sourceId, range: { start: 0, end: 0 } },
-              message: "",
-              style: "primary",
-            },
-          ],
+        ? null
+        : {
+            range: { source: sourceId, range: { start: 0, end: 0 } },
+            message: "",
+          },
+    secondary_labels: [],
     help: null,
     fix: null,
     trace: [],

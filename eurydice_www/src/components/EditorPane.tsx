@@ -27,6 +27,7 @@ import {
   DiagnosticSource,
   editorDiagnostics,
   EurydiceDiagnostic,
+  diagnosticLabels,
   isApplicableFix,
   SuggestedFix,
 } from "../diagnostics";
@@ -235,7 +236,7 @@ export function DiagnosticCard({
   const fix = diagnostic.fix;
   const supportingMessages = Array.from(
     new Set(
-      diagnostic.labels
+      diagnosticLabels(diagnostic)
         .map((label) => label.message?.trim() ?? "")
         .filter(
           (message) =>

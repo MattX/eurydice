@@ -60,15 +60,13 @@ describe("editorDiagnostics", () => {
     code: "name.undefined_variable",
     severity: "error",
     summary: "Variable `FOO` is not defined",
-    labels: [
-      {
-        range: { source: 0, range: { start: 7, end: 10 } },
-        style: "primary",
-      },
+    primary_label: {
+      range: { source: 0, range: { start: 7, end: 10 } },
+    },
+    secondary_labels: [
       {
         range: { source: 0, range: { start: 11, end: 14 } },
         message: "defined later",
-        style: "secondary",
       },
     ],
     help: null,
