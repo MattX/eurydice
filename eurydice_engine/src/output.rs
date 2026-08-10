@@ -33,7 +33,7 @@ pub enum FieldSchema {
 impl Distribution {
     /// Converts an evaluated value into its serialized display representation,
     /// attaching validated tuple field names when the output supplied them.
-    pub fn from_runtime(
+    pub(crate) fn from_runtime(
         value: RuntimeValue,
         field_names: Option<Vec<String>>,
         symbols: &SymbolTable,
@@ -273,31 +273,6 @@ fn to_probabilities_generic<T: Clone>(ordered_outcomes: &[(T, Natural)]) -> Vec<
         .collect()
 }
 
-pub fn mean(probabilities: &[(i32, f64)]) -> f64 {
-    probabilities
-        .iter()
-        .map(|(outcome, prob)| *outcome as f64 * *prob)
-        .sum()
-}
-
-pub fn stddev(probabilities: &[(i32, f64)], mean: f64) -> f64 {
-    let variance: f64 = probabilities
-        .iter()
-        .map(|(outcome, prob)| (*outcome as f64 - mean).powi(2) * *prob)
-        .sum();
-    variance.sqrt()
-}
-
-pub fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
-    let mut outcomes = probabilities.iter().map(|(outcome, _)| *outcome);
-    let Some(first) = outcomes.next() else {
-        return (0, 0);
-    };
-    outcomes.fold((first, first), |(min, max), outcome| {
-        (min.min(outcome), max.max(outcome))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
@@ -348,11 +323,5 @@ mod tests {
             distribution.probabilities,
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
-    }
-
-    #[test]
-    fn min_and_max_handles_empty_and_nonempty_distributions() {
-        assert_eq!(min_and_max(&[]), (0, 0));
-        assert_eq!(min_and_max(&[(3, 0.25), (-2, 0.5), (1, 0.25)]), (-2, 3));
     }
 }

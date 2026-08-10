@@ -228,7 +228,7 @@ fn equality_aware_operations_are_total_across_symbols() {
 }
 
 #[test]
-fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
+fn distribution_keeps_numeric_probabilities_and_enum_labels() {
     let output = distributions("enum { MISS, HIT } output d{MISS, HIT}").remove(0);
     assert_eq!(output.probabilities.len(), 2);
     let FieldSchema::Enum { labels } = &output.fields[0] else {
@@ -238,7 +238,7 @@ fn serialized_distribution_keeps_numeric_probabilities_and_enum_labels() {
 }
 
 #[test]
-fn serialized_symbol_fields_only_include_observed_values() {
+fn symbol_fields_only_include_observed_values() {
     let output = distributions("enum { A, B, C } output d{A, B}").remove(0);
     let FieldSchema::Enum { labels } = &output.fields[0] else {
         panic!("expected enum field");
@@ -247,7 +247,7 @@ fn serialized_symbol_fields_only_include_observed_values() {
 }
 
 #[test]
-fn serialized_tuple_distribution_hoists_field_schema() {
+fn tuple_distribution_hoists_field_schema() {
     let dist =
         distributions("enum { MISS, HIT } A: d2 B: d{MISS, HIT} output [tuple A B]").remove(0);
     assert!(dist.field_names.is_none());

@@ -7,7 +7,7 @@ implementation of the [AnyDice](https://anydice.com/) language.
 use eurydice_engine::Engine;
 
 let mut engine = Engine::new();
-let report = engine.run_with_diagnostics("output 2d6 named \"roll\"");
+let report = engine.run_source("output 2d6 named \"roll\"");
 
 assert!(report.error().is_none());
 assert_eq!(report.outputs[0].name, "roll");

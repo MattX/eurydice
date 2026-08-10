@@ -12,8 +12,7 @@ use crate::{
     },
     diagnostic::{
         DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, EngineDiagnostic, EvaluationFrame,
-        LabelStyle, SourceId, SourceRange, TraceBinding, WarningKind, missing_return_warning,
-        preview_value,
+        LabelStyle, SourceId, SourceRange, TraceBinding, missing_return_warning, preview_value,
     },
     dice::{MultisetCrossProductIterator, Pool},
     error::{NonAdditiveSubject, ShapeMismatchError},
@@ -143,14 +142,14 @@ pub struct Evaluator {
     functions: HashMap<String, Function>,
     symbols: SymbolTable,
     explode_depth: usize,
-    recursion_depth: usize,
+    recursion_depth_limit: usize,
     lowest_first: bool,
     print_callback: Option<Box<dyn Fn(String, String)>>,
     source_id: SourceId,
     diagnostics: Vec<EngineDiagnostic>,
     /// Warnings already reported, so repeated evaluations of the same
     /// expression do not build a diagnostic only to discard it.
-    warned: HashSet<(WarningKind, SourceRange)>,
+    warned: HashSet<(DiagnosticCode, SourceRange)>,
 }
 
 /// A top-level output and its presentation metadata.
@@ -177,7 +176,7 @@ impl Evaluator {
             functions,
             symbols: SymbolTable::default(),
             explode_depth: 2,
-            recursion_depth: 10,
+            recursion_depth_limit: 10,
             lowest_first: false,
             print_callback: None,
             source_id: SourceId(0),
@@ -224,19 +223,19 @@ impl Evaluator {
     /// Callers check this before building a diagnostic: warnings are raised
     /// from inside evaluation loops, where the same expression can be visited
     /// once per outcome of a pool.
-    fn should_warn(&mut self, kind: WarningKind, source: SourceId, range: ast::Range) -> bool {
-        self.warned.insert((kind, SourceRange { source, range }))
+    fn should_warn(&mut self, code: DiagnosticCode, source: SourceId, range: ast::Range) -> bool {
+        self.warned.insert((code, SourceRange { source, range }))
     }
 
     /// `subject` is a plural phrase naming the two uses; it is always followed
     /// by "refer to the same pool".
     fn warn_pool_reuse(&mut self, source: SourceId, range: ast::Range, subject: &str) {
-        const KIND: WarningKind = WarningKind::IndependentPoolReuse;
-        if !self.should_warn(KIND, source, range) {
+        const CODE: DiagnosticCode = DiagnosticCode::IndependentPoolReuse;
+        if !self.should_warn(CODE, source, range) {
             return;
         }
         self.diagnostics.push(EngineDiagnostic {
-            code: KIND.code(),
+            code: CODE,
             severity: DiagnosticSeverity::Warning,
             summary: "The same dice pool is sampled independently more than once".to_string(),
             labels: vec![DiagnosticLabel {
@@ -264,16 +263,16 @@ impl Evaluator {
         &mut self,
         source: SourceId,
         range: ast::Range,
-        kind: WarningKind,
+        code: DiagnosticCode,
         setting: &str,
         value: usize,
         summary: &str,
     ) {
-        if !self.should_warn(kind, source, range) {
+        if !self.should_warn(code, source, range) {
             return;
         }
         self.diagnostics.push(EngineDiagnostic {
-            code: kind.code(),
+            code,
             severity: DiagnosticSeverity::Warning,
             summary: summary.to_string(),
             labels: vec![DiagnosticLabel {
@@ -383,7 +382,7 @@ impl Evaluator {
             }
             Statement::FunctionDefinition(fd) => {
                 if self.should_warn(
-                    WarningKind::MissingResult,
+                    DiagnosticCode::MissingResult,
                     eval_context.source_id,
                     fd.name.range,
                 ) && let Some(warning) = missing_return_warning(eval_context.source_id, fd)
@@ -498,7 +497,7 @@ impl Evaluator {
                 }
             }
             Statement::Return { value } => {
-                if self.recursion_depth == 0 {
+                if eval_context.recursion_depth == 0 {
                     return Err(RuntimeError::ReturnOutsideFunction {
                         range: statement.range,
                     });
@@ -576,7 +575,7 @@ impl Evaluator {
                         self.lowest_first = *order == PositionOrder::Ascending
                     }
                     SetParam::ExplodeDepth(d) => self.explode_depth = *d,
-                    SetParam::MaximumFunctionDepth(d) => self.recursion_depth = *d,
+                    SetParam::MaximumFunctionDepth(d) => self.recursion_depth_limit = *d,
                 }
             }
         }
@@ -755,13 +754,13 @@ impl Evaluator {
         function: &WithRange<Function>,
         args: Vec<WithRange<RuntimeValue>>,
     ) -> Result<RuntimeValue, RuntimeError> {
-        if eval_context.recursion_depth >= self.recursion_depth {
+        if eval_context.recursion_depth >= self.recursion_depth_limit {
             self.warn_limit(
                 eval_context.source_id,
                 function.range,
-                WarningKind::MaximumFunctionDepth,
+                DiagnosticCode::MaximumFunctionDepth,
                 "maximum function depth",
-                self.recursion_depth,
+                self.recursion_depth_limit,
                 "Maximum function depth stopped this call",
             );
             return Ok(RuntimeValue::empty_list());
@@ -887,7 +886,7 @@ impl Evaluator {
                     self.warn_limit(
                         eval_context.source_id,
                         function.range,
-                        WarningKind::ExplodeDepth,
+                        DiagnosticCode::ExplodeDepth,
                         "explode depth",
                         self.explode_depth,
                         "Explode depth bounds this distribution",

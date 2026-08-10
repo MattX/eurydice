@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use eurydice_engine::Engine;
+use eurydice_engine::{Engine, Program};
 
 criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
@@ -9,14 +9,13 @@ fn criterion_benchmark(c: &mut Criterion) {
         // Each program is parsed once, outside the measured closure: parsing
         // costs a quarter to a third of a short pool program's total time,
         // which would swamp the evaluation signal these benchmarks watch.
-        let program = Engine::new()
-            .compile(source)
+        let program = Program::compile(source)
             .unwrap_or_else(|report| panic!("`{name}` failed to parse: {:?}", report.error()));
         c.bench_function(name, |b| {
             // A fresh engine per iteration: definitions and settings persist
             // across runs, so a shared one would not be measuring the same work
             // twice.
-            b.iter(|| std::hint::black_box(Engine::new().run(&program)))
+            b.iter(|| std::hint::black_box(Engine::new().run_program(&program)))
         });
     }
 }

@@ -10,7 +10,7 @@ fn main() {
     let mut code = String::new();
     while let Ok(line) = rl.readline(if code.is_empty() { "> " } else { ". " }) {
         code.push_str(&line);
-        let report = engine.run_with_diagnostics(&code);
+        let report = engine.run_source(&code);
         if report.error().is_some_and(|error| error.incomplete) {
             code.push('\n');
             continue;

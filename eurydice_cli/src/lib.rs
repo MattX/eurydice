@@ -229,14 +229,13 @@ mod tests {
 
     #[test]
     fn formats_structured_warnings_and_evaluation_traces() {
-        let warning = Engine::new().run_with_diagnostics("D: d6\noutput D + D");
+        let warning = Engine::new().run_source("D: d6\noutput D + D");
         let rendered = format_engine_diagnostics(&warning.diagnostics, &warning.sources);
         assert!(rendered.contains("evaluation.independent_pool_reuse"));
         assert!(rendered.contains("sampled independently"));
 
-        let error = Engine::new().run_with_diagnostics(
-            "function: pick I:n { result: [field I of [tuple 1 2]] } output [pick d3]",
-        );
+        let error = Engine::new()
+            .run_source("function: pick I:n { result: [field I of [tuple 1 2]] } output [pick d3]");
         let rendered = format_engine_diagnostics(&error.diagnostics, &error.sources);
         assert!(rendered.contains("while calling [pick …]"));
         assert!(rendered.contains("I = 3"));

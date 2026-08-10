@@ -1,9 +1,9 @@
 use lalrpop_util::ParseError;
-#[cfg(feature = "serde")]
+#[cfg(any(feature = "serde", test))]
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct Range {
     pub start: usize,
     pub end: usize,
@@ -19,10 +19,10 @@ impl From<(usize, usize)> for Range {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct WithRange<T> {
     pub value: T,
-    #[cfg_attr(feature = "serde", serde(skip))]
+    #[cfg_attr(any(feature = "serde", test), serde(skip))]
     pub range: Range,
 }
 
@@ -36,7 +36,7 @@ impl<T> WithRange<T> {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum Statement {
     Assignment {
         name: WithRange<String>,
@@ -80,7 +80,7 @@ pub struct OutputOptions {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct FunctionDefinition {
     pub name: WithRange<String>,
     pub args: Vec<WithRange<ArgWithType>>,
@@ -88,7 +88,7 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum Expression {
     Int(i32),
     List(ListLiteral),
@@ -109,28 +109,28 @@ pub enum Expression {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct ListLiteral {
     /// (Item, number of repetitions)
     pub items: Vec<ListItem>,
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct ListItem {
     pub item: BareListItem,
     pub repeat: Option<WithRange<Expression>>,
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum BareListItem {
     Expr(WithRange<Expression>),
     Range(WithRange<Expression>, WithRange<Expression>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum UnaryOp {
     Negate,
     Invert,
@@ -139,7 +139,7 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum BinaryOp {
     Pow,
     Add,
@@ -216,7 +216,7 @@ pub fn apply_string_escapes(s: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum StaticType {
     Int,
     List,
@@ -234,7 +234,7 @@ impl std::fmt::Display for StaticType {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum SetParam {
     PositionOrder(PositionOrder),
     MaximumFunctionDepth(usize),
@@ -242,7 +242,7 @@ pub enum SetParam {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum PositionOrder {
     Ascending,
     Descending,
@@ -255,7 +255,7 @@ pub enum FunctionDefinitionItem {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct ArgWithType {
     pub name: String,
     pub ty: Option<StaticType>,
@@ -369,7 +369,6 @@ mod tests {
         assert_eq!(apply_string_escapes("hello\\xworld"), "hello\\xworld");
     }
 
-    #[cfg(feature = "serde")]
     #[test]
     fn test_parse_function_call() {
         let text = "[test 1 2]";
@@ -381,7 +380,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
     fn test_parse_unop_function_call() {
         let text = "[test 1 - 2]";
@@ -393,7 +391,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
     fn test_parse_function_definition() {
         let text = "function: explode DIE:d { result: DIE }";
@@ -407,7 +404,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
     fn test_parse_function_definition_no_type() {
         let text = "function: explode DIE { result: DIE }";
@@ -421,7 +417,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
     fn test_parse_single_letter_function_name() {
         let definition = grammar::FunctionDefinitionParser::new()
@@ -436,7 +431,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
     fn test_parse_binary_op_precedence() {
         let text = "1 + 2 * 3";

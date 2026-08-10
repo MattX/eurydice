@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 
 /// Runs a program, returning its outputs and structured diagnostics.
 #[wasm_bindgen(js_name = runWithDiagnostics)]
-pub fn run_with_diagnostics(input: &str, print_callback: Function) -> JsValue {
+pub fn run_source(input: &str, print_callback: Function) -> JsValue {
     set_panic_hook();
     let callback = move |value: String, name: String| {
         print_callback
@@ -20,7 +20,7 @@ pub fn run_with_diagnostics(input: &str, print_callback: Function) -> JsValue {
     };
     let mut engine = Engine::new();
     engine.set_print_callback(callback);
-    let mut report = engine.run_with_diagnostics(input);
+    let mut report = engine.run_source(input);
     convert_report_offsets(&mut report);
     serde_wasm_bindgen::to_value(&report).unwrap()
 }
@@ -82,8 +82,7 @@ mod tests {
 
     #[test]
     fn labeled_tuple_metadata_reaches_wasm_output() {
-        let report =
-            Engine::new().run_with_diagnostics("output [tuple 1 2] labeled \"Left\", \"Right\"");
+        let report = Engine::new().run_source("output [tuple 1 2] labeled \"Left\", \"Right\"");
         let distribution = &report.outputs[0].distribution;
         assert_eq!(
             distribution.field_names.as_ref().unwrap(),
@@ -100,7 +99,7 @@ mod tests {
     #[test]
     fn converts_every_structured_diagnostic_range() {
         let input = "print 1 named \"é\"\noutput MISSING";
-        let mut report = Engine::new().run_with_diagnostics(input);
+        let mut report = Engine::new().run_source(input);
         let byte_start = report.error().unwrap().labels[0].range.range.start;
         convert_report_offsets(&mut report);
 

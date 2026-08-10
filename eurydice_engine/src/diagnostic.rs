@@ -105,201 +105,106 @@ pub struct EvaluationFrame {
 /// The set grows as the engine learns to report more, so it is
 /// `#[non_exhaustive]`: a match on it needs a fallback arm, and a new code is
 /// not a breaking change. [`DiagnosticCode::ALL`] lists every code this version
-/// defines; adding a code means adding it there and to
-/// [`as_str`](DiagnosticCode::as_str) as well.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum DiagnosticCode {
-    // Syntax: the program could not be parsed.
-    /// `=` was used where a binding expects `:`.
-    AssignmentSeparator,
-    /// `==` was used where a comparison expects `=`.
-    EqualityOperator,
-    /// A variable was written in lowercase, where names are uppercase.
-    VariableCase,
-    /// A token cannot appear where it was found.
-    UnexpectedToken,
-    /// A bracket, brace, or parenthesis was never closed.
-    UnclosedDelimiter,
-    /// The program ended in the middle of something.
-    UnexpectedEnd,
-    /// Input continues past the end of a complete program.
-    ExtraToken,
-    /// A string literal was never closed.
-    UnterminatedString,
-    /// A block comment was never closed.
-    UnterminatedComment,
-    /// A `;` was used to end a statement, which the language does not use.
-    UnexpectedSemicolon,
-    /// A character that means nothing in the language.
-    InvalidCharacter,
-    /// An integer literal does not fit in the engine's integer type.
-    IntegerOutOfRange,
-    /// A call names no function at all, as in `[]`.
-    EmptyFunctionCall,
+/// defines. The declaration table below generates that list and
+/// [`as_str`](DiagnosticCode::as_str), keeping them exhaustive by construction.
+macro_rules! define_diagnostic_codes {
+    ($( $(#[$metadata:meta])* $variant:ident => $wire:literal, )+) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[non_exhaustive]
+        pub enum DiagnosticCode {
+            $( $(#[$metadata])* $variant, )+
+        }
 
-    // Names: something was referred to that is not defined, or cannot be.
-    /// A variable that has not been assigned.
-    UndefinedVariable,
-    /// A function that has not been defined.
-    UndefinedFunction,
-    /// A name is already taken, or cannot be bound in this position.
-    BindingConflict,
+        impl DiagnosticCode {
+            /// Every code this version of the engine can produce.
+            pub const ALL: &'static [DiagnosticCode] = &[
+                $(Self::$variant,)+
+            ];
 
-    // Types: a value's type or shape is not what the operation needs.
-    /// A sequence was required.
-    ExpectedSequence,
-    /// A number was required.
-    ExpectedNumber,
-    /// An operator was given an operand of a type it does not accept.
-    OperatorArgument,
-    /// An operator's operands do not work together, whatever each is alone.
-    OperatorOperands,
-    /// A function was given an argument of a type it does not accept.
-    FunctionArgument,
-    /// Two values that had to line up have different shapes.
-    OutcomeMismatch,
-    /// A value that had to be summed has parts that cannot be added.
-    NonAdditiveValue,
-    /// `labeled` was applied to an output that is not a tuple.
-    LabelsRequireTuple,
-    /// A repeat count is not a number.
-    RepeatCount,
-    /// A range endpoint is not a number.
-    RangeEndpoint,
-
-    // Values: the type is right but the value is not usable.
-    /// A negative number was given where only zero or more makes sense.
-    NonnegativeRequired,
-    /// A value falls outside the range the operation allows.
-    OutOfRange,
-    /// An arithmetic operation has no defined result, such as division by zero.
-    ArithmeticError,
-    /// The number of labels does not match the number of tuple fields.
-    OutputLabelCount,
-
-    // Placement: the statement is fine, but not here.
-    /// `result:` appeared outside a function.
-    ResultOutsideFunction,
-    /// A statement that is only allowed at the top level appeared inside a block.
-    TopLevelOnly,
-
-    // Control flow.
-    /// A function may finish without reaching `result:`.
-    MissingResult,
-
-    // Evaluation: the program ran, but a limit or a subtlety was hit.
-    /// One dice pool is sampled independently more than once.
-    IndependentPoolReuse,
-    /// Exploding dice stopped at the configured depth.
-    ExplodeDepth,
-    /// Recursion stopped at the configured depth.
-    MaximumFunctionDepth,
+            /// The code's stable dotted string, as it is serialized.
+            #[must_use]
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire,)+
+                }
+            }
+        }
+    };
 }
 
-impl DiagnosticCode {
-    /// Every code this version of the engine can produce.
-    pub const ALL: &'static [DiagnosticCode] = &[
-        // Syntax: the program could not be parsed.
-        Self::AssignmentSeparator,
-        Self::EqualityOperator,
-        Self::VariableCase,
-        Self::UnexpectedToken,
-        Self::UnclosedDelimiter,
-        Self::UnexpectedEnd,
-        Self::ExtraToken,
-        Self::UnterminatedString,
-        Self::UnterminatedComment,
-        Self::UnexpectedSemicolon,
-        Self::InvalidCharacter,
-        Self::IntegerOutOfRange,
-        Self::EmptyFunctionCall,
-        // Names: something was referred to that is not defined, or cannot be.
-        Self::UndefinedVariable,
-        Self::UndefinedFunction,
-        Self::BindingConflict,
-        // Types: a value's type or shape is not what the operation needs.
-        Self::ExpectedSequence,
-        Self::ExpectedNumber,
-        Self::OperatorArgument,
-        Self::OperatorOperands,
-        Self::FunctionArgument,
-        Self::OutcomeMismatch,
-        Self::NonAdditiveValue,
-        Self::LabelsRequireTuple,
-        Self::RepeatCount,
-        Self::RangeEndpoint,
-        // Values: the type is right but the value is not usable.
-        Self::NonnegativeRequired,
-        Self::OutOfRange,
-        Self::ArithmeticError,
-        Self::OutputLabelCount,
-        // Placement: the statement is fine, but not here.
-        Self::ResultOutsideFunction,
-        Self::TopLevelOnly,
-        // Control flow.
-        Self::MissingResult,
-        // Evaluation: the program ran, but a limit or a subtlety was hit.
-        Self::IndependentPoolReuse,
-        Self::ExplodeDepth,
-        Self::MaximumFunctionDepth,
-    ];
-
-    /// The code's stable dotted string, as it is serialized.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            // Syntax: the program could not be parsed.
-            Self::AssignmentSeparator => "syntax.assignment_separator",
-            Self::EqualityOperator => "syntax.equality_operator",
-            Self::VariableCase => "syntax.variable_case",
-            Self::UnexpectedToken => "syntax.unexpected_token",
-            Self::UnclosedDelimiter => "syntax.unclosed_delimiter",
-            Self::UnexpectedEnd => "syntax.unexpected_end",
-            Self::ExtraToken => "syntax.extra_token",
-            Self::UnterminatedString => "syntax.unterminated_string",
-            Self::UnterminatedComment => "syntax.unterminated_comment",
-            Self::UnexpectedSemicolon => "syntax.unexpected_semicolon",
-            Self::InvalidCharacter => "syntax.invalid_character",
-            Self::IntegerOutOfRange => "syntax.integer_out_of_range",
-            Self::EmptyFunctionCall => "syntax.empty_function_call",
-
-            // Names: something was referred to that is not defined, or cannot be.
-            Self::UndefinedVariable => "name.undefined_variable",
-            Self::UndefinedFunction => "name.undefined_function",
-            Self::BindingConflict => "name.binding_conflict",
-
-            // Types: a value's type or shape is not what the operation needs.
-            Self::ExpectedSequence => "type.expected_sequence",
-            Self::ExpectedNumber => "type.expected_number",
-            Self::OperatorArgument => "type.operator_argument",
-            Self::OperatorOperands => "type.operator_operands",
-            Self::FunctionArgument => "type.function_argument",
-            Self::OutcomeMismatch => "type.outcome_mismatch",
-            Self::NonAdditiveValue => "type.non_additive_value",
-            Self::LabelsRequireTuple => "type.labels_require_tuple",
-            Self::RepeatCount => "type.repeat_count",
-            Self::RangeEndpoint => "type.range_endpoint",
-
-            // Values: the type is right but the value is not usable.
-            Self::NonnegativeRequired => "value.nonnegative_required",
-            Self::OutOfRange => "value.out_of_range",
-            Self::ArithmeticError => "value.arithmetic_error",
-            Self::OutputLabelCount => "value.output_label_count",
-
-            // Placement: the statement is fine, but not here.
-            Self::ResultOutsideFunction => "placement.result_outside_function",
-            Self::TopLevelOnly => "placement.top_level_only",
-
-            // Control flow.
-            Self::MissingResult => "control_flow.missing_result",
-
-            // Evaluation: the program ran, but a limit or a subtlety was hit.
-            Self::IndependentPoolReuse => "evaluation.independent_pool_reuse",
-            Self::ExplodeDepth => "evaluation.explode_depth",
-            Self::MaximumFunctionDepth => "evaluation.maximum_function_depth",
-        }
-    }
+define_diagnostic_codes! {
+    /// `=` was used where a binding expects `:`.
+    AssignmentSeparator => "syntax.assignment_separator",
+    /// `==` was used where a comparison expects `=`.
+    EqualityOperator => "syntax.equality_operator",
+    /// A variable was written in lowercase, where names are uppercase.
+    VariableCase => "syntax.variable_case",
+    /// A token cannot appear where it was found.
+    UnexpectedToken => "syntax.unexpected_token",
+    /// A bracket, brace, or parenthesis was never closed.
+    UnclosedDelimiter => "syntax.unclosed_delimiter",
+    /// The program ended in the middle of something.
+    UnexpectedEnd => "syntax.unexpected_end",
+    /// Input continues past the end of a complete program.
+    ExtraToken => "syntax.extra_token",
+    /// A string literal was never closed.
+    UnterminatedString => "syntax.unterminated_string",
+    /// A block comment was never closed.
+    UnterminatedComment => "syntax.unterminated_comment",
+    /// A `;` was used to end a statement, which the language does not use.
+    UnexpectedSemicolon => "syntax.unexpected_semicolon",
+    /// A character that means nothing in the language.
+    InvalidCharacter => "syntax.invalid_character",
+    /// An integer literal does not fit in the engine's integer type.
+    IntegerOutOfRange => "syntax.integer_out_of_range",
+    /// A call names no function at all, as in `[]`.
+    EmptyFunctionCall => "syntax.empty_function_call",
+    /// A variable that has not been assigned.
+    UndefinedVariable => "name.undefined_variable",
+    /// A function that has not been defined.
+    UndefinedFunction => "name.undefined_function",
+    /// A name is already taken, or cannot be bound in this position.
+    BindingConflict => "name.binding_conflict",
+    /// A sequence was required.
+    ExpectedSequence => "type.expected_sequence",
+    /// A number was required.
+    ExpectedNumber => "type.expected_number",
+    /// An operator was given an operand of a type it does not accept.
+    OperatorArgument => "type.operator_argument",
+    /// An operator's operands do not work together, whatever each is alone.
+    OperatorOperands => "type.operator_operands",
+    /// A function was given an argument of a type it does not accept.
+    FunctionArgument => "type.function_argument",
+    /// Two values that had to line up have different shapes.
+    OutcomeMismatch => "type.outcome_mismatch",
+    /// A value that had to be summed has parts that cannot be added.
+    NonAdditiveValue => "type.non_additive_value",
+    /// `labeled` was applied to an output that is not a tuple.
+    LabelsRequireTuple => "type.labels_require_tuple",
+    /// A repeat count is not a number.
+    RepeatCount => "type.repeat_count",
+    /// A range endpoint is not a number.
+    RangeEndpoint => "type.range_endpoint",
+    /// A negative number was given where only zero or more makes sense.
+    NonnegativeRequired => "value.nonnegative_required",
+    /// A value falls outside the range the operation allows.
+    OutOfRange => "value.out_of_range",
+    /// An arithmetic operation has no defined result, such as division by zero.
+    ArithmeticError => "value.arithmetic_error",
+    /// The number of labels does not match the number of tuple fields.
+    OutputLabelCount => "value.output_label_count",
+    /// `result:` appeared outside a function.
+    ResultOutsideFunction => "placement.result_outside_function",
+    /// A statement that is only allowed at the top level appeared inside a block.
+    TopLevelOnly => "placement.top_level_only",
+    /// A function may finish without reaching `result:`.
+    MissingResult => "control_flow.missing_result",
+    /// One dice pool is sampled independently more than once.
+    IndependentPoolReuse => "evaluation.independent_pool_reuse",
+    /// Exploding dice stopped at the configured depth.
+    ExplodeDepth => "evaluation.explode_depth",
+    /// Recursion stopped at the configured depth.
+    MaximumFunctionDepth => "evaluation.maximum_function_depth",
 }
 
 impl std::fmt::Display for DiagnosticCode {
@@ -747,30 +652,6 @@ fn is_plain_word(word: &str) -> bool {
         && !KEYWORDS.contains(&word)
 }
 
-/// A warning the evaluator can raise.
-///
-/// Each variant owns its diagnostic code and doubles as the identity used to
-/// report a warning only once, so the two can never drift apart. Codes that
-/// differ need separate variants, or one would suppress the other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum WarningKind {
-    IndependentPoolReuse,
-    ExplodeDepth,
-    MaximumFunctionDepth,
-    MissingResult,
-}
-
-impl WarningKind {
-    pub(crate) fn code(self) -> DiagnosticCode {
-        match self {
-            Self::IndependentPoolReuse => DiagnosticCode::IndependentPoolReuse,
-            Self::ExplodeDepth => DiagnosticCode::ExplodeDepth,
-            Self::MaximumFunctionDepth => DiagnosticCode::MaximumFunctionDepth,
-            Self::MissingResult => DiagnosticCode::MissingResult,
-        }
-    }
-}
-
 pub(crate) fn missing_return_warning(
     source: SourceId,
     definition: &FunctionDefinition,
@@ -781,7 +662,7 @@ pub(crate) fn missing_return_warning(
 
     let function = definition.name.value.replace("{}", "…");
     Some(EngineDiagnostic {
-        code: WarningKind::MissingResult.code(),
+        code: DiagnosticCode::MissingResult,
         severity: DiagnosticSeverity::Warning,
         summary: format!("Function `[{function}]` may finish without a result"),
         labels: vec![DiagnosticLabel {

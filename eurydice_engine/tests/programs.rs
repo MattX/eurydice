@@ -8,10 +8,7 @@
 
 use approx::relative_ne;
 use csv::{ReaderBuilder, WriterBuilder};
-use eurydice_engine::{
-    Distribution, Engine, FieldSchema,
-    output::{mean, min_and_max, stddev},
-};
+use eurydice_engine::{Distribution, Engine, FieldSchema};
 use pretty_assertions::StrComparison;
 use std::{collections::HashSet, fmt::Write, fs, path::Path};
 use thiserror::Error;
@@ -81,7 +78,7 @@ fn run_fixture_directory(directory: &str) {
                 }
             };
 
-            let report = Engine::new().run_with_diagnostics(program);
+            let report = Engine::new().run_source(program);
             if let Some(error) = report.error() {
                 paths_with_errors.insert(path_string);
                 println!(
@@ -178,6 +175,31 @@ struct DistributionResult {
     name: String,
     fields: Vec<String>,
     outcomes: Vec<(Vec<String>, f64)>,
+}
+
+fn mean(probabilities: &[(i32, f64)]) -> f64 {
+    probabilities
+        .iter()
+        .map(|(outcome, probability)| f64::from(*outcome) * probability)
+        .sum()
+}
+
+fn stddev(probabilities: &[(i32, f64)], mean: f64) -> f64 {
+    probabilities
+        .iter()
+        .map(|(outcome, probability)| (f64::from(*outcome) - mean).powi(2) * probability)
+        .sum::<f64>()
+        .sqrt()
+}
+
+fn min_and_max(probabilities: &[(i32, f64)]) -> (i32, i32) {
+    let mut outcomes = probabilities.iter().map(|(outcome, _)| *outcome);
+    let Some(first) = outcomes.next() else {
+        return (0, 0);
+    };
+    outcomes.fold((first, first), |(min, max), outcome| {
+        (min.min(outcome), max.max(outcome))
+    })
 }
 
 fn parse_results(contents: &str) -> Result<ExpectedResult, Box<dyn std::error::Error>> {

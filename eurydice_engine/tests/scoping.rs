@@ -9,13 +9,13 @@ use eurydice_engine::Engine;
 #[test]
 fn a_function_frame_is_popped_after_an_error() {
     let mut engine = Engine::new();
-    let setup = engine.run_with_diagnostics("X: 1\nfunction: fail X:n { result: X / 0 }");
+    let setup = engine.run_source("X: 1\nfunction: fail X:n { result: X / 0 }");
     assert_eq!(setup.error(), None);
 
-    let failed = engine.run_with_diagnostics("output [fail 9]");
+    let failed = engine.run_source("output [fail 9]");
     assert!(failed.error().is_some());
 
-    let report = engine.run_with_diagnostics("output X");
+    let report = engine.run_source("output X");
     assert_eq!(report.error(), None);
     assert_eq!(
         report.outputs[0].distribution.probabilities,

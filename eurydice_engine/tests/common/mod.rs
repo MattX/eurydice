@@ -12,7 +12,7 @@ use eurydice_engine::{Distribution, Engine, EngineDiagnostic};
 /// Runs a program, returning one distribution per `output` statement, or the
 /// diagnostic that stopped it.
 pub fn run(program: &str) -> Result<Vec<Distribution>, Box<EngineDiagnostic>> {
-    let report = Engine::new().run_with_diagnostics(program);
+    let report = Engine::new().run_source(program);
     match report.error() {
         Some(error) => Err(Box::new(error.clone())),
         None => Ok(report
