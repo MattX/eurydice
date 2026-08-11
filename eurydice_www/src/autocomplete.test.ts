@@ -11,7 +11,6 @@ import {
 const primitive: PrimitiveMetadata = {
   identifier: "highest {} of {}",
   signature: "[highest COUNT:n of POOL:d]",
-  snippet: "highest ${COUNT} of ${POOL}",
   documentation: "Sums the highest dice.",
   documentation_url:
     "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold",
@@ -44,6 +43,19 @@ describe("primitive autocomplete", () => {
     );
     expect(completionTemplate(primitive, true, true)).toBe(
       "highest ${COUNT} of ${POOL}",
+    );
+  });
+
+  // A signature can open on an argument, which puts the bracket the template
+  // must not keep right against the argument name.
+  it("turns every signature argument into a placeholder", () => {
+    const contains: PrimitiveMetadata = {
+      ...primitive,
+      identifier: "{} contains {}",
+      signature: "[SEQ:s contains N:n]",
+    };
+    expect(completionTemplate(contains, true, false)).toBe(
+      "${SEQ} contains ${N}]",
     );
   });
 

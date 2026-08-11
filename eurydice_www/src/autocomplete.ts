@@ -8,7 +8,6 @@ import type { EditorState } from "@codemirror/state";
 export interface PrimitiveMetadata {
   identifier: string;
   signature: string;
-  snippet: string;
   documentation: string;
   documentation_url: string;
 }
@@ -70,15 +69,26 @@ function primitiveCompletion(
   };
 }
 
+/**
+ * A signature argument, as the engine writes it: `NAME:kind`, where `kind` is
+ * one of the single-letter type codes.
+ */
+const SIGNATURE_ARGUMENT = /([A-Z][A-Z_]*):[nds]/g;
+
 export function completionTemplate(
   primitive: PrimitiveMetadata,
   insideBracket: boolean,
   closingBracket: boolean,
 ): string {
+  // The engine ships the signature it displays to users; the placeholders that
+  // CodeMirror expects are this editor's concern, so they are added here.
+  const body = primitive.signature
+    .slice(1, -1)
+    .replace(SIGNATURE_ARGUMENT, "${$1}");
   if (!insideBracket) {
-    return `[${primitive.snippet}]`;
+    return `[${body}]`;
   }
-  return primitive.snippet + (closingBracket ? "" : "]");
+  return body + (closingBracket ? "" : "]");
 }
 
 /**

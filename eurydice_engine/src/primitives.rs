@@ -46,18 +46,18 @@ pub(crate) struct Primitive {
 #[non_exhaustive]
 pub struct PrimitiveMetadata {
     /// The evaluator's canonical function identifier, with `{}` argument slots.
-    /// 
+    ///
     /// For instance `"highest {} of {}"`.
     pub identifier: &'static str,
     /// A typed signature intended for display to users.
-    /// 
-    /// For instance `"[highest COUNT:n of POOL:d]"`.
+    ///
+    /// For instance `"[highest COUNT:n of POOL:d]"`. Each argument is a
+    /// `NAME:kind` token, where `NAME` is uppercase ASCII and `kind` is one of
+    /// `n`, `d` or `s`. Consumers can use this shape to locate arguments.
     pub signature: &'static str,
-    /// A CodeMirror-compatible snippet body, without surrounding brackets.
-    pub snippet: &'static str,
-    /// A concise description suitable for completion UI.
+    /// A concise description of the function's behavior.
     pub documentation: &'static str,
-    /// A stable link to the detailed language specification.
+    /// A link to the detailed language specification section about this function.
     pub documentation_url: &'static str,
 }
 
@@ -76,6 +76,7 @@ enum KeepMode {
 /// registry consistency test checks that every primitive names every argument.
 fn argument_names(identifier: &str) -> impl Iterator<Item = &'static str> {
     primitive_signature(identifier)
+        .map(|s| s.trim_start_matches('[').trim_end_matches(']'))
         .unwrap_or_default()
         .split_whitespace()
         .filter_map(|token| token.split_once(':'))
@@ -589,7 +590,6 @@ macro_rules! define_primitives {
             $arg_types:expr,
             $execute:path,
             $signature:literal,
-            $snippet:literal,
             $documentation:literal,
             $documentation_url:literal;
         )+
@@ -610,7 +610,6 @@ macro_rules! define_primitives {
             $(PrimitiveMetadata {
                 identifier: $name,
                 signature: $signature,
-                snippet: $snippet,
                 documentation: $documentation,
                 documentation_url: $documentation_url,
             },)+
@@ -621,7 +620,7 @@ macro_rules! define_primitives {
 define_primitives! {
     ABSOLUTE_PRIMITIVE:
         "absolute {}", &[Some(StaticType::Int)], absolute_execute,
-        "[absolute N:n]", "absolute ${N}",
+        "[absolute N:n]",
         "Returns the absolute value of N.", "/help/spec/#absolute-nn";
     // Keep SEQ uncoerced so the executor can distinguish a deterministic
     // sequence from a pool and route the latter through Icepool directly.
@@ -629,7 +628,7 @@ define_primitives! {
         "{} contains {}",
         &[None, Some(StaticType::Int)],
         contains_execute,
-        "[SEQ:s contains N:n]", "${SEQ} contains ${N}",
+        "[SEQ:s contains N:n]",
         "Returns 1 when SEQ contains N, or 0 otherwise.", "/help/spec/#seqs-contains-nn";
     // Keep HAYSTACK uncoerced so the executor can distinguish a deterministic
     // sequence from a pool and route the latter through Icepool directly.
@@ -637,7 +636,7 @@ define_primitives! {
         "count {} in {}",
         &[Some(StaticType::List), None],
         count_execute,
-        "[count NEEDLES:s in HAYSTACK:s]", "count ${NEEDLES} in ${HAYSTACK}",
+        "[count NEEDLES:s in HAYSTACK:s]",
         "Counts occurrences of every element of NEEDLES in HAYSTACK.", "/help/spec/#count-needless-in-haystacks";
     // Keep SEQ uncoerced for the same reason as `count`: a pool must reach the
     // executor whole, so that it can be mapped and summed rather than
@@ -646,55 +645,55 @@ define_primitives! {
         "count integers in {}",
         &[None],
         count_integers_execute,
-        "[count integers in SEQ:s]", "count integers in ${SEQ}",
+        "[count integers in SEQ:s]",
         "Counts the outcomes of SEQ that are integers.", "/help/spec/#-count-integers-in-seqs";
     SUM_INTEGERS_PRIMITIVE:
         "sum integers in {}",
         &[None],
         sum_integers_execute,
-        "[sum integers in SEQ:s]", "sum integers in ${SEQ}",
+        "[sum integers in SEQ:s]",
         "Sums the outcomes of SEQ that are integers, ignoring the rest.", "/help/spec/#-sum-integers-in-seqs";
     IS_INTEGER_PRIMITIVE:
         "{} is integer", &[Some(StaticType::Int)], is_integer_execute,
-        "[N:n is integer]", "${N} is integer",
+        "[N:n is integer]",
         "Returns 1 when N is an integer, or 0 when it is a symbol or a tuple.", "/help/spec/#-nn-is-integer";
     EXPLODE_PRIMITIVE:
         "explode {}", &[Some(StaticType::Pool)], explode_execute,
-        "[explode POOL:d]", "explode ${POOL}",
+        "[explode POOL:d]",
         "Rerolls the highest outcome and adds it to the original roll.", "/help/spec/#explode-poold";
     HIGHEST_PRIMITIVE:
         "highest {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
         highest_execute,
-        "[highest COUNT:n of POOL:d]", "highest ${COUNT} of ${POOL}",
+        "[highest COUNT:n of POOL:d]",
         "Sums the highest COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     LOWEST_PRIMITIVE:
         "lowest {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
         lowest_execute,
-        "[lowest COUNT:n of POOL:d]", "lowest ${COUNT} of ${POOL}",
+        "[lowest COUNT:n of POOL:d]",
         "Sums the lowest COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     MIDDLE_PRIMITIVE:
         "middle {} of {}",
         &[Some(StaticType::Int), Some(StaticType::Pool)],
         middle_execute,
-        "[middle COUNT:n of POOL:d]", "middle ${COUNT} of ${POOL}",
+        "[middle COUNT:n of POOL:d]",
         "Sums the middle COUNT dice in each outcome of POOL.", "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold";
     HIGHEST_OF_PRIMITIVE:
         "highest of {} and {}",
         &[Some(StaticType::Int), Some(StaticType::Int)],
         highest_of_execute,
-        "[highest of FIRST:n and SECOND:n]", "highest of ${FIRST} and ${SECOND}",
+        "[highest of FIRST:n and SECOND:n]",
         "Returns the greater of FIRST and SECOND.", "/help/spec/#highest-of-firstn-and-secondn-lowest-of-firstn-and-secondn";
     LOWEST_OF_PRIMITIVE:
         "lowest of {} and {}",
         &[Some(StaticType::Int), Some(StaticType::Int)],
         lowest_of_execute,
-        "[lowest of FIRST:n and SECOND:n]", "lowest of ${FIRST} and ${SECOND}",
+        "[lowest of FIRST:n and SECOND:n]",
         "Returns the lesser of FIRST and SECOND.", "/help/spec/#highest-of-firstn-and-secondn-lowest-of-firstn-and-secondn";
     MAXIMUM_PRIMITIVE:
         "maximum of {}", &[Some(StaticType::Pool)], maximum_execute,
-        "[maximum of POOL:d]", "maximum of ${POOL}",
+        "[maximum of POOL:d]",
         "Returns the largest possible outcome of the summed POOL.", "/help/spec/#maximum-of-poold";
     CHOOSE_PRIMITIVE:
         "choose {} if {} else {}",
@@ -704,47 +703,47 @@ define_primitives! {
             Some(StaticType::Pool),
         ],
         choose_execute,
-        "[choose FIRST:d if CONDITION:n else SECOND:d]", "choose ${FIRST} if ${CONDITION} else ${SECOND}",
+        "[choose FIRST:d if CONDITION:n else SECOND:d]",
         "Returns FIRST when CONDITION is nonzero, and SECOND otherwise.", "/help/spec/#-choose-firstd-if-conditionn-else-secondd";
     REVERSE_PRIMITIVE:
         "reverse {}", &[Some(StaticType::List)], reverse_execute,
-        "[reverse SEQUENCE:s]", "reverse ${SEQUENCE}",
+        "[reverse SEQUENCE:s]",
         "Returns SEQUENCE in reverse order.", "/help/spec/#reverse-sequences";
     SORT_PRIMITIVE:
         "sort {}", &[Some(StaticType::List)], sort_execute,
-        "[sort SEQUENCE:s]", "sort ${SEQUENCE}",
+        "[sort SEQUENCE:s]",
         "Sorts SEQUENCE according to the position-order setting.", "/help/spec/#sort-sequences";
     EXPLODE_ON_PRIMITIVE:
         "explode {} on {}",
         &[Some(StaticType::Pool), Some(StaticType::List)],
         explode_on_execute,
-        "[explode POOL:d on COND:s]", "explode ${POOL} on ${COND}",
+        "[explode POOL:d on COND:s]",
         "Rerolls and adds outcomes of POOL that are contained in COND.", "/help/spec/#explode-poold-on-conds";
     REROLL_PRIMITIVE:
         "reroll {}", &[Some(StaticType::Pool)], reroll_execute,
-        "[reroll POOL:d]", "reroll ${POOL}",
+        "[reroll POOL:d]",
         "Replaces the highest outcome of POOL with a new roll.", "/help/spec/#-reroll-poold";
     REROLL_ON_PRIMITIVE:
         "reroll {} on {}",
         &[Some(StaticType::Pool), Some(StaticType::List)],
         reroll_on_execute,
-        "[reroll POOL:d on COND:s]", "reroll ${POOL} on ${COND}",
+        "[reroll POOL:d on COND:s]",
         "Replaces outcomes of POOL that are contained in COND with a new roll.", "/help/spec/#-reroll-poold-on-conds";
     TUPLE_2_PRIMITIVE:
         "tuple {} {}", &[Some(StaticType::Int); 2], tuple_execute,
-        "[tuple A:n B:n]", "tuple ${A} ${B}",
+        "[tuple A:n B:n]",
         "Constructs a two-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     TUPLE_3_PRIMITIVE:
         "tuple {} {} {}", &[Some(StaticType::Int); 3], tuple_execute,
-        "[tuple A:n B:n C:n]", "tuple ${A} ${B} ${C}",
+        "[tuple A:n B:n C:n]",
         "Constructs a three-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     TUPLE_4_PRIMITIVE:
         "tuple {} {} {} {}", &[Some(StaticType::Int); 4], tuple_execute,
-        "[tuple A:n B:n C:n D:n]", "tuple ${A} ${B} ${C} ${D}",
+        "[tuple A:n B:n C:n D:n]",
         "Constructs a four-field tuple.", "/help/spec/#-tuple-an-bn-tuple-an-bn-cn-tuple-an-bn-cn-dn";
     FIELD_PRIMITIVE:
         "field {} of {}", &[Some(StaticType::Int); 2], field_execute,
-        "[field INDEX:n of TUPLE:n]", "field ${INDEX} of ${TUPLE}",
+        "[field INDEX:n of TUPLE:n]",
         "Returns the one-based INDEX field of TUPLE.", "/help/spec/#-field-indexn-of-tuplen";
 }
 
@@ -1162,10 +1161,6 @@ mod tests {
         for ((identifier, primitive), metadata) in PRIMITIVES.iter().zip(PRIMITIVE_METADATA) {
             assert_eq!(metadata.identifier, *identifier);
             assert_eq!(metadata.identifier, primitive.identifier);
-            assert_eq!(
-                metadata.snippet.matches("${").count(),
-                primitive.arg_types.len()
-            );
             // `argument_name` indexes into these, so every argument needs one.
             assert_eq!(
                 argument_names(identifier).count(),
@@ -1174,6 +1169,18 @@ mod tests {
             );
             assert!(metadata.signature.starts_with('['));
             assert!(metadata.signature.ends_with(']'));
+            // Consumers locate the arguments by their `NAME:kind` shape.
+            for token in metadata.signature.split_whitespace() {
+                let token = token.trim_start_matches('[').trim_end_matches(']');
+                let Some((name, kind)) = token.split_once(':') else {
+                    continue;
+                };
+                assert!(
+                    name.chars().all(|c| c.is_ascii_uppercase() || c == '_'),
+                    "{identifier}"
+                );
+                assert!(matches!(kind, "n" | "d" | "s"), "{identifier}");
+            }
             assert!(!metadata.documentation.is_empty());
             assert!(metadata.documentation_url.starts_with("/help/spec/#"));
         }
