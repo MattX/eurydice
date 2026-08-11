@@ -195,41 +195,29 @@ impl MietteDiagnostic for MietteDiagnosticAdapter {
 
 #[cfg(test)]
 mod tests {
-    use eurydice_engine::{Distribution, Engine, Field, FieldSchema};
+    use eurydice_engine::{Distribution, Engine};
 
     use super::{format_engine_diagnostics, format_output_probabilities};
 
     #[test]
     fn formats_labeled_and_unlabeled_tuple_outcomes() {
-        let output = |names: Option<[&str; 2]>| {
-            let name = |index: usize| names.map(|names| names[index].to_string());
-            Distribution::new(
-                vec![
-                    Field::new(name(0), FieldSchema::Int),
-                    Field::new(name(1), FieldSchema::Int),
-                ],
-                vec![(vec![1, 2], 1.0)],
-            )
+        let output = |source: &str| -> Distribution {
+            let report = Engine::new().run_source(source);
+            assert!(report.diagnostics.entries.is_empty());
+            report.outputs.into_iter().next().unwrap().distribution
         };
 
-        assert_eq!(format_output_probabilities(output(None))[0].0, "(1, 2)");
         assert_eq!(
-            format_output_probabilities(output(Some(["A", "B"])))[0].0,
+            format_output_probabilities(output("output [tuple 1 2]"))[0].0,
+            "(1, 2)"
+        );
+        assert_eq!(
+            format_output_probabilities(output("output [tuple 1 2] labeled \"A\", \"B\""))[0].0,
             "(A: 1, B: 2)"
         );
 
-        let enum_output = Distribution::new(
-            vec![
-                Field::new(Some("Roll".into()), FieldSchema::Int),
-                Field::new(
-                    Some("Result".into()),
-                    FieldSchema::Categorical {
-                        labels: vec!["MISS".into(), "HIT".into()],
-                    },
-                ),
-            ],
-            vec![(vec![20, 1], 1.0)],
-        );
+        let enum_output =
+            output("enum { MISS, HIT } output [tuple 20 HIT] labeled \"Roll\", \"Result\"");
         assert_eq!(
             format_output_probabilities(enum_output)[0].0,
             "(Roll: 20, Result: HIT)"

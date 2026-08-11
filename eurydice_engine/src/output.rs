@@ -70,19 +70,7 @@ pub enum FieldSchema {
     },
 }
 
-impl Field {
-    // TODO: make private
-    pub fn new(name: Option<String>, schema: FieldSchema) -> Self {
-        Self { name, schema }
-    }
-}
-
 impl Distribution {
-    // TODO: remove this
-    pub fn new(fields: Vec<Field>, entries: Vec<(Vec<i32>, f64)>) -> Self {
-        Self { fields, entries }
-    }
-
     /// Converts an evaluated value into its serialized display representation,
     /// attaching validated tuple field names when the output supplied them.
     pub(crate) fn from_runtime(
@@ -349,18 +337,21 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn serializes_fields_as_a_tagged_union() {
-        let distribution = Distribution::new(
-            vec![
-                Field::new(Some("Roll".into()), FieldSchema::Int),
-                Field::new(
-                    None,
-                    FieldSchema::Categorical {
+        let distribution = Distribution {
+            fields: vec![
+                Field {
+                    name: Some("Roll".into()),
+                    schema: FieldSchema::Int,
+                },
+                Field {
+                    name: None,
+                    schema: FieldSchema::Categorical {
                         labels: vec!["MISS".into(), "HIT".into()],
                     },
-                ),
+                },
             ],
-            vec![(vec![20, 1], 1.0)],
-        );
+            entries: vec![(vec![20, 1], 1.0)],
+        };
 
         assert_eq!(
             serde_lexpr::to_string(&distribution).unwrap(),
