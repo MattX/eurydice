@@ -124,7 +124,8 @@ describe("csvExport", () => {
               { name: "Attacker losses", schema: { kind: "int" } },
               { name: "Defender losses", schema: { kind: "int" } },
             ],
-            entries: [[[1, 2], 1]],
+            values: [1, 2],
+            probabilities: [1],
           },
         ],
       ]);
@@ -309,11 +310,8 @@ describe("csvExport", () => {
               },
             },
           ],
-          entries: [
-            [[1, 1], 0.4],
-            [[1, 0], 0.1],
-            [[2, 0], 0.5],
-          ] as [number[], number][],
+          values: [1, 1, 1, 0, 2, 0],
+          probabilities: [0.4, 0.1, 0.5],
         },
       ],
     ];

@@ -6,6 +6,7 @@ export function scalarDistribution(
 ): ScalarDistribution {
   return {
     fields: [{ schema }],
-    entries: entries.map(([outcome, probability]) => [[outcome], probability]),
+    values: entries.map(([outcome]) => outcome),
+    probabilities: entries.map(([, probability]) => probability),
   };
 }

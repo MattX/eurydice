@@ -338,7 +338,7 @@ fn create_anydice_result(
     name: &str,
     distribution: &Distribution,
 ) -> Result<AnyDiceResult, &'static str> {
-    match distribution.fields.as_slice() {
+    match distribution.fields() {
         [field] => match field.schema {
             FieldSchema::Int => {}
             _ => return Err("AnyDice fixtures must have numeric outputs"),
@@ -346,9 +346,8 @@ fn create_anydice_result(
         _ => return Err("AnyDice fixtures must have a single output field"),
     }
     let probabilities = distribution
-        .entries
-        .iter()
-        .map(|(values, probability)| (values[0], *probability))
+        .entries()
+        .map(|(values, probability)| (values[0], probability))
         .collect::<Vec<_>>();
     let mean = mean(&probabilities);
     let stddev = stddev(&probabilities, mean);
@@ -385,7 +384,7 @@ fn export_anydice_result(result: &AnyDiceResult) -> String {
 
 fn create_distribution_result(name: &str, distribution: Distribution) -> DistributionResult {
     let fields = distribution
-        .fields
+        .fields()
         .iter()
         .map(|field| match (&field.name, &field.schema) {
             (Some(name), _) => name.clone(),
@@ -395,15 +394,14 @@ fn create_distribution_result(name: &str, distribution: Distribution) -> Distrib
         })
         .collect::<Vec<_>>();
     let outcomes = distribution
-        .entries
-        .into_iter()
+        .entries()
         .map(|(values, probability)| {
             let values = values
-                .into_iter()
-                .zip(&distribution.fields)
+                .iter()
+                .zip(distribution.fields())
                 .map(|(value, field)| match &field.schema {
                     FieldSchema::Int => value.to_string(),
-                    FieldSchema::Categorical { labels, .. } => usize::try_from(value)
+                    FieldSchema::Categorical { labels, .. } => usize::try_from(*value)
                         .ok()
                         .and_then(|index| labels.get(index))
                         .cloned()

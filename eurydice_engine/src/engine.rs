@@ -350,6 +350,13 @@ mod tests {
         report.outputs
     }
 
+    fn entries(distribution: &Distribution) -> Vec<(Vec<i32>, f64)> {
+        distribution
+            .entries()
+            .map(|(values, probability)| (values.to_vec(), probability))
+            .collect()
+    }
+
     /// The point of compiling separately: one parse, many runs. Each run is its
     /// own submission, so a program that binds a name binds it again.
     #[test]
@@ -360,7 +367,10 @@ mod tests {
         for _ in 0..3 {
             let report = engine.run_program(&program);
             assert_eq!(report.diagnostics.first_error(), None);
-            assert_eq!(report.outputs[0].distribution.entries, vec![(vec![1], 1.0)]);
+            assert_eq!(
+                entries(&report.outputs[0].distribution),
+                vec![(vec![1], 1.0)]
+            );
         }
     }
 
@@ -385,7 +395,7 @@ mod tests {
 
         assert_eq!(report.diagnostics.first_error(), None);
         assert_eq!(
-            report.outputs[0].distribution.entries,
+            entries(&report.outputs[0].distribution),
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
         // The run registered the program's text as its own submission, so the
@@ -472,7 +482,7 @@ mod tests {
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].name, "roll");
         assert_eq!(
-            outputs[0].distribution.entries,
+            entries(&outputs[0].distribution),
             vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
         );
     }
@@ -497,7 +507,7 @@ mod tests {
 
         let outputs = run(&mut engine, "output X");
 
-        assert_eq!(outputs[0].distribution.entries, vec![(vec![4], 1.0)]);
+        assert_eq!(entries(&outputs[0].distribution), vec![(vec![4], 1.0)]);
     }
 
     #[test]
@@ -553,7 +563,7 @@ mod tests {
 
         let outputs = run(&mut engine, "output [f 3]");
 
-        assert_eq!(outputs[0].distribution.entries, vec![(vec![3], 1.0)]);
+        assert_eq!(entries(&outputs[0].distribution), vec![(vec![3], 1.0)]);
     }
 
     #[test]
@@ -768,7 +778,7 @@ output [pick d3]";
             let mut engine = Engine::new();
             let outputs = run(&mut engine, source);
             assert_eq!(
-                outputs[0].distribution.entries,
+                entries(&outputs[0].distribution),
                 vec![(vec![0], 1.0)],
                 "{source}"
             );
@@ -1035,7 +1045,10 @@ output [pick d3]";
             let report = Engine::new().run_source(source);
             assert_eq!(report.diagnostics.first_error(), None, "{source}");
             assert_eq!(report.outputs.len(), 1, "{source}");
-            assert_eq!(report.outputs[0].distribution.entries, vec![], "{source}");
+            assert!(
+                report.outputs[0].distribution.entries().next().is_none(),
+                "{source}"
+            );
         }
     }
 
@@ -1048,7 +1061,10 @@ output [pick d3]";
         for source in ["output d{}", "output d{5:0}", "output d{[tuple 5 6]:0}"] {
             let report = Engine::new().run_source(source);
             assert_eq!(report.diagnostics.first_error(), None, "{source}");
-            assert_eq!(report.outputs[0].distribution.entries, vec![], "{source}");
+            assert!(
+                report.outputs[0].distribution.entries().next().is_none(),
+                "{source}"
+            );
         }
     }
 
@@ -1061,7 +1077,7 @@ output [pick d3]";
             let outputs = run(&mut Engine::new(), source);
 
             assert_eq!(
-                outputs[0].distribution.entries,
+                entries(&outputs[0].distribution),
                 vec![(vec![0], 1.0)],
                 "{source}"
             );

@@ -1382,10 +1382,11 @@ mod tests {
         );
         let output = evaluator.take_outputs().remove(0);
         assert_eq!(output.name, "0");
+        let distribution =
+            crate::output::Distribution::from_runtime(output.value, None, evaluator.symbols());
         assert_eq!(
-            crate::output::Distribution::from_runtime(output.value, None, evaluator.symbols())
-                .entries,
-            [(vec![0], 1.0)]
+            distribution.entries().collect::<Vec<_>>(),
+            [(&[0][..], 1.0)]
         );
     }
 

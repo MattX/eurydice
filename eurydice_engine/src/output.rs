@@ -19,19 +19,19 @@ use crate::{
 pub struct Distribution {
     /// Describes the type and name of each field in the outcomes.
     ///
-    /// In the simple case of a scalar integer field, this vector will have a
+    /// In the simple case of a scalar integer field, this slice will have a
     /// single entry with [`FieldSchema::Int`].
-    pub fields: Vec<Field>,
+    fields: Box<[Field]>,
 
-    // TODO: can we reduce vec nesting?
-    /// The values in this distribution and their probabilities.
+    /// The outcomes, concatenated in row-major order.
     ///
-    /// Each entry in `entries` is a pair of an outcome (`Vec<i32>`) and its
-    /// probability (`f64`). Each entry's outcome will have the same length
-    /// as `fields`. If a given field's schema is [`FieldSchema::Categorical`],
-    /// the corresponding value in the outcome will be a non-negative ordinal
-    /// index into the schema's labels.
-    pub entries: Vec<(Vec<i32>, f64)>,
+    /// Each consecutive `fields.len()` values form one outcome. If a given
+    /// field's schema is [`FieldSchema::Categorical`], its value is a
+    /// non-negative ordinal index into the schema's labels.
+    values: Box<[i32]>,
+
+    /// One probability for each outcome in `values`.
+    probabilities: Box<[f64]>,
 }
 
 /// Information on how to render an output field.
@@ -71,6 +71,21 @@ pub enum FieldSchema {
 }
 
 impl Distribution {
+    /// Describes the type and name of each field in the outcomes.
+    pub fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+
+    /// Iterates over each outcome and its probability.
+    pub fn entries(&self) -> impl ExactSizeIterator<Item = (&[i32], f64)> + '_ {
+        let arity = self.fields.len();
+        debug_assert_ne!(arity, 0);
+        debug_assert_eq!(self.values.len(), arity * self.probabilities.len());
+        self.values
+            .chunks_exact(arity)
+            .zip(self.probabilities.iter().copied())
+    }
+
     /// Converts an evaluated value into its serialized display representation,
     /// attaching validated tuple field names when the output supplied them.
     pub(crate) fn from_runtime(
@@ -273,52 +288,44 @@ fn pool_output(
     // The evaluator only accepts labels on tuple outputs, and checks that it
     // got one per field, so the names line up with the renders by position.
     let field_names = if is_tuple { field_names } else { None };
-    Distribution {
-        fields: renders
-            .iter()
-            .enumerate()
-            .map(|(position, render)| Field {
-                name: field_names
-                    .as_ref()
-                    .and_then(|names| names.get(position).cloned()),
-                schema: render.schema(symbols),
-            })
-            .collect(),
-        entries: to_probabilities_generic(pool.ordered_outcomes())
-            .into_iter()
-            .map(|(value, probability)| {
-                let fields: &[ElementValue] = match &value {
-                    ElementValue::Tuple(fields) => fields,
-                    other => std::slice::from_ref(other),
-                };
-                (
-                    fields
-                        .iter()
-                        .zip(renders.iter())
-                        .map(|(field, render)| render.ordinal(field))
-                        .collect(),
-                    probability,
-                )
-            })
-            .collect(),
-    }
-}
-
-fn to_probabilities_generic<T: Clone>(ordered_outcomes: &[(T, Natural)]) -> Vec<(T, f64)> {
-    let total: Natural = ordered_outcomes.iter().map(|(_, count)| count).sum();
-    ordered_outcomes
+    let fields = renders
         .iter()
-        .map(|(outcome, count)| {
-            (
-                outcome.clone(),
-                f64::rounding_from(
-                    Rational::from_naturals(count.clone(), total.clone()),
-                    RoundingMode::Nearest,
-                )
-                .0,
-            )
+        .enumerate()
+        .map(|(position, render)| Field {
+            name: field_names
+                .as_ref()
+                .and_then(|names| names.get(position).cloned()),
+            schema: render.schema(symbols),
         })
-        .collect()
+        .collect::<Box<_>>();
+    let outcomes = pool.ordered_outcomes();
+    let total: Natural = outcomes.iter().map(|(_, count)| count).sum();
+    let mut values = Vec::with_capacity(outcomes.len().saturating_mul(arity));
+    let mut probabilities = Vec::with_capacity(outcomes.len());
+    for (value, count) in outcomes {
+        let outcome_fields: &[ElementValue] = match value {
+            ElementValue::Tuple(fields) => fields,
+            other => std::slice::from_ref(other),
+        };
+        values.extend(
+            outcome_fields
+                .iter()
+                .zip(&renders)
+                .map(|(field, render)| render.ordinal(field)),
+        );
+        probabilities.push(
+            f64::rounding_from(
+                Rational::from_naturals(count.clone(), total.clone()),
+                RoundingMode::Nearest,
+            )
+            .0,
+        );
+    }
+    Distribution {
+        fields,
+        values: values.into_boxed_slice(),
+        probabilities: probabilities.into_boxed_slice(),
+    }
 }
 
 #[cfg(test)]
@@ -349,15 +356,17 @@ mod tests {
                         labels: vec!["MISS".into(), "HIT".into()],
                     },
                 },
-            ],
-            entries: vec![(vec![20, 1], 1.0)],
+            ]
+            .into_boxed_slice(),
+            values: vec![20, 1].into_boxed_slice(),
+            probabilities: vec![1.0].into_boxed_slice(),
         };
 
         assert_eq!(
             serde_lexpr::to_string(&distribution).unwrap(),
             "((fields ((name \"Roll\") (schema (kind . \"int\"))) \
              ((schema (kind . \"categorical\") (labels \"MISS\" \"HIT\")))) \
-             (entries #((20 1) 1.0)))"
+             (values 20 1) (probabilities 1.0))"
         );
     }
 
@@ -365,7 +374,10 @@ mod tests {
     fn converts_int_to_distribution() {
         let distribution = distribution(RuntimeValue::from(5));
 
-        assert_eq!(distribution.entries, vec![(vec![5], 1.0)]);
+        assert_eq!(
+            distribution.entries().collect::<Vec<_>>(),
+            [(&[5][..], 1.0)]
+        );
     }
 
     #[test]
@@ -377,15 +389,15 @@ mod tests {
         let distribution = distribution(value);
 
         assert_eq!(
-            distribution.entries,
+            distribution.entries().collect::<Vec<_>>(),
             vec![
-                (vec![-1], 0.0625),
-                (vec![0], 0.0625),
-                (vec![1], 0.0625),
-                (vec![2], 0.0625),
-                (vec![3], 0.0625),
-                (vec![4], 0.0625),
-                (vec![5], 0.625),
+                (&[-1][..], 0.0625),
+                (&[0][..], 0.0625),
+                (&[1][..], 0.0625),
+                (&[2][..], 0.0625),
+                (&[3][..], 0.0625),
+                (&[4][..], 0.0625),
+                (&[5][..], 0.625),
             ]
         );
     }
@@ -397,8 +409,8 @@ mod tests {
         let distribution = distribution(value);
 
         assert_eq!(
-            distribution.entries,
-            vec![(vec![2], 0.25), (vec![3], 0.5), (vec![4], 0.25)]
+            distribution.entries().collect::<Vec<_>>(),
+            vec![(&[2][..], 0.25), (&[3][..], 0.5), (&[4][..], 0.25)]
         );
     }
 }

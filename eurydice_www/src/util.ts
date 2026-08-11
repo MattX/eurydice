@@ -1,8 +1,8 @@
 /**
  * Per-field display schema, mirroring the engine's `FieldSchema`. Categorical
- * fields carry their labels; the outcome vectors themselves store raw ints
- * (category members as ordinals). The engine uses this representation for
- * all-symbol fields and mixed number/symbol fields.
+ * fields carry their labels; the flat outcome storage holds raw ints (category
+ * members as ordinals). The engine uses this representation for all-symbol
+ * fields and mixed number/symbol fields.
  */
 export type FieldSchema =
   { kind: "int" } | { kind: "categorical"; labels: string[] };
@@ -24,7 +24,10 @@ export interface Field {
  */
 export interface Distribution {
   fields: Field[];
-  entries: [number[], number][];
+  /** Outcomes concatenated in row-major order. */
+  values: number[];
+  /** One probability per outcome in `values`. */
+  probabilities: number[];
 }
 
 /**
@@ -34,7 +37,25 @@ export interface Distribution {
  */
 export interface ScalarDistribution extends Distribution {
   fields: [Field];
-  entries: [[number], number][];
+}
+
+/** The value of one field in one outcome. */
+export function outcomeValue(
+  distribution: Distribution,
+  outcome: number,
+  field: number,
+): number {
+  return distribution.values[outcome * distribution.fields.length + field];
+}
+
+/** Copies one outcome out of the distribution's flat row-major storage. */
+export function outcomeValues(
+  distribution: Distribution,
+  outcome: number,
+): number[] {
+  const arity = distribution.fields.length;
+  const start = outcome * arity;
+  return distribution.values.slice(start, start + arity);
 }
 
 export type NamedDistribution = [string, Distribution];

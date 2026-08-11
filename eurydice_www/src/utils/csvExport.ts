@@ -38,12 +38,14 @@ function generateWideBlock(
     rows.push(
       [
         escapeCSVField(outcomeLabel(outcome)),
-        ...distributions.map(([, distribution]) =>
-          (
-            distribution.entries.find(([[value]]) => value === outcome)?.[1] ??
-            0
-          ).toString(),
-        ),
+        ...distributions.map(([, distribution]) => {
+          const index = distribution.values.findIndex(
+            (value) => value === outcome,
+          );
+          return (
+            index >= 0 ? distribution.probabilities[index] : 0
+          ).toString();
+        }),
       ].join(","),
     );
   }
@@ -103,11 +105,7 @@ export function generateSpreadsheetCSV(outputs: NamedDistribution[]): string {
     blocks.push(generateCategoricalWideBlock(distributions));
   } else if (distributions.length > 0) {
     const outcomes = Array.from(
-      new Set(
-        distributions.flatMap(([, distribution]) =>
-          distribution.entries.map(([[outcome]]) => outcome),
-        ),
-      ),
+      new Set(distributions.flatMap(([, distribution]) => distribution.values)),
     ).sort((a, b) => a - b);
     blocks.push(
       generateWideBlock(
@@ -132,10 +130,8 @@ export function generateAnyDiceFormatCSV(outputs: NamedDistribution[]): string {
   numericDistributions.forEach(([name, distribution], index) => {
     if (index > 0) csv += "\n";
 
-    const outcomes = distribution.entries.map(([[outcome]]) => outcome);
-    const probabilities = distribution.entries.map(
-      ([, probability]) => probability,
-    );
+    const outcomes = distribution.values;
+    const probabilities = distribution.probabilities;
 
     const mean = outcomes.reduce(
       (sum, val, i) => sum + val * probabilities[i],
@@ -152,7 +148,8 @@ export function generateAnyDiceFormatCSV(outputs: NamedDistribution[]): string {
     csv += `${escapeCSVField(name)},${mean},${stdDev},${min},${max}\n`;
     csv += "#,%\n";
 
-    distribution.entries.forEach(([[outcome], probability]) => {
+    distribution.values.forEach((outcome, outcomeIndex) => {
+      const probability = distribution.probabilities[outcomeIndex];
       csv += `${outcome},${(probability * 100).toFixed(10)}\n`;
     });
   });

@@ -7,14 +7,13 @@ use miette::{
 };
 
 pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f64)> {
-    let is_tuple = distribution.fields.len() > 1;
+    let is_tuple = distribution.fields().len() > 1;
     distribution
-        .entries
-        .iter()
+        .entries()
         .map(|(outcome, probability)| {
             let fields = outcome
                 .iter()
-                .zip(&distribution.fields)
+                .zip(distribution.fields())
                 .map(|(value, field)| {
                     let value = match &field.schema {
                         FieldSchema::Int => value.to_string(),
@@ -36,7 +35,7 @@ pub fn format_output_probabilities(distribution: Distribution) -> Vec<(String, f
             } else {
                 fields.into_iter().next().unwrap_or_default()
             };
-            (label, *probability)
+            (label, probability)
         })
         .collect()
 }

@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{distributions, error, field_schemas, probabilities, run};
+use common::{distributions, error, field_schemas, owned_entries, probabilities, run};
 use eurydice_engine::{DiagnosticCode, FieldSchema};
 
 /// The die this feature exists for, declared as a list and as a pool.
@@ -191,7 +191,7 @@ fn tuples_carry_a_mixed_field_through_construction_and_projection() {
         ]
     );
     assert_eq!(
-        distribution.entries,
+        owned_entries(&distribution),
         vec![
             (vec![0, 1], 2.0 / 6.0),
             (vec![1, 1], 2.0 / 6.0),
@@ -343,7 +343,10 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
             labels: vec!["0".into(), "A".into()],
         }]
     );
-    assert_eq!(distribution.entries, vec![(vec![0], 0.5), (vec![1], 0.5)]);
+    assert_eq!(
+        owned_entries(&distribution),
+        vec![(vec![0], 0.5), (vec![1], 0.5)]
+    );
 }
 
 /// A field with numeric and symbolic outcomes is serialized categorically. Its
@@ -361,7 +364,7 @@ fn mixed_fields_display_as_categories() {
             "{program}"
         );
         assert_eq!(
-            distribution.entries,
+            owned_entries(&distribution),
             vec![(vec![0], 0.5), (vec![1], 0.5)],
             "{program}"
         );
@@ -384,7 +387,7 @@ fn mixed_fields_display_as_categories() {
 #[test]
 fn all_symbol_distributions_still_display() {
     let distribution = distributions("enum { MISS, HIT } output d{MISS, HIT}").remove(0);
-    let FieldSchema::Categorical { labels } = &distribution.fields[0].schema else {
+    let FieldSchema::Categorical { labels } = &distribution.fields()[0].schema else {
         panic!("expected a symbol field");
     };
     assert_eq!(labels, &["MISS", "HIT"]);

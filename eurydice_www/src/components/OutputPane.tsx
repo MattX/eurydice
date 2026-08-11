@@ -141,8 +141,8 @@ function NumericOutputSection({
 
   // Keep the range selection plugin's offset in sync with the minimum numeric outcome.
   React.useEffect(() => {
-    const outcomes = distributions.flatMap(([, distribution]) =>
-      distribution.entries.map(([[outcome]]) => outcome),
+    const outcomes = distributions.flatMap(
+      ([, distribution]) => distribution.values,
     );
     if (outcomes.length > 0) {
       plugin.setOffset(Math.min(...outcomes));

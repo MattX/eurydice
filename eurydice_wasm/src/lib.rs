@@ -99,7 +99,7 @@ mod tests {
         let report = Engine::new().run_source("output [tuple 1 2] labeled \"Left\", \"Right\"");
         let distribution = &report.outputs[0].distribution;
         let names = distribution
-            .fields
+            .fields()
             .iter()
             .map(|field| field.name.clone())
             .collect::<Vec<_>>();

@@ -11,8 +11,10 @@ let report = engine.run_source("output 2d6 named \"roll\"");
 
 assert!(report.diagnostics.first_error().is_none());
 assert_eq!(report.outputs[0].name, "roll");
-// Outcomes are vectors of field values, paired with their probability.
-assert_eq!(report.outputs[0].distribution.entries[0], (vec![2], 1.0 / 36.0));
+assert_eq!(
+    report.outputs[0].distribution.entries().next(),
+    Some((&[2][..], 1.0 / 36.0)),
+);
 ```
 
 Probabilities are computed exactly with rational arithmetic and converted to

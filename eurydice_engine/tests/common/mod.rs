@@ -28,7 +28,12 @@ pub fn probabilities(program: &str) -> Vec<Vec<(Vec<i32>, f64)>> {
     run(program)
         .unwrap_or_else(|error| panic!("{program}: {}", error.summary))
         .into_iter()
-        .map(|distribution| distribution.entries)
+        .map(|distribution| {
+            distribution
+                .entries()
+                .map(|(values, probability)| (values.to_vec(), probability))
+                .collect()
+        })
         .collect()
 }
 
@@ -44,10 +49,18 @@ pub fn distributions(program: &str) -> Vec<Distribution> {
     run(program).unwrap_or_else(|error| panic!("{program}: {}", error.summary))
 }
 
+/// Copies a distribution's borrowed rows for concise assertions.
+pub fn owned_entries(distribution: &Distribution) -> Vec<(Vec<i32>, f64)> {
+    distribution
+        .entries()
+        .map(|(values, probability)| (values.to_vec(), probability))
+        .collect()
+}
+
 /// The schema of every field, for tests that do not care about field names.
 pub fn field_schemas(distribution: &Distribution) -> Vec<FieldSchema> {
     distribution
-        .fields
+        .fields()
         .iter()
         .map(|field| field.schema.clone())
         .collect()

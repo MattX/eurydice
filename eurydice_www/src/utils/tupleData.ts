@@ -1,4 +1,10 @@
-import { Distribution, FieldSchema, ScalarDistribution } from "../util";
+import {
+  Distribution,
+  FieldSchema,
+  outcomeValue,
+  outcomeValues,
+  ScalarDistribution,
+} from "../util";
 
 /** Display label for a single raw field value under its schema. */
 export function fieldValueLabel(schema: FieldSchema, value: number): string {
@@ -40,7 +46,9 @@ export function fieldAxis(schema: FieldSchema, observed: number[]): FieldAxis {
 }
 
 export function observedValues(dist: Distribution, field: number): number[] {
-  return dist.entries.map(([outcome]) => outcome[field]);
+  return dist.probabilities.map((_, outcome) =>
+    outcomeValue(dist, outcome, field),
+  );
 }
 
 /**
@@ -51,14 +59,17 @@ export function observedValues(dist: Distribution, field: number): number[] {
 export function computeMarginals(dist: Distribution): ScalarDistribution[] {
   return dist.fields.map((field, index) => {
     const totals = new Map<number, number>();
-    for (const [outcome, probability] of dist.entries) {
-      const value = outcome[index];
+    for (let outcome = 0; outcome < dist.probabilities.length; outcome++) {
+      const value = outcomeValue(dist, outcome, index);
+      const probability = dist.probabilities[outcome];
       totals.set(value, (totals.get(value) ?? 0) + probability);
     }
-    const entries: [[number], number][] = Array.from(totals.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([value, probability]) => [[value], probability]);
-    return { fields: [field], entries };
+    const entries = Array.from(totals.entries()).sort((a, b) => a[0] - b[0]);
+    return {
+      fields: [field],
+      values: entries.map(([value]) => value),
+      probabilities: entries.map(([, probability]) => probability),
+    };
   });
 }
 
@@ -85,8 +96,10 @@ export function computeTuplePivot(dist: Distribution): TuplePivot {
   const xMarginal = new Map<number, number>();
   const yMarginal = new Map<number, number>();
   let maxCell = 0;
-  for (const [outcome, probability] of dist.entries) {
-    const [x, y] = outcome;
+  for (let outcome = 0; outcome < dist.probabilities.length; outcome++) {
+    const x = outcomeValue(dist, outcome, 0);
+    const y = outcomeValue(dist, outcome, 1);
+    const probability = dist.probabilities[outcome];
     const key = `${x},${y}`;
     const next = (joint.get(key) ?? 0) + probability;
     joint.set(key, next);
@@ -117,13 +130,16 @@ export function computeTupleRows(
   dist: Distribution,
   sort: TupleSort,
 ): TupleRow[] {
-  const rows: TupleRow[] = dist.entries.map(([outcome, probability]) => ({
-    values: outcome,
-    labels: outcome.map((value, field) =>
-      fieldValueLabel(dist.fields[field].schema, value),
-    ),
-    probability,
-  }));
+  const rows: TupleRow[] = dist.probabilities.map((probability, outcome) => {
+    const values = outcomeValues(dist, outcome);
+    return {
+      values,
+      labels: values.map((value, field) =>
+        fieldValueLabel(dist.fields[field].schema, value),
+      ),
+      probability,
+    };
+  });
   if (sort === "probability") {
     rows.sort((a, b) => b.probability - a.probability);
   } else {

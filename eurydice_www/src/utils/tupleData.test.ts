@@ -15,12 +15,8 @@ const jointIntEnum: Distribution = {
     { schema: { kind: "int" } },
     { schema: { kind: "categorical", labels: ["MISS", "HIT"] } },
   ],
-  entries: [
-    [[1, 0], 0.1],
-    [[1, 1], 0.2],
-    [[2, 0], 0.3],
-    [[2, 1], 0.4],
-  ],
+  values: [1, 0, 1, 1, 2, 0, 2, 1],
+  probabilities: [0.1, 0.2, 0.3, 0.4],
 };
 
 describe("tupleData labels and axes", () => {
@@ -62,17 +58,18 @@ describe("tupleData labels and axes", () => {
 describe("tupleData marginals", () => {
   it("sums out other fields", () => {
     const [marginal0, marginal1] = computeMarginals(jointIntEnum);
-    expect(marginal0.entries).toEqual([
-      [[1], 0.30000000000000004],
-      [[2], 0.7],
-    ]);
+    expect(marginal0.values).toEqual([1, 2]);
+    expect(marginal0.probabilities).toEqual([0.30000000000000004, 0.7]);
     expect(marginal0.fields).toEqual([{ schema: { kind: "int" } }]);
 
     expect(marginal1.fields).toEqual([
       { schema: { kind: "categorical", labels: ["MISS", "HIT"] } },
     ]);
     const byValue = new Map(
-      marginal1.entries.map(([[value], probability]) => [value, probability]),
+      marginal1.values.map((value, index) => [
+        value,
+        marginal1.probabilities[index],
+      ]),
     );
     expect(byValue.get(0)).toBeCloseTo(0.4);
     expect(byValue.get(1)).toBeCloseTo(0.6);
