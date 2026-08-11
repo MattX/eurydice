@@ -1,3 +1,6 @@
+#![warn(missing_docs)]
+#![doc = include_str!("../README.md")]
+
 mod diagnostic;
 mod engine;
 mod output;

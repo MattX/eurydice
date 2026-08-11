@@ -9,7 +9,7 @@ use eurydice_engine::Engine;
 let mut engine = Engine::new();
 let report = engine.run_source("output 2d6 named \"roll\"");
 
-assert!(report.error().is_none());
+assert!(report.diagnostics.first_error().is_none());
 assert_eq!(report.outputs[0].name, "roll");
 // Outcomes are vectors of field values, paired with their probability.
 assert_eq!(report.outputs[0].distribution.entries[0], (vec![2], 1.0 / 36.0));

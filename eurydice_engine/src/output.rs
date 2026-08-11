@@ -34,18 +34,16 @@ pub struct Distribution {
     pub entries: Vec<(Vec<i32>, f64)>,
 }
 
-/// One output field: how its values are rendered, plus the name the `labeled`
-/// clause gave it, if any.
-///
-/// Keeping the name beside the schema means the two can never disagree on how
-/// many fields there are, and every outcome's values line up with this list by
-/// position.
+/// Information on how to render an output field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct Field {
+    /// The name the `labeled` clause gave this field, if any.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub name: Option<String>,
+    /// The schema for this field, describing how its values should be
+    /// displayed.
     pub schema: FieldSchema,
 }
 
@@ -62,11 +60,18 @@ pub struct Field {
 #[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
 #[non_exhaustive]
 pub enum FieldSchema {
+    /// An integer field.
     Int,
-    Categorical { labels: Vec<String> },
+    /// A field whose values are drawn from a fixed set of symbols. Each field
+    /// in an outcome is an index into this array.
+    Categorical {
+        /// The symbols that can appear in this field.
+        labels: Vec<String>,
+    },
 }
 
 impl Field {
+    // TODO: make private
     pub fn new(name: Option<String>, schema: FieldSchema) -> Self {
         Self { name, schema }
     }

@@ -11,22 +11,23 @@ use crate::{
     value::{ElementValue, RuntimeValue, SymbolTable},
 };
 
-/// Identifies one source submission within a stateful [`crate::Engine`].
+/// Identifies one block of source text within a compilation or engine session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceId(pub u64);
 
 /// A block of source text referenced by a diagnostic.
 ///
-/// A new `DiagnosticSource` is created each time a block of text is submitted
-/// to an [`crate::Engine`].
+/// A `DiagnosticSource` is created for source compiled by
+/// [`crate::Program::compile`] and for each block of source submitted to an
+/// [`crate::Engine`].
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct DiagnosticSource {
     /// A unique identifier for the source.
     pub id: SourceId,
-    /// The source's user-defined name.
+    /// The source's display name in diagnostics.
     pub name: String,
     /// The source's full text.
     pub text: String,
@@ -38,9 +39,10 @@ pub struct DiagnosticSource {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct Diagnostics {
+    /// The diagnostics, in the order they were produced.
     pub entries: Vec<Diagnostic>,
-    /// Every source the diagnostics point into, plus the submission that
-    /// produced them. The submission is always last.
+    /// Every source the diagnostics point into, plus the source being compiled
+    /// or executed. The current source is always last.
     pub sources: Vec<DiagnosticSource>,
 }
 
@@ -76,11 +78,11 @@ impl std::fmt::Display for Diagnostics {
 
 impl std::error::Error for Diagnostics {}
 
-/// A range with an explicit source submission.
+/// A byte range within an explicitly identified source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct SourceRange {
-    /// The unique source identifier assigned by the engine.
+    /// The identifier of the source containing the range.
     pub source: SourceId,
     /// The byte range within this source.
     pub range: ByteRange,
@@ -110,7 +112,7 @@ pub struct DiagnosticLabel {
     pub message: Option<String>,
 }
 
-/// One proposed edit to program code.
+/// One proposed edit to source text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
@@ -168,13 +170,17 @@ macro_rules! define_diagnostic_codes {
     ($( $(#[$metadata:meta])* $variant:ident => ($wire:literal, $severity:ident, $incomplete:literal), )+) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         #[non_exhaustive]
+        /// A kind of diagnostic being produced.
+        ///
+        /// Each code has a unique severity level.
         pub enum DiagnosticCode {
             $( $(#[$metadata])* $variant, )+
         }
 
         impl DiagnosticCode {
             /// Every code this version of the engine can produce.
-            pub const ALL: &'static [DiagnosticCode] = &[
+            #[cfg(test)]
+            const ALL: &'static [DiagnosticCode] = &[
                 $(Self::$variant,)+
             ];
 
@@ -194,7 +200,7 @@ macro_rules! define_diagnostic_codes {
                 }
             }
 
-            /// Whether more input may complete a submission that ended with this diagnostic.
+            /// Whether more input may complete a submission that ended with this diagnostic, turning it into a valid program.
             #[must_use]
             pub const fn is_incomplete(self) -> bool {
                 match self {
