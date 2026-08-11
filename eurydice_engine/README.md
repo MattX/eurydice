@@ -13,15 +13,15 @@ assert!(report.diagnostics.first_error().is_none());
 assert_eq!(report.outputs[0].name, "roll");
 assert_eq!(
     report.outputs[0].distribution.entries().next(),
-    Some((&[2][..], 1.0 / 36.0)),
+    Some(([2].as_slice(), 1.0 / 36.0)),
 );
 ```
 
 Probabilities are computed exactly with rational arithmetic and converted to
-`f64` only at the end, using the [Icepool][icepool] algorithm.[^1]
+`f64` only at the end. When possible, computation uses the [Icepool][icepool]
+algorithm.[^1]
 
 [icepool]: https://pypi.org/project/icepool/
-
 
 ## Features
 

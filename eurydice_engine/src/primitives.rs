@@ -46,8 +46,12 @@ pub(crate) struct Primitive {
 #[non_exhaustive]
 pub struct PrimitiveMetadata {
     /// The evaluator's canonical function identifier, with `{}` argument slots.
+    /// 
+    /// For instance `"highest {} of {}"`.
     pub identifier: &'static str,
     /// A typed signature intended for display to users.
+    /// 
+    /// For instance `"[highest COUNT:n of POOL:d]"`.
     pub signature: &'static str,
     /// A CodeMirror-compatible snippet body, without surrounding brackets.
     pub snippet: &'static str,

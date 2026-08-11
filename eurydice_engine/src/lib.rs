@@ -18,7 +18,7 @@ pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticLabel, DiagnosticSeverity, DiagnosticSource, Diagnostics,
     EvaluationFrame, SourceId, SourceRange, SuggestedFix, TraceBinding,
 };
-pub use engine::{Engine, EngineOutput, PrintEvent, Program, RunReport};
+pub use engine::{Engine, NamedDistribution, PrintEvent, Program, RunReport};
 use lalrpop_util::lalrpop_mod;
 pub use output::{Distribution, Field, FieldSchema};
 pub use primitives::{PrimitiveMetadata, primitive_metadata};
