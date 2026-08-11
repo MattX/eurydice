@@ -1,10 +1,10 @@
 use lalrpop_util::ParseError;
-#[cfg(any(feature = "serde", test))]
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 /// A range of bytes in the source text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct ByteRange {
     /// The starting byte index (inclusive) of the range.
     pub start: usize,
@@ -21,11 +21,9 @@ impl From<(usize, usize)> for ByteRange {
     }
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
+#[derive(Clone)]
 pub struct WithRange<T> {
     pub value: T,
-    #[cfg_attr(any(feature = "serde", test), serde(skip))]
     pub range: ByteRange,
 }
 
@@ -38,8 +36,17 @@ impl<T> WithRange<T> {
     }
 }
 
+/// Ranges are noise when reading a tree: they are derivable from the source and
+/// they bury the structure that is actually being inspected. Debugging a
+/// `WithRange` shows the value alone, which is also what makes the AST tests
+/// below readable.
+impl<T: std::fmt::Debug> std::fmt::Debug for WithRange<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum Statement {
     Assignment {
         name: WithRange<String>,
@@ -83,7 +90,6 @@ pub struct OutputOptions {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct FunctionDefinition {
     pub name: WithRange<String>,
     pub args: Vec<WithRange<ArgWithType>>,
@@ -91,7 +97,6 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum Expression {
     Int(i32),
     List(ListLiteral),
@@ -112,28 +117,24 @@ pub enum Expression {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct ListLiteral {
     /// (Item, number of repetitions)
     pub items: Vec<ListItem>,
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct ListItem {
     pub item: BareListItem,
     pub repeat: Option<WithRange<Expression>>,
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum BareListItem {
     Expr(WithRange<Expression>),
     Range(WithRange<Expression>, WithRange<Expression>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum UnaryOp {
     Negate,
     Invert,
@@ -142,7 +143,6 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum BinaryOp {
     Pow,
     Add,
@@ -219,7 +219,6 @@ pub fn apply_string_escapes(s: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum StaticType {
     Int,
     List,
@@ -237,7 +236,6 @@ impl std::fmt::Display for StaticType {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum SetParam {
     PositionOrder(PositionOrder),
     MaximumFunctionDepth(usize),
@@ -245,7 +243,6 @@ pub enum SetParam {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub enum PositionOrder {
     Ascending,
     Descending,
@@ -258,7 +255,6 @@ pub enum FunctionDefinitionItem {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(any(feature = "serde", test), derive(Serialize))]
 pub struct ArgWithType {
     pub name: String,
     pub ty: Option<StaticType>,
@@ -373,76 +369,68 @@ mod tests {
         assert_eq!(apply_string_escapes("hello\\xworld"), "hello\\xworld");
     }
 
+    /// The parsed shape of an expression, with byte ranges elided by
+    /// `WithRange`'s `Debug`.
+    fn expr(text: &str) -> String {
+        format!("{:?}", grammar::ExprParser::new().parse(text).unwrap())
+    }
+
+    /// As [`expr`], for a function definition.
+    fn definition(text: &str) -> String {
+        format!(
+            "{:?}",
+            grammar::FunctionDefinitionParser::new()
+                .parse(text)
+                .unwrap()
+        )
+    }
+
     #[test]
     fn test_parse_function_call() {
-        let text = "[test 1 2]";
-        let ast = grammar::ExprParser::new().parse(text).unwrap();
         assert_eq!(
-            serde_lexpr::to_string(&ast).unwrap(),
-            "((value FunctionCall (name (value . \
-                \"test {} {}\")) (args ((value Int . 1)) ((value Int . 2)))))"
+            expr("[test 1 2]"),
+            r#"FunctionCall { name: "test {} {}", args: [Int(1), Int(2)] }"#
         );
     }
 
     #[test]
     fn test_parse_unop_function_call() {
-        let text = "[test 1 - 2]";
-        let ast = grammar::ExprParser::new().parse(text).unwrap();
         assert_eq!(
-            serde_lexpr::to_string(&ast).unwrap(),
-            "((value FunctionCall (name (value . \
-            \"test {}\")) (args ((value BinaryOp (op (value . Sub)) (left (value Int . 1)) (right (value Int . 2)))))))"
+            expr("[test 1 - 2]"),
+            r#"FunctionCall { name: "test {}", args: [BinaryOp { op: Sub, left: Int(1), right: Int(2) }] }"#
         );
     }
 
     #[test]
     fn test_parse_function_definition() {
-        let text = "function: explode DIE:d { result: DIE }";
-        let ast = grammar::FunctionDefinitionParser::new()
-            .parse(text)
-            .unwrap();
         assert_eq!(
-            serde_lexpr::to_string(&ast).unwrap(),
-            "((name (value . \"explode {}\")) \
-            (args ((value (name . \"DIE\") (ty Pool)))) (body ((value Return (value (value Reference . \"DIE\"))))))"
+            definition("function: explode DIE:d { result: DIE }"),
+            r#"FunctionDefinition { name: "explode {}", args: [ArgWithType { name: "DIE", ty: Some(Pool) }], body: [Return { value: Reference("DIE") }] }"#
         );
     }
 
     #[test]
     fn test_parse_function_definition_no_type() {
-        let text = "function: explode DIE { result: DIE }";
-        let ast = grammar::FunctionDefinitionParser::new()
-            .parse(text)
-            .unwrap();
         assert_eq!(
-            serde_lexpr::to_string(&ast).unwrap(),
-            "((name (value . \"explode {}\")) \
-            (args ((value (name . \"DIE\") (ty)))) (body ((value Return (value (value Reference . \"DIE\"))))))"
+            definition("function: explode DIE { result: DIE }"),
+            r#"FunctionDefinition { name: "explode {}", args: [ArgWithType { name: "DIE", ty: None }], body: [Return { value: Reference("DIE") }] }"#
         );
     }
 
     #[test]
     fn test_parse_single_letter_function_name() {
-        let definition = grammar::FunctionDefinitionParser::new()
-            .parse("function: f { result: 1 }")
-            .unwrap();
-        assert_eq!(definition.name.value, "f");
-
-        let call = grammar::ExprParser::new().parse("[f]").unwrap();
         assert_eq!(
-            serde_lexpr::to_string(&call).unwrap(),
-            "((value FunctionCall (name (value . \"f\")) (args)))"
+            definition("function: f { result: 1 }"),
+            r#"FunctionDefinition { name: "f", args: [], body: [Return { value: Int(1) }] }"#
         );
+        assert_eq!(expr("[f]"), r#"FunctionCall { name: "f", args: [] }"#);
     }
 
     #[test]
     fn test_parse_binary_op_precedence() {
-        let text = "1 + 2 * 3";
-        let ast = grammar::ExprParser::new().parse(text).unwrap();
         assert_eq!(
-            serde_lexpr::to_string(&ast).unwrap(),
-            "((value BinaryOp (op (value . Add)) \
-            (left (value Int . 1)) (right (value BinaryOp (op (value . Mul)) (left (value Int . 2)) (right (value Int . 3))))))"
+            expr("1 + 2 * 3"),
+            r#"BinaryOp { op: Add, left: Int(1), right: BinaryOp { op: Mul, left: Int(2), right: Int(3) } }"#
         );
     }
 
