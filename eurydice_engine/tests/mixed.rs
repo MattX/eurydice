@@ -5,11 +5,25 @@
 
 mod common;
 
-use common::{distributions, error, field_schemas, owned_entries, probabilities, run};
-use eurydice_engine::{DiagnosticCode, FieldSchema};
+use common::{distributions, error, owned_entries, probabilities, run};
+use eurydice_engine::{DiagnosticCode, Distribution, FieldSchema};
 
 /// The die this feature exists for, declared as a list and as a pool.
 const DIE: &str = "enum { TIMES_TWO } DIE: d{0:2, 1:2, 2, TIMES_TWO}";
+
+fn assert_field_schemas(distribution: &Distribution, expected: &[Option<&[&str]>]) {
+    assert_eq!(distribution.fields().len(), expected.len());
+    for (field, expected_labels) in distribution.fields().iter().zip(expected) {
+        match (&field.schema, expected_labels) {
+            (FieldSchema::Int, None) => {}
+            (FieldSchema::Categorical { labels, .. }, Some(expected_labels)) => assert_eq!(
+                labels.iter().map(String::as_str).collect::<Vec<_>>(),
+                *expected_labels
+            ),
+            (schema, expected) => panic!("expected {expected:?}, got {schema:?}"),
+        }
+    }
+}
 
 /// Nothing inspects a sequence until an operation needs to. A thousand-element
 /// sequence with one symbol near the end is built without complaint, and it is
@@ -181,15 +195,7 @@ fn tuples_carry_a_mixed_field_through_construction_and_projection() {
     );
 
     let distribution = distributions(&format!("{DIE} output [tuple DIE 1]")).remove(0);
-    assert_eq!(
-        field_schemas(&distribution),
-        vec![
-            FieldSchema::Categorical {
-                labels: vec!["0".into(), "1".into(), "2".into(), "TIMES_TWO".into()],
-            },
-            FieldSchema::Int,
-        ]
-    );
+    assert_field_schemas(&distribution, &[Some(&["0", "1", "2", "TIMES_TWO"]), None]);
     assert_eq!(
         owned_entries(&distribution),
         vec![
@@ -337,12 +343,7 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
     );
 
     let distribution = distributions("enum { A } X: {} + {} output {X, A}").remove(0);
-    assert_eq!(
-        field_schemas(&distribution),
-        vec![FieldSchema::Categorical {
-            labels: vec!["0".into(), "A".into()],
-        }]
-    );
+    assert_field_schemas(&distribution, &[Some(&["0", "A"])]);
     assert_eq!(
         owned_entries(&distribution),
         vec![(vec![0], 0.5), (vec![1], 0.5)]
@@ -356,13 +357,7 @@ fn the_empty_sum_takes_the_shape_of_whatever_it_meets() {
 fn mixed_fields_display_as_categories() {
     for program in ["enum { A } output {A, 1}", "enum { A } output d{A, 1}"] {
         let distribution = distributions(program).remove(0);
-        assert_eq!(
-            field_schemas(&distribution),
-            vec![FieldSchema::Categorical {
-                labels: vec!["1".into(), "A".into()],
-            }],
-            "{program}"
-        );
+        assert_field_schemas(&distribution, &[Some(&["1", "A"])]);
         assert_eq!(
             owned_entries(&distribution),
             vec![(vec![0], 0.5), (vec![1], 0.5)],
@@ -371,15 +366,7 @@ fn mixed_fields_display_as_categories() {
     }
 
     let distribution = distributions("enum { A } output [tuple 1, d{A, 2}]").remove(0);
-    assert_eq!(
-        field_schemas(&distribution),
-        vec![
-            FieldSchema::Int,
-            FieldSchema::Categorical {
-                labels: vec!["2".into(), "A".into()],
-            },
-        ]
-    );
+    assert_field_schemas(&distribution, &[None, Some(&["2", "A"])]);
 }
 
 /// A distribution that is *all* symbols is an ordinary categorical output, even
@@ -387,7 +374,7 @@ fn mixed_fields_display_as_categories() {
 #[test]
 fn all_symbol_distributions_still_display() {
     let distribution = distributions("enum { MISS, HIT } output d{MISS, HIT}").remove(0);
-    let FieldSchema::Categorical { labels } = &distribution.fields()[0].schema else {
+    let FieldSchema::Categorical { labels, .. } = &distribution.fields()[0].schema else {
         panic!("expected a symbol field");
     };
     assert_eq!(labels, &["MISS", "HIT"]);

@@ -2,7 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    rc::Rc,
+    sync::Arc,
 };
 
 pub(crate) use crate::value::sum_pool;
@@ -89,7 +89,7 @@ impl ValEnv {
 #[derive(Debug, Clone)]
 pub enum Function {
     Primitive(&'static Primitive),
-    UserDefined(Rc<UserFunction>),
+    UserDefined(Arc<UserFunction>),
 }
 
 #[derive(Debug, Clone)]
@@ -145,7 +145,7 @@ pub struct Evaluator {
     explode_depth: usize,
     recursion_depth_limit: usize,
     lowest_first: bool,
-    print_callback: Option<Box<dyn FnMut(PrintEvent)>>,
+    print_callback: Option<Box<dyn FnMut(PrintEvent) + Send>>,
     source_id: SourceId,
     diagnostics: Vec<Diagnostic>,
     /// Warnings already reported, so repeated evaluations of the same
@@ -288,7 +288,7 @@ impl Evaluator {
         });
     }
 
-    pub fn set_print_callback(&mut self, callback: Box<dyn FnMut(PrintEvent)>) {
+    pub fn set_print_callback(&mut self, callback: Box<dyn FnMut(PrintEvent) + Send>) {
         self.print_callback = Some(callback);
     }
 
@@ -398,7 +398,7 @@ impl Evaluator {
                 let arg_types = fd.args.iter().map(|arg| arg.value.ty).collect();
                 self.functions.insert(
                     fd.name.value.clone(),
-                    Function::UserDefined(Rc::new(UserFunction {
+                    Function::UserDefined(Arc::new(UserFunction {
                         definition: fd.clone(),
                         arg_types,
                         source_id: eval_context.source_id,
@@ -479,7 +479,7 @@ impl Evaluator {
                 // does not repeat the summation.
                 let value = match (&value, summed) {
                     (RuntimeValue::Pool(pool), Some(summed)) if display_requires_summing(pool) => {
-                        RuntimeValue::Pool(Rc::new(summed))
+                        RuntimeValue::Pool(Arc::new(summed))
                     }
                     _ => value,
                 };
@@ -643,7 +643,7 @@ impl Evaluator {
                         )
                     })?);
                 }
-                Ok(RuntimeValue::List(Rc::new(flattened)))
+                Ok(RuntimeValue::List(Arc::new(flattened)))
             }
             Expression::FunctionCall { name, args } => {
                 let func = self
@@ -735,7 +735,7 @@ impl Evaluator {
                         });
                     }
                 };
-                Ok(RuntimeValue::List(Rc::new(
+                Ok(RuntimeValue::List(Arc::new(
                     (start..=end).map(ElementValue::Int).collect(),
                 )))
             }
@@ -753,7 +753,7 @@ impl Evaluator {
                 NonAdditiveSubject::Sequence(base.elements().len()),
             )
         })?;
-        Ok(RuntimeValue::List(Rc::new(elements)))
+        Ok(RuntimeValue::List(Arc::new(elements)))
     }
 
     fn evaluate_function_call(
@@ -843,7 +843,7 @@ impl Evaluator {
                 if *is_element {
                     args[*i] = RuntimeValue::Element(value[0].clone());
                 } else {
-                    args[*i] = RuntimeValue::List(Rc::new(reverse_if(!self.lowest_first, value)));
+                    args[*i] = RuntimeValue::List(Arc::new(reverse_if(!self.lowest_first, value)));
                 }
             }
             results.push((
@@ -877,7 +877,7 @@ impl Evaluator {
                 sum_pool(&pool).map_err(|error| error.into_error(function.range, COMBINING))?;
             result_distributions.push((weight, summed));
         }
-        Ok(RuntimeValue::Pool(Rc::new(Pool::from_mixture(
+        Ok(RuntimeValue::Pool(Arc::new(Pool::from_mixture(
             result_distributions,
         ))))
     }
@@ -1129,23 +1129,23 @@ fn coerce_arg(
     let coerced = match (arg, expected) {
         (value @ RuntimeValue::Element(_), StaticType::Int) => Ok(value),
         (RuntimeValue::Element(value), StaticType::List) => {
-            Ok(RuntimeValue::List(Rc::new(vec![value])))
+            Ok(RuntimeValue::List(Arc::new(vec![value])))
         }
-        (RuntimeValue::Element(value), StaticType::Pool) => {
-            Ok(RuntimeValue::Pool(Rc::new(Pool::from_list(1, vec![value]))))
-        }
+        (RuntimeValue::Element(value), StaticType::Pool) => Ok(RuntimeValue::Pool(Arc::new(
+            Pool::from_list(1, vec![value]),
+        ))),
         (RuntimeValue::List(list), StaticType::Int) => sum_elements(&list)
             .map(RuntimeValue::Element)
             .map_err(|mismatch| {
                 mismatch.into_error(range, SUMMING, NonAdditiveSubject::Sequence(list.len()))
             }),
         (value @ RuntimeValue::List(_), StaticType::List) => Ok(value),
-        (RuntimeValue::List(list), StaticType::Pool) => Ok(RuntimeValue::Pool(Rc::new(
+        (RuntimeValue::List(list), StaticType::Pool) => Ok(RuntimeValue::Pool(Arc::new(
             Pool::from_list(1, (*list).clone()),
         ))),
         (RuntimeValue::Pool(pool), StaticType::Int) => {
             let summed = sum_pool(&pool).map_err(|error| error.into_error(range, SUMMING))?;
-            Ok(RuntimeValue::Pool(Rc::new(summed)))
+            Ok(RuntimeValue::Pool(Arc::new(summed)))
         }
         (value @ RuntimeValue::Pool(_), _) => Ok(value),
     }?;
@@ -1224,7 +1224,7 @@ fn same_pool(left: &RuntimeValue, right: &RuntimeValue) -> bool {
     matches!(
         (left, right),
         (RuntimeValue::Pool(left), RuntimeValue::Pool(right))
-            if Rc::ptr_eq(left, right)
+            if Arc::ptr_eq(left, right)
     )
 }
 
@@ -1360,13 +1360,13 @@ mod tests {
 
     #[test]
     fn additive_identity_is_inspectable_in_print_but_defaulted_in_output() {
-        use std::{cell::RefCell, rc::Rc};
+        use std::sync::{Arc, Mutex};
 
-        let printed = Rc::new(RefCell::new(None));
-        let callback_result = Rc::clone(&printed);
+        let printed = Arc::new(Mutex::new(None));
+        let callback_result = Arc::clone(&printed);
         let mut evaluator = Evaluator::new();
         evaluator.set_print_callback(Box::new(move |event| {
-            *callback_result.borrow_mut() = Some((event.value, event.name));
+            *callback_result.lock().unwrap() = Some((event.value, event.name));
         }));
 
         let statements = crate::grammar::BodyParser::new()
@@ -1377,7 +1377,7 @@ mod tests {
         }
 
         assert_eq!(
-            printed.borrow().as_ref().unwrap(),
+            printed.lock().unwrap().as_ref().unwrap(),
             &("\u{1d452}".to_string(), Some("0".to_string()))
         );
         let output = evaluator.take_outputs().remove(0);

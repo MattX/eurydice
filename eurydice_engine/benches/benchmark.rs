@@ -5,7 +5,7 @@ criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
 
 fn criterion_benchmark(c: &mut Criterion) {
-    for (name, source) in PROGRAMS {
+    for &(name, source) in PROGRAMS {
         // Each program is parsed once, outside the measured closure: parsing
         // costs a quarter to a third of a short pool program's total time,
         // which would swamp the evaluation signal these benchmarks watch.

@@ -129,6 +129,7 @@ pub struct SuggestedFix {
 /// One name to value binding. The value is stringified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[non_exhaustive]
 pub struct TraceBinding {
     /// The name of the argument being bound.
     pub name: String,
@@ -152,20 +153,6 @@ pub struct EvaluationFrame {
     pub bindings: Vec<TraceBinding>,
 }
 
-/// What kind of problem a diagnostic reports.
-///
-/// Codes are the stable part of a diagnostic: summaries and help text
-/// are prose that may be reworded at any time, but a code means the same thing
-/// across versions, and serializes to the dotted string it is named for.
-/// Consumers that branch on a diagnostic should branch on this.
-///
-/// The set grows as the engine learns to report more, so it is
-/// `#[non_exhaustive]`: a match on it needs a fallback arm, and a new code is
-/// not a breaking change. [`DiagnosticCode::ALL`] lists every code this version
-/// defines. The declaration table below generates that list and
-/// [`as_str`](DiagnosticCode::as_str), [`severity`](DiagnosticCode::severity),
-/// and [`is_incomplete`](DiagnosticCode::is_incomplete), keeping them
-/// exhaustive by construction.
 macro_rules! define_diagnostic_codes {
     ($( $(#[$metadata:meta])* $variant:ident => ($wire:literal, $severity:ident, $incomplete:literal), )+) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

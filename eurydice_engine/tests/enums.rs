@@ -195,7 +195,7 @@ fn rejects_nested_declarations() {
 #[test]
 fn independently_declared_symbols_share_one_outcome_type() {
     let distribution = distributions("enum: A enum: B output {A, B}").remove(0);
-    let FieldSchema::Categorical { labels } = &distribution.fields()[0].schema else {
+    let FieldSchema::Categorical { labels, .. } = &distribution.fields()[0].schema else {
         panic!("expected a symbol field");
     };
     assert_eq!(labels, &["A", "B"]);
@@ -233,7 +233,7 @@ fn equality_aware_operations_are_total_across_symbols() {
 fn distribution_keeps_numeric_probabilities_and_enum_labels() {
     let output = distributions("enum { MISS, HIT } output d{MISS, HIT}").remove(0);
     assert_eq!(output.entries().len(), 2);
-    let FieldSchema::Categorical { labels } = &output.fields()[0].schema else {
+    let FieldSchema::Categorical { labels, .. } = &output.fields()[0].schema else {
         panic!("expected enum field");
     };
     assert_eq!(labels, &["MISS", "HIT"]);
@@ -242,7 +242,7 @@ fn distribution_keeps_numeric_probabilities_and_enum_labels() {
 #[test]
 fn symbol_fields_only_include_observed_values() {
     let output = distributions("enum { A, B, C } output d{A, B}").remove(0);
-    let FieldSchema::Categorical { labels } = &output.fields()[0].schema else {
+    let FieldSchema::Categorical { labels, .. } = &output.fields()[0].schema else {
         panic!("expected enum field");
     };
     assert_eq!(labels, &["A", "B"]);
@@ -256,7 +256,7 @@ fn tuple_distribution_hoists_field_schema() {
 
     // The per-field schema is stored once, not repeated on each outcome.
     assert!(matches!(dist.fields()[0].schema, FieldSchema::Int));
-    let FieldSchema::Categorical { labels } = &dist.fields()[1].schema else {
+    let FieldSchema::Categorical { labels, .. } = &dist.fields()[1].schema else {
         panic!("expected enum field schema");
     };
     assert_eq!(labels, &["MISS", "HIT"]);

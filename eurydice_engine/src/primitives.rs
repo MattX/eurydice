@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
 use malachite::Natural;
 #[cfg(feature = "serde")]
@@ -353,7 +353,7 @@ fn reverse_execute(
     _ctx: PrimitiveCtx,
 ) -> Result<RuntimeValue, crate::eval::RuntimeError> {
     match &args[0] {
-        RuntimeValue::List(lst) => Ok(RuntimeValue::List(std::rc::Rc::new(
+        RuntimeValue::List(lst) => Ok(RuntimeValue::List(Arc::new(
             lst.iter().rev().cloned().collect(),
         ))),
         _ => unreachable!("argument coercion guarantees a sequence"),
@@ -377,7 +377,7 @@ fn sort_execute(
         if !ctx.lowest_first {
             lst.reverse();
         }
-        Ok(RuntimeValue::List(std::rc::Rc::new(lst)))
+        Ok(RuntimeValue::List(Arc::new(lst)))
     } else {
         panic!("wrong argument types to [sort]");
     }
@@ -504,7 +504,7 @@ fn integers_in(arg: &RuntimeValue, of_int: fn(i32) -> i32) -> RuntimeValue {
                 .clone()
                 .map_outcomes(|outcome| ElementValue::Int(contribution(&outcome)));
             let summed = sum_pool(&mapped).expect("an int pool is additive");
-            RuntimeValue::Pool(Rc::new(summed))
+            RuntimeValue::Pool(Arc::new(summed))
         }
     }
 }

@@ -64,6 +64,7 @@ pub enum FieldSchema {
     Int,
     /// A field whose values are drawn from a fixed set of symbols. Each field
     /// in an outcome is an index into this array.
+    #[non_exhaustive]
     Categorical {
         /// The symbols that can appear in this field.
         labels: Vec<String>,
@@ -330,7 +331,7 @@ fn pool_output(
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use super::*;
 
@@ -339,11 +340,12 @@ mod tests {
         Distribution::from_runtime(value, None, &SymbolTable::default())
     }
 
-    /// The serialized form is the frontend's type: `FieldSchema` is a tagged
-    /// union it can switch on, and each field's name travels with its schema.
+    /// This exact representation is the frontend wire contract. If the private
+    /// storage changes, a custom `Serialize` implementation must keep this test
+    /// passing.
     #[cfg(feature = "serde")]
     #[test]
-    fn serializes_fields_as_a_tagged_union() {
+    fn distribution_wire_format_is_stable() {
         let distribution = Distribution {
             fields: vec![
                 Field {
@@ -382,7 +384,7 @@ mod tests {
 
     #[test]
     fn converts_list_to_distribution_and_combines_duplicates() {
-        let value = RuntimeValue::from(Rc::new(vec![
+        let value = RuntimeValue::from(Arc::new(vec![
             5, -1, 5, 0, 5, 1, 5, 2, 5, 3, 5, 4, 5, 5, 5, 5,
         ]));
 

@@ -1,6 +1,6 @@
 //! Unary, binary, positional, and dice-construction operator semantics.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::{
     ast::{self, BinaryOp, UnaryOp, WithRange},
@@ -70,7 +70,7 @@ fn negate_value(value: &RuntimeValue) -> Result<RuntimeValue, ElementOpError> {
         RuntimeValue::List(values) => {
             Ok(RuntimeValue::Element(sum_elements(values)?.checked_neg()?))
         }
-        RuntimeValue::Pool(pool) => Ok(RuntimeValue::Pool(Rc::new(
+        RuntimeValue::Pool(pool) => Ok(RuntimeValue::Pool(Arc::new(
             (**pool)
                 .clone()
                 .try_map_outcomes(|outcome| outcome.checked_neg())?,
@@ -235,12 +235,12 @@ pub(crate) fn apply_binary_op(
                 });
             }
             let left = match left {
-                RuntimeValue::Element(value) => Rc::new(vec![
+                RuntimeValue::Element(value) => Arc::new(vec![
                     value
                         .as_int_or_identity()
                         .expect("positions were checked to be numbers"),
                 ]),
-                RuntimeValue::List(lst) => Rc::new(
+                RuntimeValue::List(lst) => Arc::new(
                     lst.iter()
                         .map(|value| {
                             value
@@ -308,7 +308,7 @@ pub(crate) fn apply_binary_op(
                     .map(RuntimeValue::Element)
                     .map_err(|mismatch| sum_failed(mismatch, lst.len())),
                 RuntimeValue::Pool(p) => select_in_dice(&left, p, lowest_first)
-                    .map(|pool| RuntimeValue::Pool(Rc::new(pool)))
+                    .map(|pool| RuntimeValue::Pool(Arc::new(pool)))
                     .map_err(|mismatch| {
                         mismatch.into_error(
                             op.range,
@@ -491,7 +491,7 @@ fn broadcast_binary(
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
 
-    Ok(RuntimeValue::Pool(Rc::new(Pool::from_mixture(components))))
+    Ok(RuntimeValue::Pool(Arc::new(Pool::from_mixture(components))))
 }
 
 fn comp_binary_op(
@@ -558,12 +558,12 @@ fn equality_binary_op(
 
 enum DiceCount {
     Int(i32),
-    Pool(Rc<Pool<i32>>),
+    Pool(Arc<Pool<i32>>),
 }
 
 enum DRightSide {
     List(Vec<ElementValue>),
-    Pool(Rc<Pool<ElementValue>>),
+    Pool(Arc<Pool<ElementValue>>),
 }
 
 /// A dice count must be a number; this is where one that is not says so.
@@ -582,7 +582,7 @@ fn normalize_dice_count(arg: &RuntimeValue) -> Result<DiceCount, ElementMismatch
                 .iter()
                 .sum(),
         )),
-        RuntimeValue::Pool(pool) => Ok(DiceCount::Pool(Rc::new(
+        RuntimeValue::Pool(pool) => Ok(DiceCount::Pool(Arc::new(
             (**pool)
                 .clone()
                 .try_map_outcomes(|outcome| number(&outcome))?,
@@ -620,7 +620,7 @@ fn make_d(
             }
         }
         RuntimeValue::List(list) => DRightSide::List((**list).clone()),
-        RuntimeValue::Pool(d) => DRightSide::Pool(Rc::clone(d)),
+        RuntimeValue::Pool(d) => DRightSide::Pool(Arc::clone(d)),
         RuntimeValue::Element(ElementValue::Symbol(_) | ElementValue::Tuple(_)) => {
             return Err(RuntimeError::Semantic {
                 code: DiagnosticCode::OperatorOperands,
@@ -635,7 +635,7 @@ fn make_d(
     let negate = |mismatch: ElementOpError| op_error_at(range, "negating a die's faces")(mismatch);
     let result: RuntimeValue = match (repeat, right) {
         (DiceCount::Int(i), DRightSide::List(list)) => {
-            RuntimeValue::Pool(Rc::new(make_pool(i, list).map_err(negate)?))
+            RuntimeValue::Pool(Arc::new(make_pool(i, list).map_err(negate)?))
         }
         (DiceCount::Int(i), DRightSide::Pool(p)) => {
             let mut new_pool = (*p).clone();
@@ -645,7 +645,7 @@ fn make_d(
                     .map_err(negate)?;
             }
             new_pool.set_dimension(new_pool.dimension() * i.unsigned_abs());
-            RuntimeValue::Pool(Rc::new(new_pool))
+            RuntimeValue::Pool(Arc::new(new_pool))
         }
         (DiceCount::Pool(left_p), right) => {
             let left_p = (*left_p).sum();
@@ -672,7 +672,7 @@ fn make_d(
             // Each multiplier duplicates the right-hand pool and sums it, so a
             // face that cannot be added stops the walk at the first multiplier
             // that needs more than one die.
-            RuntimeValue::Pool(Rc::new(
+            RuntimeValue::Pool(Arc::new(
                 left_p
                     .try_flat_map(|count| {
                         debug_assert_eq!(

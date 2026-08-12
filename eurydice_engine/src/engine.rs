@@ -145,9 +145,13 @@ impl Engine {
     }
 
     /// Installs the callback used by `print` statements.
+    ///
+    /// The callback must be safe to move between threads so the engine remains
+    /// [`Send`]. It is still invoked synchronously by whichever thread calls a
+    /// run method.
     pub fn set_print_callback<F>(&mut self, callback: F)
     where
-        F: FnMut(PrintEvent) + 'static,
+        F: FnMut(PrintEvent) + Send + 'static,
     {
         self.evaluator.set_print_callback(Box::new(callback));
     }
@@ -456,23 +460,30 @@ mod tests {
 
     #[test]
     fn print_callbacks_are_mutable_and_removable() {
-        use std::{cell::RefCell, rc::Rc};
+        use std::sync::{Arc, Mutex};
 
-        let events = Rc::new(RefCell::new(Vec::new()));
-        let callback_events = Rc::clone(&events);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let callback_events = Arc::clone(&events);
         let mut engine = Engine::new();
-        engine.set_print_callback(move |event| callback_events.borrow_mut().push(event));
+        engine.set_print_callback(move |event| callback_events.lock().unwrap().push(event));
 
         let _ = engine.run_source("print 1\nprint 2 named \"two\"");
         engine.clear_print_callback();
         let _ = engine.run_source("print 3");
 
-        let events = events.borrow();
+        let events = events.lock().unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].name, None);
         assert_eq!(events[0].value, "1");
         assert_eq!(events[1].name.as_deref(), Some("two"));
         assert_eq!(events[1].value, "2");
+    }
+
+    #[test]
+    fn engine_is_send() {
+        fn assert_send<T: Send>() {}
+
+        assert_send::<Engine>();
     }
 
     #[test]

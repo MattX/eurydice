@@ -1,6 +1,6 @@
 //! Runtime values and their element-type behavior.
 
-use std::{collections::HashSet, fmt::Write, rc::Rc};
+use std::{collections::HashSet, fmt::Write, sync::Arc};
 
 use malachite::{Natural, base::num::basic::traits::One};
 
@@ -54,7 +54,7 @@ pub enum ElementValue {
     AdditiveIdentity,
     Int(i32),
     Symbol(u32),
-    Tuple(Rc<[ElementValue]>),
+    Tuple(Arc<[ElementValue]>),
 }
 
 impl ElementValue {
@@ -377,8 +377,8 @@ impl std::fmt::Display for Displayed<'_, ElementValue> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeValue {
     Element(ElementValue),
-    List(Rc<Vec<ElementValue>>),
-    Pool(Rc<Pool<ElementValue>>),
+    List(Arc<Vec<ElementValue>>),
+    Pool(Arc<Pool<ElementValue>>),
 }
 
 impl RuntimeValue {
@@ -463,7 +463,7 @@ impl RuntimeValue {
     /// polymorphic additive identity: a recursion that accumulates tuples still
     /// truncates cleanly instead of failing to add a tuple to `0`.
     pub(crate) fn empty_list() -> Self {
-        RuntimeValue::List(Rc::new(Vec::new()))
+        RuntimeValue::List(Arc::new(Vec::new()))
     }
 
     /// The empty distribution returned by a function with no `result`
@@ -471,7 +471,7 @@ impl RuntimeValue {
     /// with no outcomes, so it contributes nothing to the caller rather than
     /// summing to zero; AnyDice distinguishes the two.
     pub(crate) fn empty_pool() -> Self {
-        RuntimeValue::Pool(Rc::new(Pool::from_list(1, Vec::new())))
+        RuntimeValue::Pool(Arc::new(Pool::from_list(1, Vec::new())))
     }
 
     /// Every value this holds, in order. A single element counts as one.
@@ -554,7 +554,7 @@ impl RuntimeValue {
                     .sum();
                 Ok(f(sum).into())
             }
-            RuntimeValue::Pool(pool) => Ok(RuntimeValue::Pool(Rc::new(
+            RuntimeValue::Pool(pool) => Ok(RuntimeValue::Pool(Arc::new(
                 sum_pool(pool)
                     .map_err(|failure| failure.mismatch)?
                     .try_map_outcomes(|outcome| {
@@ -614,9 +614,9 @@ pub(crate) fn materialize_comparable_pair(
         match value {
             RuntimeValue::Element(element) => RuntimeValue::Element(swap(element)),
             RuntimeValue::List(list) => {
-                RuntimeValue::List(Rc::new(list.iter().map(swap).collect()))
+                RuntimeValue::List(Arc::new(list.iter().map(swap).collect()))
             }
-            RuntimeValue::Pool(pool) => RuntimeValue::Pool(Rc::new(
+            RuntimeValue::Pool(pool) => RuntimeValue::Pool(Arc::new(
                 (**pool).clone().map_outcomes(|outcome| swap(&outcome)),
             )),
         }
@@ -720,9 +720,9 @@ impl From<i32> for RuntimeValue {
     }
 }
 
-impl From<Rc<Vec<i32>>> for RuntimeValue {
-    fn from(value: Rc<Vec<i32>>) -> Self {
-        RuntimeValue::List(Rc::new(
+impl From<Arc<Vec<i32>>> for RuntimeValue {
+    fn from(value: Arc<Vec<i32>>) -> Self {
+        RuntimeValue::List(Arc::new(
             value.iter().copied().map(ElementValue::Int).collect(),
         ))
     }
@@ -730,13 +730,13 @@ impl From<Rc<Vec<i32>>> for RuntimeValue {
 
 impl From<Vec<i32>> for RuntimeValue {
     fn from(value: Vec<i32>) -> Self {
-        RuntimeValue::List(Rc::new(value.into_iter().map(ElementValue::Int).collect()))
+        RuntimeValue::List(Arc::new(value.into_iter().map(ElementValue::Int).collect()))
     }
 }
 
 impl From<Pool> for RuntimeValue {
     fn from(value: Pool) -> Self {
-        RuntimeValue::Pool(Rc::new(value.map_outcomes(ElementValue::Int)))
+        RuntimeValue::Pool(Arc::new(value.map_outcomes(ElementValue::Int)))
     }
 }
 
