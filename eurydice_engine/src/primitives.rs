@@ -57,7 +57,8 @@ pub struct PrimitiveMetadata {
     pub signature: &'static str,
     /// A concise description of the function's behavior.
     pub documentation: &'static str,
-    /// A link to the detailed language specification section about this function.
+    /// A link to the detailed language specification section about this
+    /// function.
     pub documentation_url: &'static str,
 }
 
@@ -582,6 +583,16 @@ fn numeric_list(
         .collect()
 }
 
+/// The site that [`PrimitiveMetadata::documentation_url`] links into.
+///
+/// A macro rather than a `const` so it expands to a literal that `concat!`
+/// can fold into the `&'static str` the metadata table holds.
+macro_rules! documentation_base {
+    () => {
+        "https://eurydice.terbium.io"
+    };
+}
+
 macro_rules! define_primitives {
     (
         $(
@@ -611,7 +622,12 @@ macro_rules! define_primitives {
                 identifier: $name,
                 signature: $signature,
                 documentation: $documentation,
-                documentation_url: $documentation_url,
+                // The registry below spells documentation links as site
+                // paths, which are short enough to read next to the entry
+                // they belong to. The public field is absolute, because a
+                // consumer that is not the Eurydice web UI has no base to
+                // resolve a path against.
+                documentation_url: concat!(documentation_base!(), $documentation_url),
             },)+
         ];
     };
@@ -1182,7 +1198,14 @@ mod tests {
                 assert!(matches!(kind, "n" | "d" | "s"), "{identifier}");
             }
             assert!(!metadata.documentation.is_empty());
-            assert!(metadata.documentation_url.starts_with("/help/spec/#"));
+            // Absolute, so a consumer that is not the Eurydice web UI can
+            // follow the link without knowing where the spec is hosted.
+            assert!(
+                metadata
+                    .documentation_url
+                    .starts_with(concat!(documentation_base!(), "/help/spec/#")),
+                "{identifier}"
+            );
         }
     }
 }

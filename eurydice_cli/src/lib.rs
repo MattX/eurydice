@@ -100,14 +100,12 @@ pub fn format_engine_diagnostics(diagnostics: &Diagnostics) -> String {
             rendered.push_str(&format!("  suggestion: {}\n", fix.message));
         }
         for frame in &diagnostic.trace {
-            let source = sources.iter().find(|source| source.id == frame.call.source);
-            let location = source.map_or_else(
-                || format!("submission {}", frame.call.source.0 + 1),
-                |source| {
-                    let (line, column) = line_column(&source.text, frame.call.range.start);
-                    format!("{}:{line}:{column}", source.name)
-                },
-            );
+            let source = sources
+                .iter()
+                .find(|source| source.id == frame.call.source)
+                .expect("a report carries the text of every source its frames point into");
+            let (line, column) = line_column(&source.text, frame.call.range.start);
+            let location = format!("{}:{line}:{column}", source.name);
             let bindings = frame
                 .bindings
                 .iter()

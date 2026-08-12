@@ -60,8 +60,7 @@ fn grouped_declarations_are_sugar_for_individual_symbols() {
     let render = |program: &str| distributions(program).remove(0);
     let grouped = render("enum { A, B, C } output d{A, B, C}");
     let individual = render("enum: A enum: B enum: C output d{A, B, C}");
-    assert_eq!(grouped.fields(), individual.fields());
-    assert_eq!(owned_entries(&grouped), owned_entries(&individual));
+    assert_eq!(grouped, individual);
 }
 
 #[test]

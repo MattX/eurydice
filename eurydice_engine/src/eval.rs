@@ -292,10 +292,6 @@ impl Evaluator {
         self.print_callback = Some(callback);
     }
 
-    pub fn clear_print_callback(&mut self) {
-        self.print_callback = None;
-    }
-
     /// The declared symbols, needed to render any value that may contain one.
     pub fn symbols(&self) -> &SymbolTable {
         &self.symbols

@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// A named distribution produced by an `output` statement.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct NamedDistribution {
@@ -28,7 +28,7 @@ pub struct NamedDistribution {
 }
 
 /// Outputs and diagnostics produced by one submission.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[must_use]
 #[non_exhaustive]
@@ -59,8 +59,6 @@ pub struct PrintEvent {
 /// execution is a fresh submission.
 #[derive(Debug, Clone)]
 pub struct Program {
-    /// An optional source name used in diagnostics.
-    name: Option<String>,
     /// The source this program was parsed from.
     text: String,
     /// This program's parsed AST.
@@ -75,22 +73,10 @@ impl Program {
     /// instead assigns the failure an ID from that engine's submission
     /// history.
     pub fn compile(source: impl Into<String>) -> Result<Self, Diagnostics> {
-        Self::compile_with_name(None, source.into())
-    }
-
-    /// Compiles source with a source name to use in diagnostics.
-    pub fn compile_named(
-        name: impl Into<String>,
-        source: impl Into<String>,
-    ) -> Result<Self, Diagnostics> {
-        Self::compile_with_name(Some(name.into()), source.into())
-    }
-
-    fn compile_with_name(name: Option<String>, source: String) -> Result<Self, Diagnostics> {
+        let source = source.into();
         let source_id = SourceId(0);
         match parse_program(&source, source_id) {
             Ok(statements) => Ok(Self {
-                name,
                 text: source,
                 statements,
             }),
@@ -98,7 +84,7 @@ impl Program {
                 entries: vec![*diagnostic],
                 sources: vec![DiagnosticSource {
                     id: source_id,
-                    name: name.unwrap_or_else(|| "source".to_string()),
+                    name: "source".to_string(),
                     text: source,
                 }],
             }),
@@ -108,11 +94,6 @@ impl Program {
     /// The source text this program was parsed from.
     pub fn source(&self) -> &str {
         &self.text
-    }
-
-    /// The source name used in diagnostics, if one was provided.
-    pub fn source_name(&self) -> Option<&str> {
-        self.name.as_deref()
     }
 }
 
@@ -131,6 +112,15 @@ pub struct Engine {
 impl Default for Engine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Opaque: an engine's contents are evaluator internals, and none of them mean
+/// anything to a consumer. The impl exists so that a type holding an `Engine`
+/// can still derive its own `Debug`.
+impl std::fmt::Debug for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine").finish_non_exhaustive()
     }
 }
 
@@ -156,11 +146,6 @@ impl Engine {
         self.evaluator.set_print_callback(Box::new(callback));
     }
 
-    /// Removes the print callback registered with the engine.
-    pub fn clear_print_callback(&mut self) {
-        self.evaluator.clear_print_callback();
-    }
-
     /// Executes a program as a fresh submission, returning its outputs and any
     /// diagnostics it produced.
     ///
@@ -172,7 +157,7 @@ impl Engine {
     /// function, so the report carries the text of every source its own
     /// diagnostics reference.
     pub fn run_program(&mut self, program: &Program) -> RunReport {
-        let source_id = self.begin_submission(program.name.as_deref(), &program.text);
+        let source_id = self.begin_submission(&program.text);
         self.execute_report(&program.statements, source_id)
     }
 
@@ -182,16 +167,7 @@ impl Engine {
     /// To run one program repeatedly, compile it once with [`Program::compile`]
     /// and call [`Engine::run_program`] directly.
     pub fn run_source(&mut self, source: &str) -> RunReport {
-        self.run_source_with_name(None, source)
-    }
-
-    /// Parses named source and executes it as a fresh submission.
-    pub fn run_named_source(&mut self, name: impl Into<String>, source: &str) -> RunReport {
-        self.run_source_with_name(Some(name.into()), source)
-    }
-
-    fn run_source_with_name(&mut self, name: Option<String>, source: &str) -> RunReport {
-        let source_id = self.begin_submission(name.as_deref(), source);
+        let source_id = self.begin_submission(source);
         match parse_program(source, source_id) {
             Ok(statements) => self.execute_report(&statements, source_id),
             Err(diagnostic) => self.report(Vec::new(), vec![*diagnostic]),
@@ -199,9 +175,9 @@ impl Engine {
     }
 
     /// Starts a fresh submission and returns the ID assigned to its source.
-    fn begin_submission(&mut self, name: Option<&str>, source: &str) -> SourceId {
+    fn begin_submission(&mut self, source: &str) -> SourceId {
         self.collect_garbage();
-        let source_id = self.register_source(name, source);
+        let source_id = self.register_source(source);
         // Outputs belong to one submission and must never leak out of a failed
         // previous run.
         self.evaluator.take_outputs();
@@ -239,14 +215,12 @@ impl Engine {
     }
 
     /// Records a submission's source text so diagnostics can point into it.
-    fn register_source(&mut self, name: Option<&str>, text: &str) -> SourceId {
+    fn register_source(&mut self, text: &str) -> SourceId {
         let source_id = SourceId(self.next_source_id);
         self.next_source_id += 1;
         self.sources.push(DiagnosticSource {
             id: source_id,
-            name: name
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("submission {}", source_id.0 + 1)),
+            name: format!("submission {}", source_id.0 + 1),
             text: text.to_string(),
         });
         source_id
@@ -433,50 +407,48 @@ mod tests {
     }
 
     #[test]
-    fn named_programs_keep_their_name_for_parse_and_runtime_diagnostics() {
-        let compile_error =
-            Program::compile_named("broken.eurydice", "output (").expect_err("does not parse");
-        assert_eq!(compile_error.sources[0].name, "broken.eurydice");
+    fn submissions_are_named_in_order() {
+        let mut engine = Engine::new();
 
-        let program = Program::compile_named("rules.eurydice", "output MISSING")
-            .expect("runtime errors still compile");
-        assert_eq!(program.source_name(), Some("rules.eurydice"));
-        let report = Engine::new().run_program(&program);
+        let report = engine.run_source("output MISSING");
         assert_eq!(
             report.diagnostics.sources.last().unwrap().name,
-            "rules.eurydice"
+            "submission 1"
+        );
+
+        let report = engine.run_source("output ALSO_MISSING");
+        assert_eq!(
+            report.diagnostics.sources.last().unwrap().name,
+            "submission 2"
         );
     }
 
     #[test]
-    fn direct_source_runs_can_be_named() {
-        let report = Engine::new().run_named_source("request.eurydice", "output MISSING");
-
-        assert_eq!(
-            report.diagnostics.sources.last().unwrap().name,
-            "request.eurydice"
-        );
-    }
-
-    #[test]
-    fn print_callbacks_are_mutable_and_removable() {
+    fn setting_a_print_callback_replaces_the_previous_one() {
         use std::sync::{Arc, Mutex};
 
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let callback_events = Arc::clone(&events);
+        let first = Arc::new(Mutex::new(Vec::new()));
+        let second = Arc::new(Mutex::new(Vec::new()));
         let mut engine = Engine::new();
-        engine.set_print_callback(move |event| callback_events.lock().unwrap().push(event));
 
+        let events = Arc::clone(&first);
+        engine.set_print_callback(move |event| events.lock().unwrap().push(event));
         let _ = engine.run_source("print 1\nprint 2 named \"two\"");
-        engine.clear_print_callback();
+
+        let events = Arc::clone(&second);
+        engine.set_print_callback(move |event| events.lock().unwrap().push(event));
         let _ = engine.run_source("print 3");
 
-        let events = events.lock().unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].name, None);
-        assert_eq!(events[0].value, "1");
-        assert_eq!(events[1].name.as_deref(), Some("two"));
-        assert_eq!(events[1].value, "2");
+        let first = first.lock().unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[0].name, None);
+        assert_eq!(first[0].value, "1");
+        assert_eq!(first[1].name.as_deref(), Some("two"));
+        assert_eq!(first[1].value, "2");
+
+        let second = second.lock().unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].value, "3");
     }
 
     #[test]

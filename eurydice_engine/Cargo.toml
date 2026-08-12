@@ -12,6 +12,9 @@ readme = "README.md"
 keywords = ["dice", "probability", "anydice", "rpg", "tabletop"]
 categories = ["game-development", "mathematics", "parser-implementations"]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [lib]
 name = "eurydice_engine"
 path = "src/lib.rs"

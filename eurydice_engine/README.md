@@ -17,9 +17,16 @@ assert_eq!(
 );
 ```
 
+The language is documented in the [Eurydice specification][spec]; it is a near-strict superset of AnyDice, documented at the [AnyDice
+docs](https://anydice.com/docs/)
+
+[spec]: https://eurydice.terbium.io/help/spec/
+
 Probabilities are computed exactly with rational arithmetic and converted to
 `f64` only at the end. When possible, computation uses the [Icepool][icepool]
 algorithm.[^1]
+
+This crate offers no real extension points today, but methods to have the host program insert new primitives or modify the AST are planned.
 
 [icepool]: https://pypi.org/project/icepool/
 

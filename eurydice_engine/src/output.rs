@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// A distribution of outcomes, each with a probability.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct Distribution {
@@ -21,17 +21,17 @@ pub struct Distribution {
     ///
     /// In the simple case of a scalar integer field, this slice will have a
     /// single entry with [`FieldSchema::Int`].
-    fields: Box<[Field]>,
+    pub fields: Box<[Field]>,
 
     /// The outcomes, concatenated in row-major order.
     ///
     /// Each consecutive `fields.len()` values form one outcome. If a given
     /// field's schema is [`FieldSchema::Categorical`], its value is a
     /// non-negative ordinal index into the schema's labels.
-    values: Box<[i32]>,
+    pub values: Box<[i32]>,
 
     /// One probability for each outcome in `values`.
-    probabilities: Box<[f64]>,
+    pub probabilities: Box<[f64]>,
 }
 
 /// Information on how to render an output field.

@@ -13,7 +13,7 @@ const primitive: PrimitiveMetadata = {
   signature: "[highest COUNT:n of POOL:d]",
   documentation: "Sums the highest dice.",
   documentation_url:
-    "/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold",
+    "https://eurydice.terbium.io/help/spec/#highest-countn-of-poold-lowest-countn-of-poold-middle-countn-of-poold",
 };
 
 function complete(source: string, explicit = false) {

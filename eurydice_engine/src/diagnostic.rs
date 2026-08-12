@@ -14,14 +14,14 @@ use crate::{
 /// Identifies one block of source text within a compilation or engine session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct SourceId(pub u64);
+pub struct SourceId(pub(crate) u64);
 
 /// A block of source text referenced by a diagnostic.
 ///
 /// A `DiagnosticSource` is created for source compiled by
 /// [`crate::Program::compile`] and for each block of source submitted to an
 /// [`crate::Engine`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct DiagnosticSource {
@@ -35,7 +35,7 @@ pub struct DiagnosticSource {
 
 /// Diagnostics produced by compiling or running a program, together with every
 /// source text needed to render them.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
 pub struct Diagnostics {
@@ -47,11 +47,6 @@ pub struct Diagnostics {
 }
 
 impl Diagnostics {
-    /// Whether any of the diagnostics are errors.
-    pub fn has_errors(&self) -> bool {
-        self.first_error().is_some()
-    }
-
     /// An iterator over the diagnostics that are errors.
     pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
         self.entries
